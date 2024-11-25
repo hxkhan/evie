@@ -19,13 +19,12 @@ Compared to using Golang's any type, this is in a different league altogether be
 
 RULES:
 	1. null:    it's enough for just the pointer to be nil
-	2. true:    the pointer has to be equal to TrueValue.pointer; the scalar is ignored
-	3. false:   the pointer has to be equal to FalseValue.pointer; the scalar is ignored
+	2. bool:    the pointer has to be equal to boolType; the scalar is 0 for false else true
 	4. int64:   the pointer has to be equal to i64Type; the scalar then stores the value
 	4. float64: the pointer has to be equal to f64Type; the scalar then stores the value
-	5. string:  the pointer has to be none of (TrueValue.pointer, FalseValue.pointer, i64Type, f64Type); the scalar has to be 0
-	6. userFn:  the pointer has to be none of (TrueValue.pointer, FalseValue.pointer, i64Type, f64Type); the scalar has to be 1
-	7. custom:  the pointer has to be none of (TrueValue.pointer, FalseValue.pointer, i64Type, f64Type); the scalar has to be 2
+	5. string:  the pointer has to be none of (boolType, i64Type, f64Type); the scalar has to be 0
+	6. userFn:  the pointer has to be none of (boolType, i64Type, f64Type); the scalar has to be 1
+	7. custom:  the pointer has to be none of (boolType, i64Type, f64Type); the scalar has to be 2
 
 Another alternative to these two is using this exact same Value struct with different rules.
 The scalar would use nan-tagging and would either be a valid float64 or a NaN and contain meta data that
@@ -47,16 +46,12 @@ type Value struct {
 	pointer unsafe.Pointer
 }
 
+var boolType unsafe.Pointer
 var i64Type unsafe.Pointer
 var f64Type unsafe.Pointer
 
-var TrueValue Value
-var FalseValue Value
-
 func init() {
-	TrueValue = Value{pointer: unsafe.Pointer(new(byte))}
-	FalseValue = Value{pointer: unsafe.Pointer(new(byte))}
-
+	boolType = unsafe.Pointer(new(byte))
 	i64Type = unsafe.Pointer(new(byte))
 	f64Type = unsafe.Pointer(new(byte))
 }
@@ -74,9 +69,9 @@ func Int64(i int64) Value {
 // Bool boxes a boolean into
 func Bool(b bool) Value {
 	if b {
-		return TrueValue
+		return Value{scalar: 1, pointer: boolType}
 	}
-	return FalseValue
+	return Value{scalar: 0, pointer: boolType}
 }
 
 // String boxes an string pointer
@@ -114,7 +109,7 @@ func (v Value) AsInt64() (int64, bool) {
 
 func (v Value) AsString() (string, bool) {
 	switch v.pointer {
-	case nil, i64Type, f64Type, TrueValue.pointer, FalseValue.pointer:
+	case nil, i64Type, f64Type, boolType:
 		return "", false
 	}
 
@@ -127,7 +122,7 @@ func (v Value) AsString() (string, bool) {
 
 func (v Value) AsUserFn() (unsafe.Pointer, bool) {
 	switch v.pointer {
-	case nil, i64Type, f64Type, TrueValue.pointer, FalseValue.pointer:
+	case nil, i64Type, f64Type, boolType:
 		return nil, false
 	}
 
@@ -140,7 +135,7 @@ func (v Value) AsUserFn() (unsafe.Pointer, bool) {
 
 func (v Value) AsCustomValue() (CustomValue, bool) {
 	switch v.pointer {
-	case nil, i64Type, f64Type, TrueValue.pointer, FalseValue.pointer:
+	case nil, i64Type, f64Type, boolType:
 		return nil, false
 	}
 
@@ -152,21 +147,15 @@ func (v Value) AsCustomValue() (CustomValue, bool) {
 }
 
 func (v Value) AsBool() (bool, bool) {
-	switch v.pointer {
-	case TrueValue.pointer:
-		return true, true
-	case FalseValue.pointer:
-		return false, true
-	}
-	return false, false
+	return v.scalar != 0, v.pointer == boolType
 }
 
 func (v Value) IsTruthy() bool {
 	switch v.pointer {
-	case nil, FalseValue.pointer:
+	case nil:
 		return false
-	case TrueValue.pointer:
-		return true
+	case boolType:
+		return v.scalar != 0
 	case i64Type:
 		return int64(v.scalar) != 0
 	case f64Type:
@@ -191,10 +180,8 @@ func (a Value) Equals(b Value) bool {
 	switch a.pointer {
 	case nil:
 		return b.pointer == nil
-	case FalseValue.pointer:
-		return b.pointer == FalseValue.pointer
-	case TrueValue.pointer:
-		return b.pointer == TrueValue.pointer
+	case boolType:
+		return a.scalar == b.scalar
 	case i64Type:
 		return int64(a.scalar) == int64(b.scalar)
 	case f64Type:
@@ -224,10 +211,11 @@ func (v Value) String() string {
 	switch v.pointer {
 	case nil:
 		return "null"
-	case TrueValue.pointer:
+	case boolType:
+		if v.scalar == 0 {
+			return "false"
+		}
 		return "true"
-	case FalseValue.pointer:
-		return "false"
 	case i64Type:
 		return strconv.FormatInt(int64(v.scalar), 10)
 	case f64Type:
@@ -251,7 +239,7 @@ func (v Value) TypeOf() string {
 	switch v.pointer {
 	case nil:
 		return "null"
-	case TrueValue.pointer, FalseValue.pointer:
+	case boolType:
 		return "bool"
 	case i64Type:
 		return "int"

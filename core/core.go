@@ -52,10 +52,10 @@ func init() {
 			return box.String(str), nil
 		},
 		func(rt *Routine) (box.Value, error) { // TRUE
-			return box.TrueValue, nil
+			return box.Bool(true), nil
 		},
 		func(rt *Routine) (box.Value, error) { // FALSE
-			return box.FalseValue, nil
+			return box.Bool(false), nil
 		},
 		func(rt *Routine) (box.Value, error) { // ADD
 			a, err := rt.next()

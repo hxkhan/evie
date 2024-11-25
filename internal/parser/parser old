@@ -1,0 +1,431 @@
+package parser
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/hk-32/evie/internal/ast"
+	"github.com/hk-32/evie/internal/op"
+	"github.com/hk-32/evie/internal/token"
+)
+
+func (ps *parser) next() (ast.Node, error) {
+	main := ps.PeekToken()
+
+	if main.Type == token.Keyword {
+		return ps.handleKeywords(ps.NextToken())
+	} else if main.Type == token.Name {
+		return ps.handleNames(ps.NextToken())
+	} else if main.Type == token.String {
+		ps.NextToken()
+		return ast.Input{Value: main.Literal}, nil
+	} else if main.Type == token.Number {
+		ps.NextToken()
+		if strings.Contains(main.Literal, ".") {
+			num, err := strconv.ParseFloat(main.Literal, 64)
+			if err != nil {
+				return nil, fmt.Errorf("error when parsing number, got %v", err)
+			}
+
+			return ast.Input{Value: num}, nil
+		} else {
+			num, err := strconv.ParseInt(main.Literal, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("error when parsing number, got %v", err)
+			}
+			return ast.Input{Value: num}, nil
+		}
+	} else if main.IsSimple("-") {
+		ps.NextToken()
+		e, err := ps.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+
+		// I think we must check if next is a number, in that case only negate the number
+		// x = -5 + 2
+		return ast.Neg{O: e}, nil
+	}
+
+	if main.IsEOS() {
+		ps.NextToken()
+		return nil, errEOS
+	}
+
+	return ps.parseExpression(0)
+}
+
+func (ps *parser) handleKeywords(main token.Token) (ast.Node, error) {
+	switch main.Literal {
+	case "echo":
+		value, err := ps.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+		return ast.Echo{Value: value}, nil
+
+	case "return":
+		value, err := ps.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+		return ast.Return{Value: value}, nil
+
+	case "fn":
+		return ps.parseFn(main)
+
+	case "go":
+		routine, err := ps.parseExpression(0)
+		if err != nil {
+			return routine, err
+		}
+
+		return ast.Go{Routine: routine}, nil
+
+	case "await":
+		// await.all(x, y, z) or await.any(x, y, z)
+		if ps.consumeSimple(".") {
+			switch {
+			case ps.consumeName("all"):
+				names, err := ps.parseNamesList(ps.lastConsumed)
+				if err != nil {
+					return nil, err
+				}
+
+				return ast.AwaitAll{Names: names}, nil
+
+			case ps.consumeName("any"):
+				names, err := ps.parseNamesList(ps.lastConsumed)
+				if err != nil {
+					return nil, err
+				}
+
+				return ast.AwaitAny{Names: names}, nil
+			}
+		}
+
+		something, err := ps.parseExpression(0)
+		if err != nil {
+			return something, err
+		}
+
+		return ast.Await{What: something}, nil
+
+	case "null":
+		return ast.Input{Value: nil}, nil
+
+	case "true":
+		return ast.Input{Value: true}, nil
+
+	case "false":
+		return ast.Input{Value: false}, nil
+
+	case "if":
+		if !ps.consumeSimple("(") {
+			return nil, ps.unexpectedPeek(main, "'('")
+		}
+
+		condition, err := ps.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+
+		if !ps.consumeSimple(")") {
+			return nil, ps.unexpectedPeek(main, ")")
+		}
+
+		var action, otherwise ast.Node
+
+		// parse the main part
+		action, err = ps.parseBlockOrStatement()
+		if err != nil {
+			return nil, err
+		}
+
+		// parse the else part
+		if ps.consumeKeyword("else") {
+			otherwise, err = ps.parseBlockOrStatement()
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		return ast.Conditional{Condition: condition, Action: action, Otherwise: otherwise}, nil
+	}
+
+	panic("unimplemented keyword?")
+}
+
+// assignments, calls, expressions etc.
+func (ps *parser) handleNames(main token.Token) (ast.Node, error) {
+	switch {
+	case ps.consumeSimple(":="):
+		value, err := ps.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+		return ast.IdentDec{Name: main.Literal, Value: value}, nil
+
+	case ps.consumeSimple("="):
+		value, err := ps.parseExpression(0)
+		if err != nil {
+			return value, err
+		}
+
+		return ast.IdentSet{Name: main.Literal, Value: value}, nil
+
+	case ps.consumeSimple("+=") || ps.consumeSimple("-="):
+		value, err := ps.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+
+		return ast.ApplyBinOp{
+			OP: maps[ps.lastConsumed.Literal],
+			A:  ast.IdentGet{Name: main.Literal},
+			B:  value,
+		}, nil
+
+	case ps.consumeSimple("("):
+		var args []ast.Node
+		if !ps.consumeSimple(")") {
+			for {
+				node, err := ps.parseExpression(0)
+				if err != nil {
+					return nil, err
+				}
+
+				args = append(args, node)
+				if ps.consumeSimple(")") {
+					break
+				} else if ps.consumeSimple(",") {
+					continue
+				}
+				return nil, fmt.Errorf("function call on line %v expected a ',' or ')', got '%v'", main.Line, ps.PeekToken().Literal)
+			}
+		}
+
+		return ast.Call{Fn: ast.IdentGet{Name: main.Literal}, Args: args}, nil
+	}
+
+	return ps.parseInfixExpression(ast.IdentGet{Name: main.Literal}, 0)
+}
+
+// helper to parse a block or single statement
+func (ps *parser) parseBlockOrStatement() (ast.Node, error) {
+	if ps.consumeSimple("{") {
+		var block ast.Block
+
+		for !ps.consumeSimple("}") {
+			node, err := ps.next()
+			if err != nil {
+				return nil, err
+			}
+
+			block = append(block, node)
+		}
+
+		// some optimizations in the ast depend on this
+		if len(block) == 1 {
+			return block[0], nil
+		}
+		return block, nil
+	}
+
+	action, err := ps.next()
+	return action, err
+}
+
+// helper to parse an fn
+func (ps *parser) parseFn(main token.Token) (ast.Node, error) {
+	name := ""
+
+	if ps.PeekToken().Type == token.Name {
+		name = ps.NextToken().Literal
+	}
+
+	args, err := ps.parseNamesList(main)
+	if err != nil {
+		return nil, err
+	}
+
+	if ps.consumeSimple("{") {
+		var block ast.Block
+		for !ps.consumeSimple("}") {
+			node, err := ps.next()
+			if err != nil {
+				return nil, err
+			}
+
+			block = append(block, node)
+		}
+		return ast.Fn{Name: name, Args: args, Action: block}, nil
+	} else if ps.consumeSimple("=>") {
+		node, err := ps.next()
+		if err != nil {
+			return nil, err
+		}
+		// maybe in the future we should check so node already isn't a return
+		return ast.Fn{Name: name, Args: args, Action: ast.Return{Value: node}}, nil
+	}
+	return nil, ps.unexpectedPeek(main, "a '{' or '=>'")
+}
+
+// helper to parse names surrounded by parentheses
+func (ps *parser) parseNamesList(main token.Token) ([]string, error) {
+	if !ps.consumeSimple("(") {
+		return nil, ps.unexpectedPeek(main, "a '('")
+	}
+
+	var args []string
+	if !ps.consumeSimple(")") {
+		for {
+			if ps.PeekToken().Type != token.Name {
+				return nil, ps.unexpectedPeek(main, "names in parentheses")
+			}
+
+			args = append(args, ps.NextToken().Literal)
+
+			if ps.consumeSimple(")") {
+				break
+			} else if ps.consumeSimple(",") {
+				continue
+			}
+			return nil, ps.unexpectedPeek(main, "a ',' or ')'")
+		}
+	}
+	return args, nil
+}
+
+// helper to parse a dot operator
+func (ps *parser) parseDotOperator(left ast.Node) (ast.Node, error) {
+	main := ps.NextToken() // consume the dot
+
+	if ps.PeekToken().Type != token.Name {
+		return nil, ps.unexpectedPeek(main, "a name")
+	}
+
+	name := ps.NextToken().Literal
+
+	switch {
+	case ps.consumeSimple("("):
+		var args []ast.Node
+		for !ps.PeekToken().IsSimple(")") {
+			arg, err := ps.parseExpression(0)
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, arg)
+
+			if ps.consumeSimple(")") {
+				break
+			} else if ps.consumeSimple(",") {
+				continue
+			}
+			return nil, fmt.Errorf("method call on line %v expected a ',' or ')', got '%v'", main.Line, ps.PeekToken().Literal)
+		}
+
+		// wrap the left-hand side as the object part of the method call
+		return ast.DotCall{
+			Left:  left,
+			Right: ast.IdentGet{Name: name},
+			Args:  args,
+		}, nil
+	}
+
+	return nil, ps.unexpectedPeek(main, "a '('")
+}
+
+func (ps *parser) parseExpression(precedenceLevel int) (ast.Node, error) {
+	// handle parentheses explicitly
+	if ps.consumeSimple("(") {
+		line := ps.lastConsumed.Line
+
+		// reset precedence to 0 inside parentheses
+		expr, err := ps.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+
+		// ensure the closing parenthesis is present
+		if !ps.consumeSimple(")") {
+			return nil, fmt.Errorf("'(' expected a ')' on line %v, got '%v'", line, ps.PeekToken().Literal)
+		}
+
+		// the sub-expression within the parentheses becomes the new left
+		return ps.parseInfixExpression(expr, precedenceLevel) // continue with possible infix operators
+	}
+
+	left, err := ps.next() // parse the left-hand side
+	if err != nil {
+		return nil, err
+	}
+
+	return ps.parseInfixExpression(left, precedenceLevel)
+}
+
+func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) (node ast.Node, err error) {
+	for {
+		next := ps.PeekToken()
+
+		// syntactic method call
+		if next.IsSimple(".") {
+			left, err = ps.parseDotOperator(left)
+			if err != nil {
+				return left, err
+			}
+			continue
+		}
+
+		currentPrecedence, ok := precedence[next.Literal]
+
+		// Stop parsing if next token is not an infix operator or precedence is lower
+		if !ok || currentPrecedence < precedenceLevel {
+			break
+		}
+
+		// Consume the operator
+		ps.NextToken()
+
+		// Parse the right-hand side with higher precedence level
+		right, err := ps.parseExpression(currentPrecedence + 1)
+		if err != nil {
+			return nil, err
+		}
+
+		left = ast.BinOp{
+			OP: maps[next.Literal],
+			A:  left,
+			B:  right,
+		}
+	}
+
+	return left, nil
+}
+
+var maps = map[string]byte{
+	"+": op.ADD,
+	"-": op.SUB,
+	"*": op.MUL,
+	"/": op.DIV,
+
+	"+=": op.ADD,
+	"-=": op.SUB,
+	"*=": op.MUL,
+	"/=": op.DIV,
+
+	"==": op.EQ,
+	"<":  op.LS,
+	">":  op.MR,
+}
+
+var precedence = map[string]int{
+	"+":  1,
+	"-":  1,
+	"*":  2,
+	"/":  2,
+	"==": 0,
+	"<":  0,
+	">":  0,
+}

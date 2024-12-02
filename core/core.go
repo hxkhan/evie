@@ -31,7 +31,7 @@ func init() {
 				return v, err
 			}
 
-			fmt.Println(Stringify(v))
+			fmt.Println(v)
 			return Value{}, nil
 		},
 		func(rt *Routine) (Value, error) { // INT
@@ -191,7 +191,7 @@ func init() {
 				return Float64(-a), nil
 			}
 
-			return Value{}, CustomError("negation not supported on '%v'", Stringify(o))
+			return Value{}, CustomError("negation not supported on '%v'", o)
 		},
 		func(rt *Routine) (Value, error) { // EQ
 			a, err := rt.next()
@@ -441,9 +441,9 @@ func init() {
 			// nothing more can be done; throw error
 			switch m.code[start] {
 			case op.LOAD_LOCAL, op.LOAD_CAPTURED, op.LOAD_BUILTIN:
-				return Value{}, CustomError("cannot call '%v', a non-function '%v'", m.references[start], Stringify(value))
+				return Value{}, CustomError("cannot call '%v', a non-function '%v'", m.references[start], value)
 			}
-			return Value{}, CustomError("cannot call a non-function '%v'", Stringify(value))
+			return Value{}, CustomError("cannot call a non-function '%v'", value)
 		},
 		func(rt *Routine) (Value, error) { // RET
 			v, err := rt.next()
@@ -921,48 +921,18 @@ func (rt *Routine) exitUserFN(oldAddr int, nLocals int, oldEnc []*Value) {
 	rt.captured = oldEnc
 }
 
-func (rt *Routine) Call(v Value) (Value, error) {
-	AcquireGIL()
-	defer ReleaseGIL()
-
-	fn, isFn := v.AsUserFn()
-	if !isFn {
-		return Value{}, ErrNotCallable
-	}
-	rt.captured = fn.captured
-
-	// create space for locals of fn
-	rt.pushBase(len(rt.active))
-	for range fn.Capacity {
-		rt.active = append(rt.active, boxPool.Get())
-	}
-
-	// run fn
-	for rt.ip = fn.Start; rt.ip < fn.End; rt.ip++ {
-		if v, err := instructions[m.code[rt.ip]](rt); err != nil {
-			if err == errReturnSignal {
-				return v, nil
-			}
-			return v, errWithTrace{err, m.trace}
+func (fn UserFn) Call(args ...Value) (Value, error) {
+	if len(fn.Args) != len(args) {
+		if fn.Name != "λ" {
+			return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.Name, len(fn.Args), len(args))
 		}
+		return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.Args), len(args))
 	}
 
-	// release non-escaping locals
-	for _, index := range fn.NonEscaping {
-		boxPool.Put(rt.active[rt.getCurrentBase()+index])
-	}
-
-	rt.popLocals(fn.Capacity)
-	rt.popBase()
-
-	return Value{}, nil
-}
-
-func (fn UserFn) Call() (Value, error) {
 	AcquireGIL()
 	defer ReleaseGIL()
 
-	rt := &Routine{active: make([]*Value, fn.Capacity), basis: []int{0}}
+	rt := &Routine{active: make([]*Value, fn.Capacity), basis: []int{0}, captured: fn.captured}
 	for i := range fn.Capacity {
 		rt.active[i] = boxPool.Get()
 	}
@@ -979,7 +949,7 @@ func (fn UserFn) Call() (Value, error) {
 
 	// release non-escaping locals
 	for _, index := range fn.NonEscaping {
-		boxPool.Put(rt.active[rt.getCurrentBase()+index])
+		boxPool.Put(rt.active[index])
 	}
 
 	return Value{}, nil

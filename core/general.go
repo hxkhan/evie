@@ -1,13 +1,11 @@
 package core
 
 import (
-	"fmt"
-	"strings"
 	"sync"
 )
 
 func SetProgram(code []byte, globals map[string]*Value, builtins []Value, globalScope []*Value, refs map[int]string, funcInfo map[int]*FuncInfo) (*Routine, error) {
-	m = &machine{
+	m = machine{
 		code:       code,
 		globals:    globals,
 		builtins:   builtins,
@@ -29,12 +27,12 @@ type FuncInfo struct {
 	Args        []string    // argument names
 	Refs        []Reference // captured references
 	NonEscaping []int       // the locals that do not escape
-	Capacity    int         // required scope-capacity
+	Capacity    int         // total required scope-capacity
 	Start       int         // entry point index
 	End         int         // associated op.END index
 }
 
-var m *machine
+var m machine
 
 type machine struct {
 	globals map[string]*Value
@@ -172,7 +170,7 @@ type TaskResult struct {
 
 type Tuple []any
 
-func Stringify(v any) string {
+/* func Stringify(v any) string {
 	switch value := v.(type) {
 	case nil:
 		return "null"
@@ -225,7 +223,7 @@ func Stringify(v any) string {
 	}
 
 	return fmt.Sprint(v)
-}
+} */
 
 func pop[T any](slice *[]T) T {
 	v := (*slice)[len(*slice)-1]

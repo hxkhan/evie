@@ -82,8 +82,9 @@ fn main() {
 	if errInit != nil {
 		return errInit
 	}
-	main := core.GetGlobal("main")
-	res, err := program.Call(*main)
+
+	fn, _ := core.GetGlobal("main").AsUserFn()
+	res, err := fn.Call()
 
 	if err != nil {
 		if rtc.expect == "error" {

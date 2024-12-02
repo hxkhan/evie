@@ -44,7 +44,7 @@ func CustomError(msg string, a ...interface{}) error {
 }
 
 func OperatorTypesError(op string, a any, b any) error {
-	return coreError{"RuntimeError", fmt.Sprintf("cannot apply '%v' operator on '%v' and '%v'", op, Stringify(a), Stringify(b))}
+	return coreError{"RuntimeError", fmt.Sprintf("cannot apply '%v' operator on '%v' and '%v'", op, a, b)}
 }
 
 func TypeError(args []Value, expected ...string) error {

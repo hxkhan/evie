@@ -49,11 +49,17 @@ func main() {
 
 	main := core.GetGlobal("main")
 	if main == nil {
-		fmt.Println("Error: program requires an fn main as an entry point")
+		fmt.Println("Error: program requires a main entry point")
 		return
 	}
 
-	res, err := routine.Call(*main)
+	fn, ok := main.AsUserFn()
+	if !ok {
+		fmt.Println("Error: program requires main to be a function")
+		return
+	}
+
+	res, err := fn.Call()
 	if err != nil {
 		fmt.Println(err)
 		return

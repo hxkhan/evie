@@ -1,4 +1,4 @@
-package box
+package core
 
 import (
 	"math"
@@ -79,8 +79,8 @@ func String(str string) Value {
 	return Value{scalar: 0, pointer: unsafe.Pointer(&str)}
 }
 
-// UserFn boxes a user fn pointer
-func UserFn(ptr unsafe.Pointer) Value {
+// BoxUserFn boxes a user fn pointer
+func BoxUserFn(ptr unsafe.Pointer) Value {
 	return Value{scalar: 1, pointer: ptr}
 }
 
@@ -120,17 +120,26 @@ func (v Value) AsString() (string, bool) {
 	return "", false
 }
 
-func (v Value) AsUserFn() (unsafe.Pointer, bool) {
+func (v Value) IsUserFn() bool {
 	switch v.pointer {
 	case nil, i64Type, f64Type, boolType:
-		return nil, false
+		return false
+	}
+
+	return v.scalar == 1
+}
+
+func (v Value) AsUserFn() (UserFn, bool) {
+	switch v.pointer {
+	case nil, i64Type, f64Type, boolType:
+		return UserFn{}, false
 	}
 
 	if v.scalar == 1 {
-		return v.pointer, true
+		return *(*UserFn)(v.pointer), true
 	}
 
-	return nil, false
+	return UserFn{}, false
 }
 
 func (v Value) AsCustomValue() (CustomValue, bool) {

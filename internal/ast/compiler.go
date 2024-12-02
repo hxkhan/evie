@@ -5,14 +5,13 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/hk-32/evie/box"
 	"github.com/hk-32/evie/core"
 	"github.com/hk-32/evie/internal/op"
 )
 
 func Compile(node Node, optimise bool, exports map[string]any) (*core.Routine, error) {
 	cs := &CompilerState{
-		globals:              make(map[string]*box.Value),
+		globals:              make(map[string]*core.Value),
 		fns:                  make(map[int]*core.FuncInfo),
 		symbols:              make(map[int]string),
 		rc:                   &reachability{[]map[string]int{make(map[string]int, len(exports))}, 0, 0, nil},
@@ -20,14 +19,14 @@ func Compile(node Node, optimise bool, exports map[string]any) (*core.Routine, e
 		optimise:             optimise,
 	}
 
-	/* cs.builtins = make([]box.Value, len(exports))
+	/* cs.builtins = make([]core.Value, len(exports))
 	for name, value := range exports {
 
 		switch v := value.(type) {
 		case float64:
-			cs.builtins[cs.declare(name)] = box.BoxFloat64(v)
+			cs.builtins[cs.declare(name)] = core.BoxFloat64(v)
 		case float64:
-			cs.builtins[cs.declare(name)] = box.BoxFloat64(v)
+			cs.builtins[cs.declare(name)] = core.BoxFloat64(v)
 		}
 
 		panic("unknown type")
@@ -36,7 +35,7 @@ func Compile(node Node, optimise bool, exports map[string]any) (*core.Routine, e
 	cs.scopeExtend()
 	node.compile(cs)
 
-	return core.NewProgram(cs.output, cs.globals, cs.builtins, cs.globalScope, cs.symbols, cs.fns)
+	return core.SetProgram(cs.output, cs.globals, cs.builtins, cs.globalScope, cs.symbols, cs.fns)
 }
 
 type Package struct {
@@ -50,7 +49,7 @@ func (p Package) compile(cs *CompilerState) int {
 	for _, node := range p.Code {
 		if fnDec, isFnDecl := node.(Fn); isFnDecl {
 			cs.declare(fnDec.Name)
-			v := new(box.Value)
+			v := new(core.Value)
 			cs.globals[fnDec.Name] = v
 			cs.globalScope = append(cs.globalScope, v)
 		}
@@ -58,7 +57,7 @@ func (p Package) compile(cs *CompilerState) int {
 		if iGet, isIdentDec := node.(IdentDec); isIdentDec {
 			cs.uninitializedGlobals[iGet.Name] = struct{}{}
 			cs.declare(iGet.Name)
-			v := new(box.Value)
+			v := new(core.Value)
 			cs.globals[iGet.Name] = v
 			cs.globalScope = append(cs.globalScope, v)
 		}
@@ -165,10 +164,10 @@ func (rc *reachability) String() string {
 
 type CompilerState struct {
 	output      []byte
-	globals     map[string]*box.Value
-	globalScope []*box.Value
+	globals     map[string]*core.Value
+	globalScope []*core.Value
 
-	builtins      []box.Value
+	builtins      []core.Value
 	fns           map[int]*core.FuncInfo
 	symbols       map[int]string
 	openFunctions []struct {

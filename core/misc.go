@@ -33,67 +33,67 @@ import (
 } */
 
 func (rt *Routine) String() string {
-	return fmt.Sprintf("Program{size: %v, references: %v, functions: %v}", len(rt.code), len(rt.m.references), len(rt.m.funcs))
+	return fmt.Sprintf("Program{size: %v, references: %v, functions: %v}", len(m.code), len(m.references), len(m.funcs))
 }
 
 func (rt *Routine) PrintCode() {
 	// number of digits for the biggest index
-	width := digits(len(rt.code))
+	width := digits(len(m.code))
 
 	// remember! the returned size here is of the internal representation and not the public one
-	op.Walk(rt.code, func(ip int) (size int) {
-		switch b := rt.code[ip]; b {
+	op.Walk(m.code, func(ip int) (size int) {
+		switch b := m.code[ip]; b {
 		case op.RETURN_IF:
-			size := int(rt.code[ip+1])
+			size := int(m.code[ip+1])
 			fmt.Printf("%v : %v <%v>\n", padding_left(ip, width), op.PublicName(b), size)
 			return 1 + 1
 
 		case op.IF, op.ELIF, op.ELSE:
-			size := int(uint16(rt.code[ip+1]) | uint16(rt.code[ip+2])<<8)
+			size := int(uint16(m.code[ip+1]) | uint16(m.code[ip+2])<<8)
 			fmt.Printf("%v : %v <%v>\n", padding_left(ip, width), op.PublicName(b), size)
 			return 1 + 2
 
 		case op.INT:
-			num := *(*int64)(unsafe.Pointer(&rt.code[ip+1]))
+			num := *(*int64)(unsafe.Pointer(&m.code[ip+1]))
 			fmt.Printf("%v : INT %v\n", padding_left(ip, width), num)
 			return 1 + 8
 
 		case op.FLOAT:
-			num := *(*float64)(unsafe.Pointer(&rt.code[ip+1]))
+			num := *(*float64)(unsafe.Pointer(&m.code[ip+1]))
 			fmt.Printf("%v : FLOAT %v\n", padding_left(ip, width), num)
 			return 1 + 8
 
 		case op.STR:
-			size := int(*(*uint16)(unsafe.Pointer(&rt.code[ip+1])))
-			str := unsafe.String(&rt.code[ip+3], size)
+			size := int(*(*uint16)(unsafe.Pointer(&m.code[ip+1])))
+			str := unsafe.String(&m.code[ip+3], size)
 			fmt.Printf("%v : STR '%v'\n", padding_left(ip, width), str)
 			return 1 + 2 + len(str)
 
 		case op.LOAD_LOCAL, op.STORE_LOCAL, op.LOAD_CAPTURED, op.STORE_CAPTURED, op.LOAD_BUILTIN:
-			fmt.Printf("%v : %v %v\n", padding_left(ip, width), op.PublicName(b), rt.m.references[ip])
+			fmt.Printf("%v : %v %v\n", padding_left(ip, width), op.PublicName(b), m.references[ip])
 			return 1 + 1
 
 		case op.FN_DECL:
-			fn := rt.m.funcs[ip]
+			fn := m.funcs[ip]
 			fmt.Printf("%v : FN_DECL %v(%v) LOCALS(%v) ESC(%v) REFS(%v) <%v>\n", padding_left(ip, width), fn.Name, strings.Join(fn.Args, " "), fn.Capacity, fn.Capacity-len(fn.NonEscaping), len(fn.Refs), fn.End-ip)
 			return 2
 		case op.LAMBDA:
-			fn := rt.m.funcs[ip]
+			fn := m.funcs[ip]
 			fmt.Printf("%v : LAMBDA (%v) LOCALS(%v) ESC(%v) REFS(%v) <%v>\n", padding_left(ip, width), strings.Join(fn.Args, " "), fn.Capacity, fn.Capacity-len(fn.NonEscaping), len(fn.Refs), fn.End-ip)
 			return 1
 
 		case op.CALL:
-			nargs := byte(rt.code[ip+1])
+			nargs := byte(m.code[ip+1])
 			fmt.Printf("%v : %v $%v\n", padding_left(ip, width), op.PublicName(b), nargs)
 			return 1 + 1
 
 		case op.AWAIT_ALL, op.AWAIT_ANY:
-			nargs := byte(rt.code[ip+1])
+			nargs := byte(m.code[ip+1])
 			fmt.Printf("%v : %v $%v\n", padding_left(ip, width), op.PublicName(b), nargs)
 			return 1 + 1
 
 		case op.GO:
-			nargs := int(rt.code[ip+1])
+			nargs := int(m.code[ip+1])
 			fmt.Printf("%v : GO $%v\n", padding_left(ip, width), nargs)
 			return 1 + 1
 

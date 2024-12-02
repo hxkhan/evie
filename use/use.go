@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/hk-32/evie"
+	"github.com/hk-32/evie/core"
 	"github.com/hk-32/evie/internal/ast"
 	"github.com/hk-32/evie/internal/parser"
 )
@@ -28,30 +29,31 @@ func main() {
 		return
 	}
 
-	program, err := ast.Compile(pack, optimise, evie.DefaultExports())
+	routine, err := ast.Compile(pack, optimise, evie.DefaultExports())
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
 	if print {
-		program.PrintCode()
+		routine.PrintCode()
 		fmt.Println("------------------------------")
 	}
 
 	before := time.Now()
-	err = program.Initialize()
+	err = routine.Initialize()
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	main := program.GetGlobal("main")
+	main := core.GetGlobal("main")
 	if main == nil {
 		fmt.Println("Error: program requires an fn main as an entry point")
 		return
 	}
-	res, err := program.Call(*main)
+
+	res, err := routine.Call(*main)
 	if err != nil {
 		fmt.Println(err)
 		return

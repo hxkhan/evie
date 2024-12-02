@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/hk-32/evie"
+	"github.com/hk-32/evie/core"
 	"github.com/hk-32/evie/internal/ast"
 	"github.com/hk-32/evie/internal/parser"
 )
@@ -81,7 +82,7 @@ fn main() {
 	if errInit != nil {
 		return errInit
 	}
-	main := program.GetGlobal("main")
+	main := core.GetGlobal("main")
 	res, err := program.Call(*main)
 
 	if err != nil {

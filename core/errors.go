@@ -27,6 +27,7 @@ func (t errWithTrace) Error() string {
 
 var errReturnSignal error = errors.New("<return signal>")
 var errNotFunction error = errors.New("not a native function")
+var ErrNotCallable error = errors.New("not a callable")
 
 var ErrTypes error = errors.New("wrong type of arguments given to function")
 

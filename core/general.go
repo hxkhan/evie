@@ -4,26 +4,19 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-
-	box "github.com/hk-32/evie/box"
 )
 
-func NewProgram(src []byte, globals map[string]*box.Value, builtins []box.Value, globalScope []*box.Value, refs map[int]string, funcInfo map[int]*FuncInfo) (*Routine, error) {
-	m := &machine{
+func SetProgram(code []byte, globals map[string]*Value, builtins []Value, globalScope []*Value, refs map[int]string, funcInfo map[int]*FuncInfo) (*Routine, error) {
+	m = &machine{
+		code:       code,
 		globals:    globals,
 		builtins:   builtins,
 		references: refs,
 		funcs:      funcInfo,
 	}
 
-	rt := &Routine{m: m, code: src, active: globalScope}
-	rt.pushBase(0)
-
-	/* if observe {
-		m.observe(nil, nil)
-	} */
-
-	return rt, nil
+	// return main goroutine
+	return &Routine{active: globalScope}, nil
 }
 
 type Reference struct {
@@ -41,10 +34,13 @@ type FuncInfo struct {
 	End         int         // associated op.END index
 }
 
-type machine struct {
-	globals map[string]*box.Value
+var m *machine
 
-	builtins []box.Value // built-in scope; can get from but can't set in
+type machine struct {
+	globals map[string]*Value
+	code    []byte // executable bytes
+
+	builtins []Value // built-in scope; can get from but can't set in
 
 	references map[int]string    // maps references ip's to their names
 	funcs      map[int]*FuncInfo // generated function information
@@ -55,49 +51,47 @@ type machine struct {
 }
 
 type Routine struct {
-	m        *machine     // shared machine
-	code     []byte       // executable bytes
-	ip       int          // instruction pointer
-	active   []*box.Value // active variables for all the functions in the call stack
-	basis    []int        // one base per function; locals[basis[len(basis)-1]] is where the current function's locals start at
-	captured []*box.Value // currently captured variables
+	ip       int      // instruction pointer
+	active   []*Value // active variables for all the functions in the call stack
+	basis    []int    // one base per function; locals[basis[len(basis)-1]] is where the current function's locals start at
+	captured []*Value // currently captured variables
 }
 
-func (rt *Routine) GetGlobal(name string) *box.Value {
-	return rt.m.globals[name]
+func GetGlobal(name string) *Value {
+	return m.globals[name]
 }
 
-func (rt *Routine) releaseGIL() {
-	rt.m.gil.Unlock()
+func ReleaseGIL() {
+	m.gil.Unlock()
 }
 
-func (rt *Routine) acquireGIL() {
-	rt.m.gil.Lock()
+func AcquireGIL() {
+	m.gil.Lock()
 }
 
-func (rt *Routine) newRoutine(ip int, locals []*box.Value, captured []*box.Value) *Routine {
-	rt.m.wg.Add(1)
-	return &Routine{rt.m, rt.code, ip, locals, []int{0}, captured}
+func (rt *Routine) newRoutine(ip int, locals []*Value, captured []*Value) *Routine {
+	m.wg.Add(1)
+	return &Routine{ip, locals, []int{0}, captured}
 }
 
 func (rt *Routine) terminate() {
-	rt.m.wg.Done()
-	rt.releaseGIL()
+	m.wg.Done()
+	ReleaseGIL()
 }
 
-func (rt *Routine) storeLocal(index int, value box.Value) {
+func (rt *Routine) storeLocal(index int, value Value) {
 	*(rt.active[rt.getCurrentBase()+index]) = value
 }
 
-func (rt *Routine) storeCaptured(index int, value box.Value) {
+func (rt *Routine) storeCaptured(index int, value Value) {
 	*(rt.captured[index]) = value
 }
 
-func (rt *Routine) getLocal(index int) box.Value {
+func (rt *Routine) getLocal(index int) Value {
 	return *(rt.active[rt.getCurrentBase()+index])
 }
 
-func (rt *Routine) getCaptured(index int) box.Value {
+func (rt *Routine) getCaptured(index int) Value {
 	return *(rt.captured[index])
 }
 
@@ -121,19 +115,13 @@ func (rt *Routine) popLocals(n int) {
 	rt.active = rt.active[:len(rt.active)-n]
 }
 
-// future userFn
-type userFn struct {
-	header   int          // index pos of the header
-	captured []*box.Value // variables captured from enclosing scopes
-}
-
 // enclosing scope & func combo
-type fn struct {
-	captured []*box.Value
+type UserFn struct {
+	captured []*Value
 	*FuncInfo
 }
 
-func (fn fn) String() string {
+func (fn UserFn) String() string {
 	return "<function>"
 }
 

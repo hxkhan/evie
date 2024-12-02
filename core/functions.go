@@ -4,19 +4,17 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
-
-	"github.com/hk-32/evie/box"
 )
 
 // compile time safety so uncallable functions don't get into the system
 type ValidFnTypes interface {
-	func() (box.Value, error) |
-		func(box.Value) (box.Value, error) |
-		func(box.Value, box.Value) (box.Value, error) |
-		func(box.Value, box.Value, box.Value) (box.Value, error) |
-		func(box.Value, box.Value, box.Value, box.Value) (box.Value, error) |
-		func(box.Value, box.Value, box.Value, box.Value, box.Value) (box.Value, error) |
-		func(box.Value, box.Value, box.Value, box.Value, box.Value, box.Value) (box.Value, error)
+	func() (Value, error) |
+		func(Value) (Value, error) |
+		func(Value, Value) (Value, error) |
+		func(Value, Value, Value) (Value, error) |
+		func(Value, Value, Value, Value) (Value, error) |
+		func(Value, Value, Value, Value, Value) (Value, error) |
+		func(Value, Value, Value, Value, Value, Value) (Value, error)
 }
 
 type NativeFn[T ValidFnTypes] struct {

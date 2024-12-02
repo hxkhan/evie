@@ -1,12 +1,12 @@
 package evie
 
 import (
-	"github.com/hk-32/evie/box"
+	"github.com/hk-32/evie/core"
 	"github.com/hk-32/evie/core/std"
 )
 
 type Program interface {
-	Start() (box.Value, error)
+	Start() (core.Value, error)
 	PrintCode()
 }
 

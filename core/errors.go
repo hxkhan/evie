@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/hk-32/evie/box"
 )
 
 type errWithTrace struct {
@@ -49,7 +47,7 @@ func OperatorTypesError(op string, a any, b any) error {
 	return coreError{"RuntimeError", fmt.Sprintf("cannot apply '%v' operator on '%v' and '%v'", op, Stringify(a), Stringify(b))}
 }
 
-func TypeError(args []box.Value, expected ...string) error {
+func TypeError(args []Value, expected ...string) error {
 	msg := "expected types ("
 	for i, ex := range expected {
 		msg += fmt.Sprintf("'%s'", ex)

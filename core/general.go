@@ -8,20 +8,15 @@ import (
 	box "github.com/hk-32/evie/box"
 )
 
-func NewProgram(src []byte, entry int, builtins []box.Value, nGlobals int, refs map[int]string, funcInfo map[int]*FuncInfo) (*Routine, error) {
+func NewProgram(src []byte, globals map[string]*box.Value, builtins []box.Value, globalScope []*box.Value, refs map[int]string, funcInfo map[int]*FuncInfo) (*Routine, error) {
 	m := &machine{
-		entry:      entry,
+		globals:    globals,
 		builtins:   builtins,
 		references: refs,
 		funcs:      funcInfo,
 	}
 
-	rt := &Routine{m: m, code: src}
-
-	for range nGlobals {
-		rt.active = append(rt.active, new(box.Value))
-	}
-
+	rt := &Routine{m: m, code: src, active: globalScope}
 	rt.pushBase(0)
 
 	/* if observe {
@@ -47,7 +42,7 @@ type FuncInfo struct {
 }
 
 type machine struct {
-	entry int // main entry point index
+	globals map[string]*box.Value
 
 	builtins []box.Value // built-in scope; can get from but can't set in
 
@@ -66,6 +61,10 @@ type Routine struct {
 	active   []*box.Value // active variables for all the functions in the call stack
 	basis    []int        // one base per function; locals[basis[len(basis)-1]] is where the current function's locals start at
 	captured []*box.Value // currently captured variables
+}
+
+func (rt *Routine) GetGlobal(name string) *box.Value {
+	return rt.m.globals[name]
 }
 
 func (rt *Routine) releaseGIL() {
@@ -120,6 +119,12 @@ func (rt *Routine) popBase() {
 
 func (rt *Routine) popLocals(n int) {
 	rt.active = rt.active[:len(rt.active)-n]
+}
+
+// future userFn
+type userFn struct {
+	header   int          // index pos of the header
+	captured []*box.Value // variables captured from enclosing scopes
 }
 
 // enclosing scope & func combo

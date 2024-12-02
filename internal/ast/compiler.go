@@ -12,42 +12,15 @@ import (
 
 func Compile(node Node, optimise bool, exports map[string]any) (*core.Routine, error) {
 	cs := &CompilerState{
+		globals:              make(map[string]*box.Value),
 		fns:                  make(map[int]*core.FuncInfo),
-		entryPoint:           -1,
 		symbols:              make(map[int]string),
 		rc:                   &reachability{[]map[string]int{make(map[string]int, len(exports))}, 0, 0, nil},
 		uninitializedGlobals: make(map[string]struct{}),
 		optimise:             optimise,
 	}
 
-	cs.scopeExtend()
-	node.compile(cs)
-
-	if cs.entryPoint == -1 {
-		return nil, fmt.Errorf("CompileError: package main requires an fn main as an entry point")
-	}
-
-	return core.NewProgram(cs.output, cs.entryPoint, cs.builtins, cs.scopeCapacity(), cs.symbols, cs.fns)
-}
-
-type Package struct {
-	Name    string
-	Imports []string
-	Code    []Node
-}
-
-// make Package implement ast.Node and treat it as any other Node and have separate Compile function that takes a node
-/* func (p *Package) Compile(optimise bool, exports map[string]any) (*core.Routine, error) {
-	cs := &CompilerState{
-		fns:                  make(map[int]*core.FuncInfo),
-		entryPoint:           -1,
-		symbols:              make(map[int]string),
-		rc:                   &reachability{[]map[string]int{make(map[string]int, len(exports))}, 0, 0, nil},
-		uninitializedGlobals: make(map[string]struct{}),
-		optimise:             optimise,
-	}
-
-	cs.builtins = make([]box.Value, len(exports))
+	/* cs.builtins = make([]box.Value, len(exports))
 	for name, value := range exports {
 
 		switch v := value.(type) {
@@ -58,28 +31,36 @@ type Package struct {
 		}
 
 		panic("unknown type")
-	}
+	} */
 
-	cs.scopeExtend() // from built-in scope to global
-	cs.compile(p.Code)
+	cs.scopeExtend()
+	node.compile(cs)
 
-	if cs.entryPoint == -1 {
-		return nil, fmt.Errorf("CompileError: package main requires an fn main as an entry point")
-	}
+	return core.NewProgram(cs.output, cs.globals, cs.builtins, cs.globalScope, cs.symbols, cs.fns)
+}
 
-	return core.NewProgram(cs.output, cs.entryPoint, cs.builtins, cs.scopeCapacity(), cs.symbols, cs.fns)
-} */
+type Package struct {
+	Name    string
+	Imports []string
+	Code    []Node
+}
 
 func (p Package) compile(cs *CompilerState) int {
 	// 1. declare all symbols
 	for _, node := range p.Code {
 		if fnDec, isFnDecl := node.(Fn); isFnDecl {
 			cs.declare(fnDec.Name)
+			v := new(box.Value)
+			cs.globals[fnDec.Name] = v
+			cs.globalScope = append(cs.globalScope, v)
 		}
 
 		if iGet, isIdentDec := node.(IdentDec); isIdentDec {
 			cs.uninitializedGlobals[iGet.Name] = struct{}{}
 			cs.declare(iGet.Name)
+			v := new(box.Value)
+			cs.globals[iGet.Name] = v
+			cs.globalScope = append(cs.globalScope, v)
 		}
 	}
 
@@ -118,7 +99,7 @@ But this is; becuase the declaration ends up being shifted to the top:
 	println(x)
 	var x = 10
 */
-func (cs *CompilerState) compile(code []Node) {
+/* func (cs *CompilerState) compile(code []Node) {
 	// 1. declare all symbols
 	for _, node := range code {
 		if fnDec, isFnDecl := node.(Fn); isFnDecl {
@@ -150,7 +131,7 @@ func (cs *CompilerState) compile(code []Node) {
 		}
 		node.compile(cs)
 	}
-}
+} */
 
 type reachability struct {
 	lookup   []map[string]int
@@ -183,8 +164,10 @@ func (rc *reachability) String() string {
 }
 
 type CompilerState struct {
-	output        []byte
-	entryPoint    int
+	output      []byte
+	globals     map[string]*box.Value
+	globalScope []*box.Value
+
 	builtins      []box.Value
 	fns           map[int]*core.FuncInfo
 	symbols       map[int]string

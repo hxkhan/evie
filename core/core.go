@@ -884,55 +884,18 @@ func init() {
 	}
 }
 
-func (rt *Routine) Start() (box.Value, error) {
-	rt.m.gil.Lock()
+func (rt *Routine) Initialize() error {
+	rt.acquireGIL()
+	defer rt.releaseGIL()
 
 	for rt.ip = 0; rt.ip < len(rt.code); rt.ip++ {
-		// fetch the instruction
-		if v, err := instructions[rt.code[rt.ip]](rt); err != nil {
-			if err == errReturnSignal {
-				return v, nil
-			}
-			return v, errWithTrace{err, rt.m.trace}
+		// fetch and execute the instruction
+		if _, err := instructions[rt.code[rt.ip]](rt); err != nil {
+			return err
 		}
 	}
 
-	ptr, _ := (*rt.active[rt.m.entry]).AsUserFn()
-	main := *(*fn)(ptr)
-	rt.captured = main.captured
-	//rt.active = rt.active[:0]
-
-	// create space for locals of main
-	rt.pushBase(len(rt.active))
-	for range main.Capacity {
-		rt.active = append(rt.active, boxPool.Get())
-	}
-
-	// run main
-	for rt.ip = main.Start; rt.ip < main.End; rt.ip++ {
-		if v, err := instructions[rt.code[rt.ip]](rt); err != nil {
-			if err == errReturnSignal {
-				return v, nil
-			}
-			return v, errWithTrace{err, rt.m.trace}
-		}
-	}
-
-	// release non-escaping locals
-	for _, index := range main.NonEscaping {
-		boxPool.Put(rt.active[rt.getCurrentBase()+index])
-	}
-
-	rt.popLocals(main.Capacity)
-	rt.popBase()
-
-	rt.m.gil.Unlock()
-	rt.m.wg.Wait()
-
-	//fmt.Printf("LOCALS: LEN(%v) CAP(%v) \n", len(rt.locals), cap(rt.locals))
-	//fmt.Printf("PUSHES(%v) \n", PUSHES)
-	//fmt.Printf("BASIS: LEN(%v) CAP(%v) \n", len(m.basis), cap(m.basis))
-	return box.Value{}, nil
+	return nil
 }
 
 // evaluates the next value and returns it
@@ -957,6 +920,41 @@ func (rt *Routine) exitUserFN(oldAddr int, nLocals int, oldEnc []*box.Value) {
 	rt.popLocals(nLocals)
 	rt.popBase()
 	rt.captured = oldEnc
+}
+
+func (rt *Routine) Call(v box.Value) (box.Value, error) {
+	rt.acquireGIL()
+	defer rt.releaseGIL()
+
+	ptr, _ := v.AsUserFn()
+	fn := *(*fn)(ptr)
+	rt.captured = fn.captured
+
+	// create space for locals of fn
+	rt.pushBase(len(rt.active))
+	for range fn.Capacity {
+		rt.active = append(rt.active, boxPool.Get())
+	}
+
+	// run fn
+	for rt.ip = fn.Start; rt.ip < fn.End; rt.ip++ {
+		if v, err := instructions[rt.code[rt.ip]](rt); err != nil {
+			if err == errReturnSignal {
+				return v, nil
+			}
+			return v, errWithTrace{err, rt.m.trace}
+		}
+	}
+
+	// release non-escaping locals
+	for _, index := range fn.NonEscaping {
+		boxPool.Put(rt.active[rt.getCurrentBase()+index])
+	}
+
+	rt.popLocals(fn.Capacity)
+	rt.popBase()
+
+	return box.Value{}, nil
 }
 
 func (rt *Routine) tryNativeCall(value any, nargsP int) (result box.Value, err error) {

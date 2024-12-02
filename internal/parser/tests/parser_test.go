@@ -77,7 +77,13 @@ fn main() {
 		return fmt.Errorf("failed to compile with %v", err)
 	}
 
-	res, err := program.Start()
+	errInit := program.Initialize()
+	if errInit != nil {
+		return errInit
+	}
+	main := program.GetGlobal("main")
+	res, err := program.Call(*main)
+
 	if err != nil {
 		if rtc.expect == "error" {
 			return nil // Expected an error, so this is considered a success

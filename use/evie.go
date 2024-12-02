@@ -40,13 +40,24 @@ func main() {
 	}
 
 	before := time.Now()
-	res, err := program.Start()
-	difference := time.Since(before)
-
+	err = program.Initialize()
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
+
+	main := program.GetGlobal("main")
+	if main == nil {
+		fmt.Println("Error: program requires an fn main as an entry point")
+		return
+	}
+	res, err := program.Call(*main)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	difference := time.Since(before)
 
 	if !res.IsNull() {
 		fmt.Println(res)

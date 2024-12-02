@@ -23,6 +23,8 @@ type Return struct {
 	Value Node
 }
 
+// LAMBDA : len : name : nargs : (len : arg)... : nrefs : (index, scroll)... : ncap : nrecyclable : (index)... : start : end
+
 func (fn Fn) compile(cs *CompilerState) int {
 	if fn.Name != "" {
 		panic("named functions are only allowed as top level declarations")
@@ -56,9 +58,9 @@ func (fn Fn) compile(cs *CompilerState) int {
 
 func (fn Fn) compileInGlobal(cs *CompilerState) int {
 	index := cs.get(fn.Name)
-	if fn.Name == "main" {
+	/* if fn.Name == "main" {
 		cs.entryPoint = index
-	}
+	} */
 
 	pos := cs.emit(op.FN_DECL, byte(index))
 	cs.openFunction(pos)

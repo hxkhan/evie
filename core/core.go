@@ -37,24 +37,24 @@ func init() {
 		func(rt *Routine) (Value, error) { // INT
 			v := *(*int64)(unsafe.Pointer(&m.code[rt.ip+1]))
 			rt.ip += 8
-			return Int64(v), nil
+			return BoxInt64(v), nil
 		},
 		func(rt *Routine) (Value, error) { // FLOAT
 			v := *(*float64)(unsafe.Pointer(&m.code[rt.ip+1]))
 			rt.ip += 8
-			return Float64(v), nil
+			return BoxFloat64(v), nil
 		},
 		func(rt *Routine) (Value, error) { // STR
 			size := int(*(*uint16)(unsafe.Pointer(&m.code[rt.ip+1])))
 			str := unsafe.String(&m.code[rt.ip+3], size)
 			rt.ip += 2 + size
-			return String(str), nil
+			return BoxString(str), nil
 		},
 		func(rt *Routine) (Value, error) { // TRUE
-			return Bool(true), nil
+			return BoxBool(true), nil
 		},
 		func(rt *Routine) (Value, error) { // FALSE
-			return Bool(false), nil
+			return BoxBool(false), nil
 		},
 		func(rt *Routine) (Value, error) { // ADD
 			a, err := rt.next()
@@ -68,19 +68,19 @@ func init() {
 
 			if a, ok := a.AsInt64(); ok {
 				if b, ok := b.AsInt64(); ok {
-					return Int64(a + b), nil
+					return BoxInt64(a + b), nil
 				}
 				if b, ok := b.AsFloat64(); ok {
-					return Float64(float64(a) + b), nil
+					return BoxFloat64(float64(a) + b), nil
 				}
 			}
 
 			if a, ok := a.AsFloat64(); ok {
 				if b, ok := b.AsInt64(); ok {
-					return Float64(a + float64(b)), nil
+					return BoxFloat64(a + float64(b)), nil
 				}
 				if b, ok := b.AsFloat64(); ok {
-					return Float64(a + b), nil
+					return BoxFloat64(a + b), nil
 				}
 			}
 
@@ -99,19 +99,19 @@ func init() {
 
 			if a, ok := a.AsInt64(); ok {
 				if b, ok := b.AsInt64(); ok {
-					return Int64(a - b), nil
+					return BoxInt64(a - b), nil
 				}
 				if b, ok := b.AsFloat64(); ok {
-					return Float64(float64(a) - b), nil
+					return BoxFloat64(float64(a) - b), nil
 				}
 			}
 
 			if a, ok := a.AsFloat64(); ok {
 				if b, ok := b.AsInt64(); ok {
-					return Float64(a - float64(b)), nil
+					return BoxFloat64(a - float64(b)), nil
 				}
 				if b, ok := b.AsFloat64(); ok {
-					return Float64(a - b), nil
+					return BoxFloat64(a - b), nil
 				}
 			}
 
@@ -129,19 +129,19 @@ func init() {
 
 			if a, ok := a.AsInt64(); ok {
 				if b, ok := b.AsInt64(); ok {
-					return Int64(a * b), nil
+					return BoxInt64(a * b), nil
 				}
 				if b, ok := b.AsFloat64(); ok {
-					return Float64(float64(a) * b), nil
+					return BoxFloat64(float64(a) * b), nil
 				}
 			}
 
 			if a, ok := a.AsFloat64(); ok {
 				if b, ok := b.AsInt64(); ok {
-					return Float64(a * float64(b)), nil
+					return BoxFloat64(a * float64(b)), nil
 				}
 				if b, ok := b.AsFloat64(); ok {
-					return Float64(a * b), nil
+					return BoxFloat64(a * b), nil
 				}
 			}
 
@@ -159,19 +159,19 @@ func init() {
 
 			if a, ok := a.AsInt64(); ok {
 				if b, ok := b.AsInt64(); ok {
-					return Float64(float64(a) / float64(b)), nil
+					return BoxFloat64(float64(a) / float64(b)), nil
 				}
 				if b, ok := b.AsFloat64(); ok {
-					return Float64(float64(a) / b), nil
+					return BoxFloat64(float64(a) / b), nil
 				}
 			}
 
 			if a, ok := a.AsFloat64(); ok {
 				if b, ok := b.AsInt64(); ok {
-					return Float64(a / float64(b)), nil
+					return BoxFloat64(a / float64(b)), nil
 				}
 				if b, ok := b.AsFloat64(); ok {
-					return Float64(a / b), nil
+					return BoxFloat64(a / b), nil
 				}
 			}
 
@@ -184,11 +184,11 @@ func init() {
 			}
 
 			if a, ok := o.AsInt64(); ok {
-				return Int64(-a), nil
+				return BoxInt64(-a), nil
 			}
 
 			if a, ok := o.AsFloat64(); ok {
-				return Float64(-a), nil
+				return BoxFloat64(-a), nil
 			}
 
 			return Value{}, CustomError("negation not supported on '%v'", o)
@@ -202,7 +202,7 @@ func init() {
 			if err != nil {
 				return a, err
 			}
-			return Bool(a == b), nil
+			return BoxBool(a == b), nil
 		},
 		func(rt *Routine) (Value, error) { // LS
 			a, err := rt.next()
@@ -216,19 +216,19 @@ func init() {
 
 			if a, ok := a.AsInt64(); ok {
 				if b, ok := b.AsInt64(); ok {
-					return Bool(a < b), nil
+					return BoxBool(a < b), nil
 				}
 				if b, ok := b.AsFloat64(); ok {
-					return Bool(float64(a) < b), nil
+					return BoxBool(float64(a) < b), nil
 				}
 			}
 
 			if a, ok := a.AsFloat64(); ok {
 				if b, ok := b.AsInt64(); ok {
-					return Bool(a < float64(b)), nil
+					return BoxBool(a < float64(b)), nil
 				}
 				if b, ok := b.AsFloat64(); ok {
-					return Bool(a < b), nil
+					return BoxBool(a < b), nil
 				}
 			}
 
@@ -246,19 +246,19 @@ func init() {
 
 			if a, ok := a.AsInt64(); ok {
 				if b, ok := b.AsInt64(); ok {
-					return Bool(a > b), nil
+					return BoxBool(a > b), nil
 				}
 				if b, ok := b.AsFloat64(); ok {
-					return Bool(float64(a) > b), nil
+					return BoxBool(float64(a) > b), nil
 				}
 			}
 
 			if a, ok := a.AsFloat64(); ok {
 				if b, ok := b.AsInt64(); ok {
-					return Bool(a > float64(b)), nil
+					return BoxBool(a > float64(b)), nil
 				}
 				if b, ok := b.AsFloat64(); ok {
-					return Bool(a > b), nil
+					return BoxBool(a > b), nil
 				}
 			}
 
@@ -357,7 +357,7 @@ func init() {
 				captured[i] = rt.active[base+ref.Index]
 			}
 
-			*rt.active[rt.getCurrentBase()+index] = BoxUserFn(unsafe.Pointer(&UserFn{captured, info}))
+			*rt.active[rt.getCurrentBase()+index] = BoxUserFn(UserFn{captured, info})
 			rt.ip = info.End
 			return Value{}, nil
 		},
@@ -368,8 +368,9 @@ func init() {
 				base := rt.getScrolledBase(ref.Scroll)
 				captured[i] = rt.active[base+ref.Index]
 			}
+
 			rt.ip = info.End
-			return BoxUserFn(unsafe.Pointer(&UserFn{captured, info})), nil
+			return BoxUserFn(UserFn{captured, info}), nil
 		},
 		func(rt *Routine) (Value, error) { // CALL
 			rt.ip++
@@ -639,9 +640,9 @@ func init() {
 			}
 
 			if f, isFloat64 := value.AsFloat64(); isFloat64 {
-				value = Float64(f + 1)
+				value = BoxFloat64(f + 1)
 			} else if i, isInt64 := value.AsInt64(); isInt64 {
-				value = Int64(i + 1)
+				value = BoxInt64(i + 1)
 			} else {
 				return Value{}, CustomError("cannot increment variable '%v' with a value of type '%v'", m.references[rt.ip], value.TypeOf())
 			}
@@ -669,9 +670,9 @@ func init() {
 			}
 
 			if f, isFloat64 := value.AsFloat64(); isFloat64 {
-				value = Float64(f - 1)
+				value = BoxFloat64(f - 1)
 			} else if i, isInt64 := value.AsInt64(); isInt64 {
-				value = Int64(i - 1)
+				value = BoxInt64(i - 1)
 			} else {
 				return Value{}, CustomError("cannot decremenent variable '%v' with a value of type '%v'", m.references[rt.ip], value.TypeOf())
 			}
@@ -705,18 +706,18 @@ func init() {
 
 			if a, ok := left.AsInt64(); ok {
 				if b, ok := right.AsInt64(); ok {
-					left = Int64(a + b)
+					left = BoxInt64(a + b)
 					goto SAVE
 				} else if b, ok := right.AsFloat64(); ok {
-					left = Float64(float64(a) + b)
+					left = BoxFloat64(float64(a) + b)
 					goto SAVE
 				}
 			} else if a, ok := left.AsFloat64(); ok {
 				if b, ok := right.AsInt64(); ok {
-					left = Float64(a + float64(b))
+					left = BoxFloat64(a + float64(b))
 					goto SAVE
 				} else if b, ok := right.AsFloat64(); ok {
-					left = Float64(a + b)
+					left = BoxFloat64(a + b)
 					goto SAVE
 				}
 			}
@@ -754,18 +755,18 @@ func init() {
 
 			if a, ok := left.AsInt64(); ok {
 				if b, ok := right.AsInt64(); ok {
-					left = Int64(a - b)
+					left = BoxInt64(a - b)
 					goto SAVE
 				} else if b, ok := right.AsFloat64(); ok {
-					left = Float64(float64(a) - b)
+					left = BoxFloat64(float64(a) - b)
 					goto SAVE
 				}
 			} else if a, ok := left.AsFloat64(); ok {
 				if b, ok := right.AsInt64(); ok {
-					left = Float64(a - float64(b))
+					left = BoxFloat64(a - float64(b))
 					goto SAVE
 				} else if b, ok := right.AsFloat64(); ok {
-					left = Float64(a - b)
+					left = BoxFloat64(a - b)
 					goto SAVE
 				}
 			}
@@ -794,15 +795,15 @@ func init() {
 
 			if a, ok := a.AsInt64(); ok {
 				if bOp == op.INT {
-					return Int64(a + *(*int64)(b)), nil
+					return BoxInt64(a + *(*int64)(b)), nil
 				}
-				return Float64(float64(a) + *(*float64)(b)), nil
+				return BoxFloat64(float64(a) + *(*float64)(b)), nil
 			}
 			if a, ok := a.AsFloat64(); ok {
 				if bOp == op.INT {
-					return Float64(a + float64(*(*int64)(b))), nil
+					return BoxFloat64(a + float64(*(*int64)(b))), nil
 				}
-				return Float64(a + *(*float64)(b)), nil
+				return BoxFloat64(a + *(*float64)(b)), nil
 			}
 
 			return Value{}, CustomError(mathErrFormat, "+", a, b)
@@ -819,15 +820,15 @@ func init() {
 
 			if a, ok := a.AsInt64(); ok {
 				if bOp == op.INT {
-					return Int64(a - *(*int64)(b)), nil
+					return BoxInt64(a - *(*int64)(b)), nil
 				}
-				return Float64(float64(a) - *(*float64)(b)), nil
+				return BoxFloat64(float64(a) - *(*float64)(b)), nil
 			}
 			if a, ok := a.AsFloat64(); ok {
 				if bOp == op.INT {
-					return Float64(a - float64(*(*int64)(b))), nil
+					return BoxFloat64(a - float64(*(*int64)(b))), nil
 				}
-				return Float64(a - *(*float64)(b)), nil
+				return BoxFloat64(a - *(*float64)(b)), nil
 			}
 
 			return Value{}, CustomError(mathErrFormat, "-", a, b)
@@ -844,15 +845,15 @@ func init() {
 
 			if a, ok := a.AsInt64(); ok {
 				if bOp == op.INT {
-					return Bool(a < *(*int64)(b)), nil
+					return BoxBool(a < *(*int64)(b)), nil
 				}
-				return Bool(float64(a) < *(*float64)(b)), nil
+				return BoxBool(float64(a) < *(*float64)(b)), nil
 			}
 			if a, ok := a.AsFloat64(); ok {
 				if bOp == op.INT {
-					return Bool(a < float64(*(*int64)(b))), nil
+					return BoxBool(a < float64(*(*int64)(b))), nil
 				}
-				return Bool(a < *(*float64)(b)), nil
+				return BoxBool(a < *(*float64)(b)), nil
 			}
 
 			return Value{}, CustomError(mathErrFormat, "<", a, b)
@@ -932,6 +933,7 @@ func (fn UserFn) Call(args ...Value) (Value, error) {
 	AcquireGIL()
 	defer ReleaseGIL()
 
+	// Routines could later be pooled for better performance
 	rt := &Routine{active: make([]*Value, fn.Capacity), basis: []int{0}, captured: fn.captured}
 	for i := range fn.Capacity {
 		rt.active[i] = boxPool.Get()

@@ -3,6 +3,7 @@ package core
 import (
 	"math"
 	"strconv"
+	"strings"
 	"unsafe"
 )
 
@@ -24,7 +25,8 @@ RULES:
 	4. float64: the pointer has to be equal to f64Type; the scalar then stores the value
 	5. string:  the pointer has to be none of (boolType, i64Type, f64Type); the scalar has to be 0
 	6. userFn:  the pointer has to be none of (boolType, i64Type, f64Type); the scalar has to be 1
-	7. custom:  the pointer has to be none of (boolType, i64Type, f64Type); the scalar has to be 2
+	7. array:   the pointer has to be none of (boolType, i64Type, f64Type); the scalar has to be 2
+	8. custom:  the pointer has to be none of (boolType, i64Type, f64Type); the scalar has to be 3
 
 Another alternative to these two is using this exact same Value struct with different rules.
 The scalar would use nan-tagging and would either be a valid float64 or a NaN and contain meta data that
@@ -32,6 +34,13 @@ would suggest if it's null, a bool, an int32 (if needed) or a reference value,
 in the last case, we would use the pointer part of the struct and cast it to the appropriate type.
 Although arguably simpler in design, we lose 64 bit integers so idk.
 */
+
+const (
+	scalarString = iota
+	scalarUserFn
+	scalarArray
+	scalarCustom
+)
 
 type CustomValue interface {
 	String() string
@@ -56,37 +65,42 @@ func init() {
 	f64Type = unsafe.Pointer(new(byte))
 }
 
-// Float64 boxes a float64
-func Float64(f float64) Value {
+// BoxFloat64 boxes a float64
+func BoxFloat64(f float64) Value {
 	return Value{scalar: math.Float64bits(f), pointer: f64Type}
 }
 
-// Int64 boxes an int64
-func Int64(i int64) Value {
+// BoxInt64 boxes an int64
+func BoxInt64(i int64) Value {
 	return Value{scalar: uint64(i), pointer: i64Type}
 }
 
-// Bool boxes a boolean into
-func Bool(b bool) Value {
+// BoxBool boxes a boolean into
+func BoxBool(b bool) Value {
 	if b {
 		return Value{scalar: 1, pointer: boolType}
 	}
 	return Value{scalar: 0, pointer: boolType}
 }
 
-// String boxes an string pointer
-func String(str string) Value {
-	return Value{scalar: 0, pointer: unsafe.Pointer(&str)}
+// BoxString boxes a Golang string
+func BoxString(str string) Value {
+	return Value{scalar: scalarString, pointer: unsafe.Pointer(&str)}
 }
 
 // BoxUserFn boxes a user fn pointer
-func BoxUserFn(ptr unsafe.Pointer) Value {
-	return Value{scalar: 1, pointer: ptr}
+func BoxUserFn(ptr UserFn) Value {
+	return Value{scalar: scalarUserFn, pointer: unsafe.Pointer(&ptr)}
 }
 
-// Custom boxes a CustomValue
-func Custom(cv CustomValue) Value {
-	return Value{scalar: 2, pointer: unsafe.Pointer(&cv)}
+// BoxArray boxes an evie array
+func BoxArray(array []Value) Value {
+	return Value{scalar: scalarArray, pointer: unsafe.Pointer(&array)}
+}
+
+// BoxCustom boxes a value of a custom type
+func BoxCustom(cv CustomValue) Value {
+	return Value{scalar: scalarCustom, pointer: unsafe.Pointer(&cv)}
 }
 
 func (v Value) IsNull() bool {
@@ -113,20 +127,11 @@ func (v Value) AsString() (string, bool) {
 		return "", false
 	}
 
-	if v.scalar == 0 {
+	if v.scalar == scalarString {
 		return *(*string)(v.pointer), true
 	}
 
 	return "", false
-}
-
-func (v Value) IsUserFn() bool {
-	switch v.pointer {
-	case nil, i64Type, f64Type, boolType:
-		return false
-	}
-
-	return v.scalar == 1
 }
 
 func (v Value) AsUserFn() (UserFn, bool) {
@@ -135,20 +140,33 @@ func (v Value) AsUserFn() (UserFn, bool) {
 		return UserFn{}, false
 	}
 
-	if v.scalar == 1 {
+	if v.scalar == scalarUserFn {
 		return *(*UserFn)(v.pointer), true
 	}
 
 	return UserFn{}, false
 }
 
-func (v Value) AsCustomValue() (CustomValue, bool) {
+func (v Value) AsArray() ([]Value, bool) {
 	switch v.pointer {
 	case nil, i64Type, f64Type, boolType:
 		return nil, false
 	}
 
-	if v.scalar > 1 {
+	if v.scalar == scalarArray {
+		return *(*[]Value)(v.pointer), true
+	}
+
+	return nil, false
+}
+
+func (v Value) AsCustom() (CustomValue, bool) {
+	switch v.pointer {
+	case nil, i64Type, f64Type, boolType:
+		return nil, false
+	}
+
+	if v.scalar == scalarCustom {
 		return *(*CustomValue)(v.pointer), true
 	}
 
@@ -172,12 +190,15 @@ func (v Value) IsTruthy() bool {
 	}
 
 	switch v.scalar {
-	case 0: // string
+	case scalarString: // string
 		return *(*string)(v.pointer) != ""
-	case 1: // userFn
+	case scalarUserFn: // userFn
 		// In both JavaScript and Python, functions are inherently truthy
 		return true
-	case 2:
+	case scalarArray: // array
+		array := *(*[]Value)(v.pointer)
+		return len(array) != 0
+	case scalarCustom:
 		cv := *(*CustomValue)(v.pointer)
 		return cv.IsTruthy()
 	}
@@ -203,11 +224,13 @@ func (a Value) Equals(b Value) bool {
 	}
 
 	switch a.scalar {
-	case 0: // string
+	case scalarString: // string
 		return *(*string)(a.pointer) == *(*string)(b.pointer)
-	case 1: // userFn
+	case scalarUserFn: // userFn
 		return a.pointer == b.pointer
-	case 2:
+	case scalarArray: // array
+		return a.pointer == b.pointer
+	case scalarCustom:
 		cvL := (*(*CustomValue)(a.pointer))
 		cvR := (*(*CustomValue)(b.pointer))
 		return cvL.Equals(cvR)
@@ -232,11 +255,33 @@ func (v Value) String() string {
 	}
 
 	switch v.scalar {
-	case 0: // string
+	case scalarString: // string
 		return *(*string)(v.pointer)
-	case 1: // userFn
+	case scalarUserFn: // userFn
 		return "<fn>"
-	case 2: // custom
+	case scalarArray: // array
+		array := *(*[]Value)(v.pointer)
+
+		builder := strings.Builder{}
+		builder.WriteByte('[')
+
+		for i, v := range array {
+			if str, ok := v.AsString(); ok {
+				builder.WriteByte('\'')
+				builder.WriteString(str)
+				builder.WriteByte('\'')
+			} else {
+				builder.WriteString(v.String())
+			}
+
+			if i != len(array)-1 {
+				builder.WriteString(", ")
+			}
+		}
+
+		builder.WriteByte(']')
+		return builder.String()
+	case scalarCustom: // custom
 		cv := (*(*CustomValue)(v.pointer))
 		return cv.String()
 	}
@@ -257,11 +302,13 @@ func (v Value) TypeOf() string {
 	}
 
 	switch v.scalar {
-	case 0: // string
+	case scalarString: // string
 		return "string"
-	case 1: // userFn
+	case scalarUserFn: // userFn
 		return "<fn>"
-	case 2: // custom
+	case scalarArray: // array
+		return "array"
+	case scalarCustom: // custom
 		cv := (*(*CustomValue)(v.pointer))
 		return cv.TypeOf()
 	}

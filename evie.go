@@ -3,6 +3,7 @@ package evie
 import (
 	"github.com/hk-32/evie/core"
 	"github.com/hk-32/evie/core/std"
+	"github.com/hk-32/evie/core/std/builtin"
 )
 
 type Program interface {
@@ -23,7 +24,7 @@ type Program interface {
 func DefaultExports() map[string]any {
 	std.Exports = map[string]any{}
 	/* fs.Export()
-	time.Export()
-	builtin.Export() */
+	time.Export() */
+	builtin.Export()
 	return std.Exports
 }

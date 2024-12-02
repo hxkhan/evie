@@ -1,36 +1,47 @@
 package builtin
 
-/* func Export() {
+import (
+	"strings"
+
+	"github.com/hk-32/evie/core"
+	"github.com/hk-32/evie/core/std"
+)
+
+func Export() {
 	std.ImportFn(split)
 	std.ImportFn(join)
 }
 
-func split(str, sep box.Value) (box.Value, error) {
+func split(str, sep core.Value) (core.Value, error) {
 	if str, ok := str.AsString(); ok {
 		if sep, ok := sep.AsString(); ok {
 
 			parts := strings.Split(str, sep)
-			result := make([]box.Value, len(parts))
+			result := make([]core.Value, len(parts))
 			for i, part := range parts {
-				result[i] = box.String(part)
+				result[i] = core.BoxString(part)
 			}
-			return result, nil
+			return core.BoxArray(result), nil
 		}
 	}
-	return nil, core.ErrTypes
+	return core.Value{}, core.ErrTypes
 }
 
-func join(parts, sep box.Value) (box.Value, error) {
-	if parts, ok := parts.([]box.Value); ok {
+func join(parts, sep core.Value) (core.Value, error) {
+	if parts, ok := parts.AsArray(); ok {
 		if sep, ok := sep.AsString(); ok {
 
 			strs := make([]string, len(parts))
 			for i, part := range parts {
-				strs[i] = part.AsString()
+				str, ok := part.AsString()
+				if !ok {
+					return core.Value{}, core.ErrTypes
+				}
+				strs[i] = str
 			}
 
-			return strings.Join(strs, sep), nil
+			return core.BoxString(strings.Join(strs, sep)), nil
 		}
 	}
-	return nil, core.ErrTypes
-} */
+	return core.Value{}, core.ErrTypes
+}

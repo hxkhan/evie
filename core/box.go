@@ -8,7 +8,7 @@ import (
 )
 
 /*
-NOTE: Theres 2 parts to a box.Value
+NOTE: Theres 2 parts to a Value
 	1. The scalar can store int64, float64, bool
 	2. The pointer can store any reference value like strings, functions, arrays, maps or custom types provided by Go packages
 
@@ -19,14 +19,16 @@ This might sound confusing but I've tried about 4 different designs and this one
 Compared to using Golang's any type, this is in a different league altogether because scalars here are not heap allocated.
 
 RULES:
-	1. null:    it's enough for just the pointer to be nil
-	2. bool:    the pointer has to be equal to boolType; the scalar is 0 for false else true
-	4. int64:   the pointer has to be equal to i64Type; the scalar then stores the value
-	4. float64: the pointer has to be equal to f64Type; the scalar then stores the value
-	5. string:  the pointer has to be none of (boolType, i64Type, f64Type); the scalar has to be 0
-	6. userFn:  the pointer has to be none of (boolType, i64Type, f64Type); the scalar has to be 1
-	7. array:   the pointer has to be none of (boolType, i64Type, f64Type); the scalar has to be 2
-	8. custom:  the pointer has to be none of (boolType, i64Type, f64Type); the scalar has to be 3
+	1.  null:    it's enough for just the pointer to be nil
+	2.  bool:    the pointer has to be equal to boolType; the scalar is 0 for false else true
+	4.  int64:   the pointer has to be equal to i64Type; the scalar then stores the value
+	4.  float64: the pointer has to be equal to f64Type; the scalar then stores the value
+	5.  string:  the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be stringType
+	6.  userFn:  the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be userFnType
+	7.  array:   the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be arrayType
+	8.  task:    the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be taskType
+	9.  buffer:  the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be bufferType
+	10. custom:  the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be customType
 
 Another alternative to these two is using this exact same Value struct with different rules.
 The scalar would use nan-tagging and would either be a valid float64 or a NaN and contain meta data that
@@ -36,10 +38,13 @@ Although arguably simpler in design, we lose 64 bit integers so idk.
 */
 
 const (
-	scalarString = iota
-	scalarUserFn
-	scalarArray
-	scalarCustom
+	stringType = iota
+	userFnType
+	nativeFnType
+	arrayType
+	taskType
+	bufferType
+	customType
 )
 
 type CustomValue interface {
@@ -55,24 +60,19 @@ type Value struct {
 	pointer unsafe.Pointer
 }
 
-var boolType unsafe.Pointer
-var i64Type unsafe.Pointer
-var f64Type unsafe.Pointer
+// scalar types
+var i64Type = unsafe.Pointer(new(byte))
+var f64Type = unsafe.Pointer(new(byte))
+var boolType = unsafe.Pointer(new(byte))
 
-func init() {
-	boolType = unsafe.Pointer(new(byte))
-	i64Type = unsafe.Pointer(new(byte))
-	f64Type = unsafe.Pointer(new(byte))
+// BoxInt64 boxes an int64
+func BoxInt64(i int64) Value {
+	return Value{scalar: uint64(i), pointer: i64Type}
 }
 
 // BoxFloat64 boxes a float64
 func BoxFloat64(f float64) Value {
 	return Value{scalar: math.Float64bits(f), pointer: f64Type}
-}
-
-// BoxInt64 boxes an int64
-func BoxInt64(i int64) Value {
-	return Value{scalar: uint64(i), pointer: i64Type}
 }
 
 // BoxBool boxes a boolean into
@@ -85,49 +85,62 @@ func BoxBool(b bool) Value {
 
 // BoxString boxes a Golang string
 func BoxString(str string) Value {
-	return Value{scalar: scalarString, pointer: unsafe.Pointer(&str)}
+	return Value{scalar: stringType, pointer: unsafe.Pointer(&str)}
 }
 
-// BoxUserFn boxes a user fn pointer
-func BoxUserFn(ptr UserFn) Value {
-	return Value{scalar: scalarUserFn, pointer: unsafe.Pointer(&ptr)}
+// BoxUserFn boxes a user function
+func BoxUserFn(fn UserFn) Value {
+	return Value{scalar: userFnType, pointer: unsafe.Pointer(&fn)}
+}
+
+// BoxNativeFn boxes a native function
+func BoxNativeFn[T ValidFnTypes](fn T) Value {
+	iface := any(fn)
+	return Value{scalar: nativeFnType, pointer: unsafe.Pointer(&iface)}
 }
 
 // BoxArray boxes an evie array
 func BoxArray(array []Value) Value {
-	return Value{scalar: scalarArray, pointer: unsafe.Pointer(&array)}
+	return Value{scalar: arrayType, pointer: unsafe.Pointer(&array)}
+}
+
+// BoxTask boxes an evie task
+func BoxTask(task chan TaskResult) Value {
+	return Value{scalar: taskType, pointer: unsafe.Pointer(&task)}
+}
+
+// BoxBuffer boxes a Golang byte slice
+func BoxBuffer(bytes []byte) Value {
+	return Value{scalar: bufferType, pointer: unsafe.Pointer(&bytes)}
 }
 
 // BoxCustom boxes a value of a custom type
 func BoxCustom(cv CustomValue) Value {
-	return Value{scalar: scalarCustom, pointer: unsafe.Pointer(&cv)}
+	return Value{scalar: customType, pointer: unsafe.Pointer(&cv)}
 }
 
 func (v Value) IsNull() bool {
 	return v.pointer == nil
 }
 
-func (v Value) AsFloat64() (float64, bool) {
-	if v.pointer == f64Type {
-		return math.Float64frombits(v.scalar), true
-	}
-	return 0, false
+func (v Value) AsInt64() (int64, bool) {
+	return int64(v.scalar), v.pointer == i64Type
 }
 
-func (v Value) AsInt64() (int64, bool) {
-	if v.pointer == i64Type {
-		return int64(v.scalar), true
-	}
-	return 0, false
+func (v Value) AsFloat64() (float64, bool) {
+	return math.Float64frombits(v.scalar), v.pointer == f64Type
+}
+
+func (v Value) AsBool() (bool, bool) {
+	return v.scalar != 0, v.pointer == boolType
 }
 
 func (v Value) AsString() (string, bool) {
-	switch v.pointer {
-	case nil, i64Type, f64Type, boolType:
+	if isKnown(v.pointer) {
 		return "", false
 	}
 
-	if v.scalar == scalarString {
+	if v.scalar == stringType {
 		return *(*string)(v.pointer), true
 	}
 
@@ -135,46 +148,83 @@ func (v Value) AsString() (string, bool) {
 }
 
 func (v Value) AsUserFn() (UserFn, bool) {
-	switch v.pointer {
-	case nil, i64Type, f64Type, boolType:
+	if isKnown(v.pointer) {
 		return UserFn{}, false
 	}
 
-	if v.scalar == scalarUserFn {
+	if v.scalar == userFnType {
 		return *(*UserFn)(v.pointer), true
 	}
 
 	return UserFn{}, false
 }
 
-func (v Value) AsArray() ([]Value, bool) {
-	switch v.pointer {
-	case nil, i64Type, f64Type, boolType:
+func (v Value) AsNativeFn() (any, bool) {
+	if isKnown(v.pointer) {
 		return nil, false
 	}
 
-	if v.scalar == scalarArray {
+	if v.scalar == nativeFnType {
+		return *(*any)(v.pointer), true
+	}
+
+	return nil, false
+}
+
+func (v Value) AsArray() ([]Value, bool) {
+	if isKnown(v.pointer) {
+		return nil, false
+	}
+
+	if v.scalar == arrayType {
 		return *(*[]Value)(v.pointer), true
 	}
 
 	return nil, false
 }
 
-func (v Value) AsCustom() (CustomValue, bool) {
-	switch v.pointer {
-	case nil, i64Type, f64Type, boolType:
+func (v Value) AsTask() (<-chan TaskResult, bool) {
+	if isKnown(v.pointer) {
 		return nil, false
 	}
 
-	if v.scalar == scalarCustom {
+	if v.scalar == taskType {
+		return *(*chan TaskResult)(v.pointer), true
+	}
+
+	return nil, false
+}
+
+func (v Value) AsBuffer() ([]byte, bool) {
+	if isKnown(v.pointer) {
+		return nil, false
+	}
+
+	if v.scalar == bufferType {
+		return *(*[]byte)(v.pointer), true
+	}
+
+	return nil, false
+}
+
+func (v Value) AsCustom() (CustomValue, bool) {
+	if isKnown(v.pointer) {
+		return nil, false
+	}
+
+	if v.scalar == customType {
 		return *(*CustomValue)(v.pointer), true
 	}
 
 	return nil, false
 }
 
-func (v Value) AsBool() (bool, bool) {
-	return v.scalar != 0, v.pointer == boolType
+func isKnown(p unsafe.Pointer) bool {
+	switch p {
+	case nil, i64Type, f64Type, boolType:
+		return true
+	}
+	return false
 }
 
 func (v Value) IsTruthy() bool {
@@ -190,15 +240,21 @@ func (v Value) IsTruthy() bool {
 	}
 
 	switch v.scalar {
-	case scalarString: // string
+	case stringType:
 		return *(*string)(v.pointer) != ""
-	case scalarUserFn: // userFn
+	case userFnType:
 		// In both JavaScript and Python, functions are inherently truthy
 		return true
-	case scalarArray: // array
+	case arrayType:
 		array := *(*[]Value)(v.pointer)
 		return len(array) != 0
-	case scalarCustom:
+	case taskType:
+		task := *(*chan TaskResult)(v.pointer)
+		return len(task) != 0
+	case bufferType:
+		array := *(*[]Value)(v.pointer)
+		return len(array) != 0
+	case customType:
 		cv := *(*CustomValue)(v.pointer)
 		return cv.IsTruthy()
 	}
@@ -224,19 +280,16 @@ func (a Value) Equals(b Value) bool {
 	}
 
 	switch a.scalar {
-	case scalarString: // string
+	case stringType:
 		return *(*string)(a.pointer) == *(*string)(b.pointer)
-	case scalarUserFn: // userFn
-		return a.pointer == b.pointer
-	case scalarArray: // array
-		return a.pointer == b.pointer
-	case scalarCustom:
-		cvL := (*(*CustomValue)(a.pointer))
-		cvR := (*(*CustomValue)(b.pointer))
-		return cvL.Equals(cvR)
+	case customType:
+		lhs := (*(*CustomValue)(a.pointer))
+		rhs := (*(*CustomValue)(b.pointer))
+		return lhs.Equals(rhs)
 	}
 
-	return false
+	// default comparison
+	return a.pointer == b.pointer
 }
 
 func (v Value) String() string {
@@ -255,11 +308,11 @@ func (v Value) String() string {
 	}
 
 	switch v.scalar {
-	case scalarString: // string
+	case stringType:
 		return *(*string)(v.pointer)
-	case scalarUserFn: // userFn
+	case userFnType:
 		return "<fn>"
-	case scalarArray: // array
+	case arrayType:
 		array := *(*[]Value)(v.pointer)
 
 		builder := strings.Builder{}
@@ -267,9 +320,9 @@ func (v Value) String() string {
 
 		for i, v := range array {
 			if str, ok := v.AsString(); ok {
-				builder.WriteByte('\'')
+				builder.WriteByte('"')
 				builder.WriteString(str)
-				builder.WriteByte('\'')
+				builder.WriteByte('"')
 			} else {
 				builder.WriteString(v.String())
 			}
@@ -281,7 +334,27 @@ func (v Value) String() string {
 
 		builder.WriteByte(']')
 		return builder.String()
-	case scalarCustom: // custom
+
+	case taskType:
+		return "<task>"
+	case bufferType:
+		array := *(*[]byte)(v.pointer)
+		builder := strings.Builder{}
+		builder.WriteByte('[')
+
+		for i, v := range array {
+			builder.WriteByte('\'')
+			builder.WriteString(strconv.FormatInt(int64(v), 10))
+			builder.WriteByte('\'')
+
+			if i != len(array)-1 {
+				builder.WriteString(", ")
+			}
+		}
+
+		builder.WriteByte(']')
+		return builder.String()
+	case customType:
 		cv := (*(*CustomValue)(v.pointer))
 		return cv.String()
 	}
@@ -302,13 +375,17 @@ func (v Value) TypeOf() string {
 	}
 
 	switch v.scalar {
-	case scalarString: // string
+	case stringType:
 		return "string"
-	case scalarUserFn: // userFn
-		return "<fn>"
-	case scalarArray: // array
+	case userFnType:
+		return "function"
+	case arrayType:
 		return "array"
-	case scalarCustom: // custom
+	case taskType:
+		return "task"
+	case bufferType:
+		return "buffer"
+	case customType:
 		cv := (*(*CustomValue)(v.pointer))
 		return cv.TypeOf()
 	}

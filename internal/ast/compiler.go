@@ -9,7 +9,7 @@ import (
 	"github.com/hk-32/evie/internal/op"
 )
 
-func Compile(node Node, optimise bool, exports map[string]any) (*core.Routine, error) {
+func Compile(node Node, optimise bool, exports map[string]core.Value) (*core.Routine, error) {
 	cs := &CompilerState{
 		globals:              make(map[string]*core.Value),
 		fns:                  make(map[int]*core.FuncInfo),
@@ -19,18 +19,10 @@ func Compile(node Node, optimise bool, exports map[string]any) (*core.Routine, e
 		optimise:             optimise,
 	}
 
-	/* cs.builtins = make([]core.Value, len(exports))
+	cs.builtins = make([]core.Value, len(exports))
 	for name, value := range exports {
-
-		switch v := value.(type) {
-		case float64:
-			cs.builtins[cs.declare(name)] = core.BoxFloat64(v)
-		case float64:
-			cs.builtins[cs.declare(name)] = core.BoxFloat64(v)
-		}
-
-		panic("unknown type")
-	} */
+		cs.builtins[cs.declare(name)] = value
+	}
 
 	cs.scopeExtend()
 	node.compile(cs)

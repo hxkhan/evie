@@ -394,7 +394,7 @@ func init() {
 				// create space for all the locals
 				base := len(rt.active)
 				for range fn.Capacity {
-					rt.active = append(rt.active, boxPool.Get())
+					rt.active = append(rt.active, m.boxes.new())
 				}
 
 				// set arguments
@@ -430,14 +430,14 @@ func init() {
 
 				// release non-escaping locals
 				for _, index := range fn.NonEscaping {
-					boxPool.Put(rt.active[base+index])
+					m.boxes.put(rt.active[base+index])
 				}
 
 				rt.exitUserFN(retAddr, fn.Capacity, retEnc)
 				return value, err
-			} /* else if res, err := rt.tryNativeCall(value, nargsProvided); err != errNotFunction {
+			} else if res, err := rt.tryNativeCall(value, nargsProvided); err != errNotFunction {
 				return res, err
-			} */
+			}
 
 			// nothing more can be done; throw error
 			switch m.code[start] {
@@ -455,8 +455,7 @@ func init() {
 			return v, errReturnSignal
 		},
 		func(rt *Routine) (Value, error) { // GO
-			panic("implement go")
-			/* rt.ip++
+			rt.ip++
 			nargsProvided := int(m.code[rt.ip])
 			start := rt.ip + 1
 			value, err := rt.next()
@@ -465,9 +464,7 @@ func init() {
 			}
 
 			// check if its a user function
-			if ptr, isUserFn := value.AsUserFn(); isUserFn {
-				fn := *(*fn)(ptr)
-
+			if fn, isUserFn := value.AsUserFn(); isUserFn {
 				if len(fn.Args) != nargsProvided {
 					if fn.Name != "λ" {
 						return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.Name, len(fn.Args), nargsProvided)
@@ -478,7 +475,7 @@ func init() {
 				// evaluate and store locals
 				locals := make([]*Value, fn.Capacity)
 				for i := range fn.Capacity {
-					locals[i] = boxPool.Get()
+					locals[i] = m.boxes.new()
 				}
 
 				for i := range nargsProvided {
@@ -489,8 +486,9 @@ func init() {
 					*locals[i] = v
 				}
 
+				m.wg.Add(1)
 				go func(rt *Routine) {
-					rt.AcquireGIL()
+					m.gil.Lock()
 
 					for rt.ip < fn.End {
 						_, err := instructions[m.code[rt.ip]](rt)
@@ -506,10 +504,11 @@ func init() {
 
 					// release non-escaping locals
 					for _, index := range fn.NonEscaping {
-						rt.m.pool.Put(rt.active[rt.getBase()+index])
+						m.boxes.put(rt.active[rt.getCurrentBase()+index])
 					}
 
-					rt.terminate()
+					m.wg.Done()
+					m.gil.Unlock()
 				}(rt.newRoutine(fn.Start, locals, fn.captured))
 				return Value{}, nil
 			} else if value.TypeOf() == "function" {
@@ -519,29 +518,28 @@ func init() {
 			// nothing more can be done; throw error
 			switch m.code[start] {
 			case op.LOAD_LOCAL, op.LOAD_CAPTURED, op.LOAD_BUILTIN:
-				return Value{}, CustomError("go on '%v', a non-function '%v' of type '%v'.", rt.m.references[start], Stringify(value), value.TypeOf())
+				return Value{}, CustomError("go on '%s', a non-function '%s' of type '%v'.", m.references[start], value.String(), value.TypeOf())
 			}
-			return Value{}, CustomError("go on a non-function '%v' of type '%v'.", Stringify(value), value.TypeOf()) */
+			return Value{}, CustomError("go on a non-function '%s' of type '%s'.", value.String(), value.TypeOf())
 		},
 		func(rt *Routine) (Value, error) { // AWAIT
-			panic("implement await")
-			/* value, err := rt.next()
+			value, err := rt.next()
 			if err != nil {
 				return value, err
 			}
 
-			if task, isTask := value.(Task); isTask {
-				rt.ReleaseGIL()
+			if task, isTask := value.AsTask(); isTask {
+				m.gil.Unlock()
 				response, ok := <-task
-				rt.AcquireGIL()
+				m.gil.Lock()
 
 				if !ok {
 					return Value{}, CustomError("cannot await on a closed task")
 				}
 
-				return response.Value, response.Error
+				return response.Result, response.Error
 			}
-			return Value{}, CustomError("cannot await on '%v' of type '%v'", Stringify(value), value.TypeOf()) */
+			return Value{}, CustomError("cannot await on '%s' of type '%s'", value.String(), value.TypeOf())
 		},
 		func(rt *Routine) (Value, error) { // AWAIT_ALL
 			panic("implement await_all")
@@ -936,7 +934,7 @@ func (fn UserFn) Call(args ...Value) (Value, error) {
 	// Routines could later be pooled for better performance
 	rt := &Routine{active: make([]*Value, fn.Capacity), basis: []int{0}, captured: fn.captured}
 	for i := range fn.Capacity {
-		rt.active[i] = boxPool.Get()
+		rt.active[i] = m.boxes.new()
 	}
 
 	// run fn
@@ -951,13 +949,13 @@ func (fn UserFn) Call(args ...Value) (Value, error) {
 
 	// release non-escaping locals
 	for _, index := range fn.NonEscaping {
-		boxPool.Put(rt.active[index])
+		m.boxes.put(rt.active[index])
 	}
 
 	return Value{}, nil
 }
 
-/* func (rt *Routine) tryNativeCall(value any, nargsP int) (result Value, err error) {
+func (rt *Routine) tryNativeCall(value Value, nargsP int) (result Value, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			result = Value{}
@@ -965,39 +963,29 @@ func (fn UserFn) Call(args ...Value) (Value, error) {
 		}
 	}()
 
+	nfn, ok := value.AsNativeFn()
+	if !ok {
+		return Value{}, errNotFunction
+	}
+
 	switch nargsP {
 	case 0:
-		if fn, ok := value.(NativeFn[func() (Value, error)]); ok {
-			return fn.Callable()
+		if fn, ok := nfn.(func() (Value, error)); ok {
+			return fn()
 		}
 	case 1:
-		if fn, ok := value.(NativeFn[func(Value) (Value, error)]); ok {
-			return fn.Callable(rt.nextP())
+		if fn, ok := nfn.(func(Value) (Value, error)); ok {
+			return fn(rt.nextP())
 		}
 	case 2:
-		if fn, ok := value.(NativeFn[func(Value, Value) (Value, error)]); ok {
-			return fn.Callable(rt.nextP(), rt.nextP())
+		if fn, ok := nfn.(func(Value, Value) (Value, error)); ok {
+			return fn(rt.nextP(), rt.nextP())
 		}
 	case 3:
-		if fn, ok := value.(NativeFn[func(Value, Value, Value) (Value, error)]); ok {
-			return fn.Callable(rt.nextP(), rt.nextP(), rt.nextP())
+		if fn, ok := nfn.(func(Value, Value, Value) (Value, error)); ok {
+			return fn(rt.nextP(), rt.nextP(), rt.nextP())
 		}
 	}
 
-	// check if its even a function
-	if value.TypeOf() == "function" {
-		fn := value.(interface {
-			Name() string
-			Nargs() int
-		})
-
-		if fn.Nargs() != nargsP {
-			return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.Name(), fn.Nargs(), nargsP)
-		}
-
-		panic("function, but not callable, what is this even??")
-	}
-
-	return Value{}, errNotFunction
+	panic("this cant be")
 }
-*/

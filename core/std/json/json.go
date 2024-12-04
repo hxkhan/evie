@@ -1,18 +1,22 @@
 package json
 
-import (
-	"encoding/json"
+/* func Export() {
+	std.ImportFn(decode)
+}
 
-	"github.com/hk-32/evie/core"
-)
-
-func decode(v any) (any, error) {
-	str, ok := v.(string)
+func decode(v core.Value) (core.Value, error) {
+	str, ok := v.AsString()
 	if ok {
 		var v any
 		err := json.Unmarshal([]byte(str), &v)
+
+		switch v.(type) {
+		case []any:
+
+		}
+
 		return v, err
 	}
-	return nil, core.ErrTypes
+	return core.Value{}, core.ErrTypes
 
-}
+} */

@@ -1,6 +1,13 @@
 package time
 
-/* func Export() {
+import (
+	"time"
+
+	"github.com/hk-32/evie/core"
+	"github.com/hk-32/evie/core/std"
+)
+
+func Export() {
 	std.ImportFn(timer)
 }
 
@@ -8,8 +15,8 @@ func timer(duration core.Value) (core.Value, error) {
 	if duration, ok := duration.AsInt64(); ok {
 		return core.NewTask(func() (core.Value, error) {
 			time.Sleep(time.Millisecond * time.Duration(duration))
-			return nil, nil
-		})
+			return core.Value{}, nil
+		}), nil
 	}
-	return nil, core.ErrTypes
-} */
+	return core.Value{}, core.ErrTypes
+}

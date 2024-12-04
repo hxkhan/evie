@@ -8,6 +8,7 @@ func SetProgram(code []byte, globals map[string]*Value, builtins []Value, global
 	m = machine{
 		code:       code,
 		globals:    globals,
+		boxes:      make(pool[Value], 0, 48), // 48 = pool size of boxes
 		builtins:   builtins,
 		references: refs,
 		funcs:      funcInfo,
@@ -35,8 +36,9 @@ type FuncInfo struct {
 var m machine
 
 type machine struct {
-	globals map[string]*Value
 	code    []byte // executable bytes
+	globals map[string]*Value
+	boxes   pool[Value]
 
 	builtins []Value // built-in scope; can get from but can't set in
 
@@ -59,6 +61,10 @@ func GetGlobal(name string) *Value {
 	return m.globals[name]
 }
 
+func WaitForNoActivity() {
+	m.wg.Wait()
+}
+
 func ReleaseGIL() {
 	m.gil.Unlock()
 }
@@ -68,14 +74,13 @@ func AcquireGIL() {
 }
 
 func (rt *Routine) newRoutine(ip int, locals []*Value, captured []*Value) *Routine {
-	m.wg.Add(1)
 	return &Routine{ip, locals, []int{0}, captured}
 }
 
-func (rt *Routine) terminate() {
+/* func (rt *Routine) terminate() {
 	m.wg.Done()
 	ReleaseGIL()
-}
+} */
 
 func (rt *Routine) storeLocal(index int, value Value) {
 	*(rt.active[rt.getCurrentBase()+index]) = value
@@ -123,107 +128,21 @@ func (fn UserFn) String() string {
 	return "<function>"
 }
 
-/*
-	IDEA: instead of (chan TaskResponse) we can have
-
-	type Task struct {
-		channel chan TaskResponse
-		err error // last error
-	}
-
-
-*/
-
-/* func NewTask() chan TaskResult {
-	return make(chan TaskResult, 1)
-} */
-
-type Task chan TaskResult
-
-func NewTask(fn func() (any, error)) (Task, error) {
-	task := make(Task, 1)
+func NewTask(fn func() (Value, error)) Value {
+	task := make(chan TaskResult, 1)
 	go func() {
 		res, err := fn()
 		task <- TaskResult{res, err}
 	}()
-	return task, nil
+	return BoxTask(task)
 }
 
 type TaskResult struct {
-	Value any
-	Error error
+	Result Value
+	Error  error
 }
 
-// Safely exit when the consumer choses to discontinue the task
-/* func SafeExit() {
-	if r := recover(); r != nil {
-		if r.(error).Error() != "send on closed channel" {
-			panic(r)
-		}
-		fmt.Println("task discontinued")
-	}
-} */
-
-/* func (ft Task) Resolve(value any, err error) {
-	ft <- result{value, err}
-} */
-
 type Tuple []any
-
-/* func Stringify(v any) string {
-	switch value := v.(type) {
-	case nil:
-		return "null"
-	case Task:
-		return "<task>"
-
-	case []byte:
-		return "<buffer>"
-	case Tuple:
-		builder := strings.Builder{}
-		builder.WriteByte('(')
-
-		for i, v := range value {
-			if str, ok := v.(string); ok {
-				builder.WriteByte('\'')
-				builder.WriteString(str)
-				builder.WriteByte('\'')
-			} else {
-				builder.WriteString(Stringify(v))
-			}
-
-			if i != len(value)-1 {
-				builder.WriteString(", ")
-			}
-		}
-
-		builder.WriteByte(')')
-		return builder.String()
-
-	case []any:
-		builder := strings.Builder{}
-		builder.WriteByte('[')
-
-		for i, v := range value {
-			if str, ok := v.(string); ok {
-				builder.WriteByte('\'')
-				builder.WriteString(str)
-				builder.WriteByte('\'')
-			} else {
-				builder.WriteString(Stringify(v))
-			}
-
-			if i != len(value)-1 {
-				builder.WriteString(", ")
-			}
-		}
-
-		builder.WriteByte(']')
-		return builder.String()
-	}
-
-	return fmt.Sprint(v)
-} */
 
 func pop[T any](slice *[]T) T {
 	v := (*slice)[len(*slice)-1]

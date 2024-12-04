@@ -1,12 +1,11 @@
 package main
 
-message := "hello world"
-
 fn main() {
-    echo message.split(" ").join("_")
-    echo join(split(message, " "), "_")
-
+    message := "hello world"
 
     echo message.split(" ")
     echo split(message, " ")
+
+    echo message.split(" ").join("_")
+    echo join(split(message, " "), "_")
 }

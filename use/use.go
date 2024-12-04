@@ -1,8 +1,10 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/hk-32/evie"
@@ -11,7 +13,7 @@ import (
 	"github.com/hk-32/evie/internal/parser"
 )
 
-func main() {
+/* func main() {
 	fileName := "./fib.es"
 	optimise := true
 	observe := true
@@ -78,13 +80,9 @@ func main() {
 	if measure {
 		fmt.Printf("Execution time: %v\n", difference)
 	}
+} */
 
-	/* if *d {
-		program.PrintStats()
-	} */
-}
-
-/* func main() {
+func main() {
 	p := flag.Bool("p", false, "To print the program before running it")
 	o := flag.Bool("o", true, "To optimise the program with specialised instructions")
 	d := flag.Bool("d", false, "To print debug stats")
@@ -102,15 +100,13 @@ func main() {
 		panic(err)
 	}
 
-	pack, err := parser.ParsePackage(input)
+	pack, err := parser.Parse(input)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	//pack
-
-	program, err := evie.NewProgramFromAST(pack, *o, *d)
+	program, err := ast.Compile(pack, *o, evie.DefaultExports())
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -122,13 +118,33 @@ func main() {
 	}
 
 	before := time.Now()
-	res, err := program.Start()
-	difference := time.Since(before)
-
+	err = program.Initialize()
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
+
+	main := core.GetGlobal("main")
+	if main == nil {
+		fmt.Println("Error: program requires a main entry point")
+		return
+	}
+
+	fn, ok := main.AsUserFn()
+	if !ok {
+		fmt.Println("Error: program requires main to be a function")
+		return
+	}
+
+	res, err := fn.Call()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	core.WaitForNoActivity()
+
+	difference := time.Since(before)
 
 	if !res.IsNull() {
 		fmt.Println(res)
@@ -142,4 +158,3 @@ func main() {
 		fmt.Printf("Execution time: %v\n", difference)
 	}
 }
-*/

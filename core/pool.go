@@ -1,21 +1,10 @@
 package core
 
-const poolSize = 48
+type pool[T any] []*T
 
-type pool []*Value
-
-var boxPool pool
-
-func init() {
-	boxPool = make(pool, poolSize)
-	for i := 0; i < poolSize; i++ {
-		boxPool[i] = new(Value)
-	}
-}
-
-func (p *pool) Get() *Value {
+func (p *pool[T]) new() *T {
 	if len(*p) == 0 {
-		return new(Value)
+		return new(T)
 	}
 	// ugly ass derefs but its fine
 	obj := (*p)[len(*p)-1]
@@ -23,7 +12,7 @@ func (p *pool) Get() *Value {
 	return obj
 }
 
-func (p *pool) Put(obj *Value) {
+func (p *pool[T]) put(obj *T) {
 	if len(*p) < cap(*p) {
 		*p = append(*p, obj)
 	}

@@ -1,16 +1,22 @@
 package fs
 
-/* func Export() {
+import (
+	"os"
+
+	"github.com/hk-32/evie/core"
+	"github.com/hk-32/evie/core/std"
+)
+
+func Export() {
 	std.ImportFn(readFile)
 }
 
-func readFile(fileName any) (any, error) {
-	if fileName, ok := fileName.(string); ok {
-		return core.NewTask(func() (any, error) {
+func readFile(fileName core.Value) (core.Value, error) {
+	if fileName, ok := fileName.AsString(); ok {
+		return core.NewTask(func() (core.Value, error) {
 			bytes, err := os.ReadFile(fileName)
-			return bytes, err
-		})
+			return core.BoxBuffer(bytes), err
+		}), nil
 	}
-	return nil, core.ErrTypes
+	return core.Value{}, core.ErrTypes
 }
-*/

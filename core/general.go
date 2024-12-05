@@ -4,7 +4,7 @@ import (
 	"sync"
 )
 
-func SetProgram(code []byte, globals map[string]*Value, builtins []Value, globalScope []*Value, refs map[int]string, funcInfo map[int]*FuncInfo) (*Routine, error) {
+func SetProgram(code []byte, globals map[string]*Value, builtins []Value, globalScope []*Value, refs map[int]string, funcInfo map[int]*FuncInfo) (*CoRoutine, error) {
 	m = machine{
 		code:       code,
 		globals:    globals,
@@ -15,7 +15,7 @@ func SetProgram(code []byte, globals map[string]*Value, builtins []Value, global
 	}
 
 	// return main goroutine
-	return &Routine{active: globalScope}, nil
+	return &CoRoutine{stack: globalScope}, nil
 }
 
 type Reference struct {
@@ -36,12 +36,12 @@ type FuncInfo struct {
 var m machine
 
 type machine struct {
-	code    []byte // executable bytes
-	globals map[string]*Value
-	boxes   pool[Value]
+	code  []byte      // executable bytes
+	boxes pool[Value] // pool of
 
 	builtins []Value // built-in scope; can get from but can't set in
 
+	globals    map[string]*Value
 	references map[int]string    // maps references ip's to their names
 	funcs      map[int]*FuncInfo // generated function information
 	trace      []string          // call stack trace
@@ -50,11 +50,11 @@ type machine struct {
 	wg  sync.WaitGroup // wait for all threads
 }
 
-type Routine struct {
+type CoRoutine struct {
 	ip       int      // instruction pointer
-	active   []*Value // active variables for all the functions in the call stack
-	basis    []int    // one base per function; locals[basis[len(basis)-1]] is where the current function's locals start at
 	captured []*Value // currently captured variables
+	stack    []*Value // local variables for all the functions in the call stack
+	basis    []int    // one base per function; basis[-1] is where the current function's locals start at
 }
 
 func GetGlobal(name string) *Value {
@@ -73,8 +73,8 @@ func AcquireGIL() {
 	m.gil.Lock()
 }
 
-func (rt *Routine) newRoutine(ip int, locals []*Value, captured []*Value) *Routine {
-	return &Routine{ip, locals, []int{0}, captured}
+func (rt *CoRoutine) newRoutine(ip int, locals []*Value, captured []*Value) *CoRoutine {
+	return &CoRoutine{ip, captured, locals, []int{0}}
 }
 
 /* func (rt *Routine) terminate() {
@@ -82,40 +82,44 @@ func (rt *Routine) newRoutine(ip int, locals []*Value, captured []*Value) *Routi
 	ReleaseGIL()
 } */
 
-func (rt *Routine) storeLocal(index int, value Value) {
-	*(rt.active[rt.getCurrentBase()+index]) = value
+func (rt *CoRoutine) storeLocal(index int, value Value) {
+	*(rt.stack[rt.getCurrentBase()+index]) = value
 }
 
-func (rt *Routine) storeCaptured(index int, value Value) {
+func (rt *CoRoutine) storeCaptured(index int, value Value) {
 	*(rt.captured[index]) = value
 }
 
-func (rt *Routine) getLocal(index int) Value {
-	return *(rt.active[rt.getCurrentBase()+index])
+func (rt *CoRoutine) getLocal(index int) Value {
+	return *(rt.stack[rt.getCurrentBase()+index])
 }
 
-func (rt *Routine) getCaptured(index int) Value {
+func (rt *CoRoutine) capture(index int, scroll int) *Value {
+	return rt.stack[rt.getScrolledBase(scroll)+index]
+}
+
+func (rt *CoRoutine) getCaptured(index int) Value {
 	return *(rt.captured[index])
 }
 
-func (rt *Routine) getCurrentBase() int {
+func (rt *CoRoutine) getCurrentBase() int {
 	return rt.basis[len(rt.basis)-1]
 }
 
-func (rt *Routine) getScrolledBase(scroll int) int {
+func (rt *CoRoutine) getScrolledBase(scroll int) int {
 	return rt.basis[len(rt.basis)-scroll]
 }
 
-func (rt *Routine) pushBase(base int) {
+func (rt *CoRoutine) pushBase(base int) {
 	rt.basis = append(rt.basis, base)
 }
 
-func (rt *Routine) popBase() {
+func (rt *CoRoutine) popBase() {
 	rt.basis = rt.basis[:len(rt.basis)-1]
 }
 
-func (rt *Routine) popLocals(n int) {
-	rt.active = rt.active[:len(rt.active)-n]
+func (rt *CoRoutine) popLocals(n int) {
+	rt.stack = rt.stack[:len(rt.stack)-n]
 }
 
 // enclosing scope & func combo

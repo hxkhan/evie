@@ -9,23 +9,23 @@ import (
 )
 
 // order should be consistent with ast/op.go
-var instructions [op.NUM_OPS]func(rt *Routine) (Value, error)
+var instructions [op.NUM_OPS]func(rt *CoRoutine) (Value, error)
 
 var runs [op.NUM_OPS]int
 
 var mathErrFormat = "operator '%v' expects numbers, got '%v' and '%v'"
 
 func init() {
-	instructions = [...]func(rt *Routine) (Value, error){
-		func(rt *Routine) (Value, error) { // NULL
+	instructions = [...]func(rt *CoRoutine) (Value, error){
+		func(rt *CoRoutine) (Value, error) { // NULL
 			return Value{}, nil
 		},
-		func(rt *Routine) (Value, error) { // EXIT
+		func(rt *CoRoutine) (Value, error) { // EXIT
 			fmt.Printf("EXIT at ip %v \n", rt.ip)
 			os.Exit(0)
 			return Value{}, nil
 		},
-		func(rt *Routine) (Value, error) { // ECHO
+		func(rt *CoRoutine) (Value, error) { // ECHO
 			v, err := rt.next()
 			if err != nil {
 				return v, err
@@ -34,29 +34,29 @@ func init() {
 			fmt.Println(v)
 			return Value{}, nil
 		},
-		func(rt *Routine) (Value, error) { // INT
+		func(rt *CoRoutine) (Value, error) { // INT
 			v := *(*int64)(unsafe.Pointer(&m.code[rt.ip+1]))
 			rt.ip += 8
 			return BoxInt64(v), nil
 		},
-		func(rt *Routine) (Value, error) { // FLOAT
+		func(rt *CoRoutine) (Value, error) { // FLOAT
 			v := *(*float64)(unsafe.Pointer(&m.code[rt.ip+1]))
 			rt.ip += 8
 			return BoxFloat64(v), nil
 		},
-		func(rt *Routine) (Value, error) { // STR
+		func(rt *CoRoutine) (Value, error) { // STR
 			size := int(*(*uint16)(unsafe.Pointer(&m.code[rt.ip+1])))
 			str := unsafe.String(&m.code[rt.ip+3], size)
 			rt.ip += 2 + size
 			return BoxString(str), nil
 		},
-		func(rt *Routine) (Value, error) { // TRUE
+		func(rt *CoRoutine) (Value, error) { // TRUE
 			return BoxBool(true), nil
 		},
-		func(rt *Routine) (Value, error) { // FALSE
+		func(rt *CoRoutine) (Value, error) { // FALSE
 			return BoxBool(false), nil
 		},
-		func(rt *Routine) (Value, error) { // ADD
+		func(rt *CoRoutine) (Value, error) { // ADD
 			a, err := rt.next()
 			if err != nil {
 				return a, err
@@ -86,7 +86,7 @@ func init() {
 
 			return Value{}, OperatorTypesError("+", a, b)
 		},
-		func(rt *Routine) (Value, error) { // SUB
+		func(rt *CoRoutine) (Value, error) { // SUB
 			a, err := rt.next()
 			if err != nil {
 				return a, err
@@ -117,7 +117,7 @@ func init() {
 
 			return Value{}, OperatorTypesError("-", a, b)
 		},
-		func(rt *Routine) (Value, error) { // MUL
+		func(rt *CoRoutine) (Value, error) { // MUL
 			a, err := rt.next()
 			if err != nil {
 				return a, err
@@ -147,7 +147,7 @@ func init() {
 
 			return Value{}, OperatorTypesError("*", a, b)
 		},
-		func(rt *Routine) (Value, error) { // DIV
+		func(rt *CoRoutine) (Value, error) { // DIV
 			a, err := rt.next()
 			if err != nil {
 				return a, err
@@ -177,7 +177,7 @@ func init() {
 
 			return Value{}, OperatorTypesError("/", a, b)
 		},
-		func(rt *Routine) (Value, error) { // NEG
+		func(rt *CoRoutine) (Value, error) { // NEG
 			o, err := rt.next()
 			if err != nil {
 				return o, err
@@ -193,7 +193,7 @@ func init() {
 
 			return Value{}, CustomError("negation not supported on '%v'", o)
 		},
-		func(rt *Routine) (Value, error) { // EQ
+		func(rt *CoRoutine) (Value, error) { // EQ
 			a, err := rt.next()
 			if err != nil {
 				return a, err
@@ -204,7 +204,7 @@ func init() {
 			}
 			return BoxBool(a == b), nil
 		},
-		func(rt *Routine) (Value, error) { // LS
+		func(rt *CoRoutine) (Value, error) { // LS
 			a, err := rt.next()
 			if err != nil {
 				return a, err
@@ -234,7 +234,7 @@ func init() {
 
 			return Value{}, OperatorTypesError("<", a, b)
 		},
-		func(rt *Routine) (Value, error) { // MR
+		func(rt *CoRoutine) (Value, error) { // MR
 			a, err := rt.next()
 			if err != nil {
 				return a, err
@@ -264,7 +264,7 @@ func init() {
 
 			return Value{}, OperatorTypesError(">", a, b)
 		},
-		func(rt *Routine) (Value, error) { // IF
+		func(rt *CoRoutine) (Value, error) { // IF
 		IF:
 			size := int(uint16(m.code[rt.ip+1]) | uint16(m.code[rt.ip+2])<<8)
 			jmp := rt.ip + size
@@ -289,7 +289,7 @@ func init() {
 			// Basically fallthrough the byte m.code to the true section...
 			return Value{}, nil
 		},
-		func(rt *Routine) (Value, error) { // ELIF (runaway) so skip
+		func(rt *CoRoutine) (Value, error) { // ELIF (runaway) so skip
 		AGAIN:
 			// The last op.IF/ELIF was successful, so skip all remaining op.ELIF's and a potential op.ELSE
 			// this would make rt.ip point to an op.ELIF or op.ELSE or op.END; former 2 need to be skipped
@@ -300,26 +300,26 @@ func init() {
 			// we are sure rt.ip is pointing at an op.END
 			return Value{}, nil
 		},
-		func(rt *Routine) (Value, error) { // ELSE (runaway) so skip
+		func(rt *CoRoutine) (Value, error) { // ELSE (runaway) so skip
 			// The last op.IF/op.ELIF was successful, so skip this op.ELSE
 			// this would make rt.ip point to an op.END
 			rt.ip += int(m.code[rt.ip+1])
 			return Value{}, nil
 		},
-		func(rt *Routine) (Value, error) { // END
+		func(rt *CoRoutine) (Value, error) { // END
 			return Value{}, nil
 		},
-		func(rt *Routine) (Value, error) { // LOAD_BUILTIN
+		func(rt *CoRoutine) (Value, error) { // LOAD_BUILTIN
 			rt.ip++
 			index := int(m.code[rt.ip])
 			return m.builtins[index], nil
 		},
-		func(rt *Routine) (Value, error) { // LOAD_LOCAL
+		func(rt *CoRoutine) (Value, error) { // LOAD_LOCAL
 			rt.ip++
 			index := int(m.code[rt.ip])
-			return *rt.active[rt.getCurrentBase()+index], nil
+			return *rt.stack[rt.getCurrentBase()+index], nil
 		},
-		func(rt *Routine) (Value, error) { // STORE_LOCAL
+		func(rt *CoRoutine) (Value, error) { // STORE_LOCAL
 			rt.ip++
 			index := int(m.code[rt.ip])
 
@@ -331,12 +331,12 @@ func init() {
 			rt.storeLocal(index, v)
 			return Value{}, nil
 		},
-		func(rt *Routine) (Value, error) { // LOAD_CAPTURED
+		func(rt *CoRoutine) (Value, error) { // LOAD_CAPTURED
 			rt.ip++
 			index := int(m.code[rt.ip])
 			return rt.getCaptured(index), nil
 		},
-		func(rt *Routine) (Value, error) { // STORE_CAPTURED
+		func(rt *CoRoutine) (Value, error) { // STORE_CAPTURED
 			index := int(m.code[rt.ip+1])
 			rt.ip += 1
 
@@ -348,31 +348,30 @@ func init() {
 			rt.storeCaptured(index, v)
 			return Value{}, nil
 		},
-		func(rt *Routine) (Value, error) { // FN_DECL
+		func(rt *CoRoutine) (Value, error) { // FN_DECL
 			info := m.funcs[rt.ip]
 			index := int(m.code[rt.ip+1])
 			captured := make([]*Value, len(info.Refs))
 			for i, ref := range info.Refs {
-				base := rt.getScrolledBase(ref.Scroll)
-				captured[i] = rt.active[base+ref.Index]
+				captured[i] = rt.capture(ref.Index, ref.Scroll)
 			}
 
-			*rt.active[rt.getCurrentBase()+index] = BoxUserFn(UserFn{captured, info})
+			rt.storeLocal(index, BoxUserFn(UserFn{captured, info}))
 			rt.ip = info.End
 			return Value{}, nil
 		},
-		func(rt *Routine) (Value, error) { // LAMBDA
+		func(rt *CoRoutine) (Value, error) { // LAMBDA
 			info := m.funcs[rt.ip]
 			captured := make([]*Value, len(info.Refs))
 			for i, ref := range info.Refs {
 				base := rt.getScrolledBase(ref.Scroll)
-				captured[i] = rt.active[base+ref.Index]
+				captured[i] = rt.stack[base+ref.Index]
 			}
 
 			rt.ip = info.End
 			return BoxUserFn(UserFn{captured, info}), nil
 		},
-		func(rt *Routine) (Value, error) { // CALL
+		func(rt *CoRoutine) (Value, error) { // CALL
 			rt.ip++
 			nargsProvided := int(m.code[rt.ip])
 			start := rt.ip + 1
@@ -392,9 +391,9 @@ func init() {
 				}
 
 				// create space for all the locals
-				base := len(rt.active)
+				base := len(rt.stack)
 				for range fn.Capacity {
-					rt.active = append(rt.active, m.boxes.new())
+					rt.stack = append(rt.stack, m.boxes.new())
 				}
 
 				// set arguments
@@ -403,7 +402,7 @@ func init() {
 					if err != nil {
 						return v, err
 					}
-					*rt.active[base+i] = v
+					*rt.stack[base+i] = v
 				}
 				rt.pushBase(base)
 
@@ -430,7 +429,7 @@ func init() {
 
 				// release non-escaping locals
 				for _, index := range fn.NonEscaping {
-					m.boxes.put(rt.active[base+index])
+					m.boxes.put(rt.stack[base+index])
 				}
 
 				rt.exitUserFN(retAddr, fn.Capacity, retEnc)
@@ -446,7 +445,7 @@ func init() {
 			}
 			return Value{}, CustomError("cannot call a non-function '%v'", value)
 		},
-		func(rt *Routine) (Value, error) { // RET
+		func(rt *CoRoutine) (Value, error) { // RET
 			v, err := rt.next()
 			if err != nil {
 				return v, err
@@ -454,7 +453,7 @@ func init() {
 			// no error
 			return v, errReturnSignal
 		},
-		func(rt *Routine) (Value, error) { // GO
+		func(rt *CoRoutine) (Value, error) { // GO
 			rt.ip++
 			nargsProvided := int(m.code[rt.ip])
 			start := rt.ip + 1
@@ -472,12 +471,13 @@ func init() {
 					return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.Args), nargsProvided)
 				}
 
-				// evaluate and store locals
+				// create space for all the locals
 				locals := make([]*Value, fn.Capacity)
 				for i := range fn.Capacity {
 					locals[i] = m.boxes.new()
 				}
 
+				// set arguments
 				for i := range nargsProvided {
 					v, err := rt.next()
 					if err != nil {
@@ -487,7 +487,7 @@ func init() {
 				}
 
 				m.wg.Add(1)
-				go func(rt *Routine) {
+				go func(rt *CoRoutine) {
 					m.gil.Lock()
 
 					for rt.ip < fn.End {
@@ -504,7 +504,7 @@ func init() {
 
 					// release non-escaping locals
 					for _, index := range fn.NonEscaping {
-						m.boxes.put(rt.active[rt.getCurrentBase()+index])
+						m.boxes.put(rt.stack[rt.getCurrentBase()+index])
 					}
 
 					m.wg.Done()
@@ -522,7 +522,7 @@ func init() {
 			}
 			return Value{}, CustomError("go on a non-function '%s' of type '%s'.", value.String(), value.TypeOf())
 		},
-		func(rt *Routine) (Value, error) { // AWAIT
+		func(rt *CoRoutine) (Value, error) { // AWAIT
 			value, err := rt.next()
 			if err != nil {
 				return value, err
@@ -541,7 +541,7 @@ func init() {
 			}
 			return Value{}, CustomError("cannot await on '%s' of type '%s'", value.String(), value.TypeOf())
 		},
-		func(rt *Routine) (Value, error) { // AWAIT_ALL
+		func(rt *CoRoutine) (Value, error) { // AWAIT_ALL
 			panic("implement await_all")
 			/* rt.ip++
 			nargs := int(m.code[rt.ip])
@@ -576,7 +576,7 @@ func init() {
 
 			return tuple, nil */
 		},
-		func(rt *Routine) (Value, error) { // AWAIT_ANY
+		func(rt *CoRoutine) (Value, error) { // AWAIT_ANY
 			panic("implement await_any")
 			/* rt.ip++
 			nargs := m.code[rt.ip]
@@ -614,7 +614,7 @@ func init() {
 
 			return Tuple{response.Value, int64(chosen)}, nil */
 		},
-		func(rt *Routine) (Value, error) { // LOOP
+		func(rt *CoRoutine) (Value, error) { // LOOP
 			v, err := rt.next()
 			if err != nil {
 				return v, err
@@ -623,7 +623,7 @@ func init() {
 			return v, errReturnSignal
 		},
 
-		func(rt *Routine) (Value, error) { // INC
+		func(rt *CoRoutine) (Value, error) { // INC
 			rt.ip++
 			OP := m.code[rt.ip]
 			rt.ip++
@@ -653,7 +653,7 @@ func init() {
 			}
 			return value, nil
 		},
-		func(rt *Routine) (Value, error) { // DEC
+		func(rt *CoRoutine) (Value, error) { // DEC
 			rt.ip++
 			OP := m.code[rt.ip]
 			rt.ip++
@@ -683,7 +683,7 @@ func init() {
 			}
 			return value, nil
 		},
-		func(rt *Routine) (Value, error) { // STORE_ADD
+		func(rt *CoRoutine) (Value, error) { // STORE_ADD
 			rt.ip++
 			OP := m.code[rt.ip]
 			rt.ip++
@@ -732,7 +732,7 @@ func init() {
 
 			return Value{}, nil
 		},
-		func(rt *Routine) (Value, error) { // STORE_SUB
+		func(rt *CoRoutine) (Value, error) { // STORE_SUB
 			rt.ip++
 			OP := m.code[rt.ip]
 			rt.ip++
@@ -741,7 +741,7 @@ func init() {
 			var left Value
 			switch OP {
 			case op.LOAD_LOCAL:
-				left = *rt.active[rt.getCurrentBase()+int(index)]
+				left = *rt.stack[rt.getCurrentBase()+int(index)]
 			case op.LOAD_CAPTURED:
 				left = *rt.captured[index]
 			}
@@ -781,7 +781,7 @@ func init() {
 
 			return Value{}, nil
 		},
-		func(rt *Routine) (Value, error) { // ADD_RIGHT_CONST
+		func(rt *CoRoutine) (Value, error) { // ADD_RIGHT_CONST
 			a, err := rt.next()
 			if err != nil {
 				return a, err
@@ -806,7 +806,7 @@ func init() {
 
 			return Value{}, CustomError(mathErrFormat, "+", a, b)
 		},
-		func(rt *Routine) (Value, error) { // SUB_RIGHT_CONST
+		func(rt *CoRoutine) (Value, error) { // SUB_RIGHT_CONST
 			a, err := rt.next()
 			if err != nil {
 				return a, err
@@ -831,7 +831,7 @@ func init() {
 
 			return Value{}, CustomError(mathErrFormat, "-", a, b)
 		},
-		func(rt *Routine) (Value, error) { // LS_RIGHT_CONST
+		func(rt *CoRoutine) (Value, error) { // LS_RIGHT_CONST
 			a, err := rt.next()
 			if err != nil {
 				return a, err
@@ -856,7 +856,7 @@ func init() {
 
 			return Value{}, CustomError(mathErrFormat, "<", a, b)
 		},
-		func(rt *Routine) (Value, error) { // RETURN_IF
+		func(rt *CoRoutine) (Value, error) { // RETURN_IF
 			size := int(m.code[rt.ip+1])
 			jmp := rt.ip + size
 
@@ -881,7 +881,7 @@ func init() {
 	}
 }
 
-func (rt *Routine) Initialize() error {
+func (rt *CoRoutine) Initialize() error {
 	AcquireGIL()
 	defer ReleaseGIL()
 
@@ -897,13 +897,13 @@ func (rt *Routine) Initialize() error {
 }
 
 // evaluates the next value and returns it
-func (rt *Routine) next() (Value, error) {
+func (rt *CoRoutine) next() (Value, error) {
 	rt.ip++
 	return instructions[m.code[rt.ip]](rt)
 }
 
 // evaluates the next value and returns it, panics on errors
-func (rt *Routine) nextP() Value {
+func (rt *CoRoutine) nextP() Value {
 	rt.ip++
 	v, err := instructions[m.code[rt.ip]](rt)
 	if err != nil {
@@ -912,7 +912,7 @@ func (rt *Routine) nextP() Value {
 	return v
 }
 
-func (rt *Routine) exitUserFN(oldAddr int, nLocals int, oldEnc []*Value) {
+func (rt *CoRoutine) exitUserFN(oldAddr int, nLocals int, oldEnc []*Value) {
 	// return to caller context
 	rt.ip = oldAddr
 	rt.popLocals(nLocals)
@@ -932,9 +932,9 @@ func (fn UserFn) Call(args ...Value) (Value, error) {
 	defer ReleaseGIL()
 
 	// Routines could later be pooled for better performance
-	rt := &Routine{active: make([]*Value, fn.Capacity), basis: []int{0}, captured: fn.captured}
+	rt := &CoRoutine{stack: make([]*Value, fn.Capacity), basis: []int{0}, captured: fn.captured}
 	for i := range fn.Capacity {
-		rt.active[i] = m.boxes.new()
+		rt.stack[i] = m.boxes.new()
 	}
 
 	// run fn
@@ -949,13 +949,13 @@ func (fn UserFn) Call(args ...Value) (Value, error) {
 
 	// release non-escaping locals
 	for _, index := range fn.NonEscaping {
-		m.boxes.put(rt.active[index])
+		m.boxes.put(rt.stack[index])
 	}
 
 	return Value{}, nil
 }
 
-func (rt *Routine) tryNativeCall(value Value, nargsP int) (result Value, err error) {
+func (rt *CoRoutine) tryNativeCall(value Value, nargsP int) (result Value, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			result = Value{}

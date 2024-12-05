@@ -10,13 +10,13 @@ import (
 
 var Exports map[string]core.Value
 
-func ImportFn[T core.ValidFnTypes](callable T) {
+func ImportFn[T core.ValidFuncTypes](callable T) {
 	// get name of the function
 	path := runtime.FuncForPC(reflect.ValueOf(callable).Pointer()).Name()
 	parts := strings.Split(path, "/")
 	fullname := parts[len(parts)-1]
 
-	v := core.BoxNativeFn(callable)
+	v := core.BoxFunc(callable)
 
 	if name, found := strings.CutPrefix(fullname, "builtin."); found {
 		Exports[name] = v

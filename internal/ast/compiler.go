@@ -9,7 +9,7 @@ import (
 	"github.com/hk-32/evie/internal/op"
 )
 
-func Compile(node Node, optimise bool, exports map[string]core.Value) (*core.Routine, error) {
+func Compile(node Node, optimise bool, exports map[string]core.Value) (*core.CoRoutine, error) {
 	cs := &CompilerState{
 		globals:              make(map[string]*core.Value),
 		fns:                  make(map[int]*core.FuncInfo),

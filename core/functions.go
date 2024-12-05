@@ -1,13 +1,7 @@
 package core
 
-import (
-	"reflect"
-	"runtime"
-	"strings"
-)
-
 // compile time safety so uncallable functions don't get into the system
-type ValidFnTypes interface {
+type ValidFuncTypes interface {
 	func() (Value, error) |
 		func(Value) (Value, error) |
 		func(Value, Value) (Value, error) |
@@ -17,7 +11,7 @@ type ValidFnTypes interface {
 		func(Value, Value, Value, Value, Value, Value) (Value, error)
 }
 
-type NativeFn[T ValidFnTypes] struct {
+/* type NativeFn[T ValidFnTypes] struct {
 	Callable T
 }
 
@@ -38,3 +32,4 @@ func (fn NativeFn[T]) Name() string {
 func (fn NativeFn[T]) Nargs() int {
 	return reflect.TypeOf(fn.Callable).NumIn()
 }
+*/

@@ -25,6 +25,7 @@ RULES:
 	4.  float64: the pointer has to be equal to f64Type; the scalar then stores the value
 	5.  string:  the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be stringType
 	6.  userFn:  the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be userFnType
+	6.  func:    the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be funcType
 	7.  array:   the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be arrayType
 	8.  task:    the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be taskType
 	9.  buffer:  the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be bufferType
@@ -40,7 +41,7 @@ Although arguably simpler in design, we lose 64 bit integers so idk.
 const (
 	stringType = iota
 	userFnType
-	nativeFnType
+	funcType
 	arrayType
 	taskType
 	bufferType
@@ -83,20 +84,20 @@ func BoxBool(b bool) Value {
 	return Value{scalar: 0, pointer: boolType}
 }
 
-// BoxString boxes a Golang string
+// BoxString boxes a string
 func BoxString(str string) Value {
 	return Value{scalar: stringType, pointer: unsafe.Pointer(&str)}
 }
 
-// BoxUserFn boxes a user function
+// BoxUserFn boxes an evie function
 func BoxUserFn(fn UserFn) Value {
 	return Value{scalar: userFnType, pointer: unsafe.Pointer(&fn)}
 }
 
-// BoxNativeFn boxes a native function
-func BoxNativeFn[T ValidFnTypes](fn T) Value {
+// BoxFunc boxes a golang function
+func BoxFunc[T ValidFuncTypes](fn T) Value {
 	iface := any(fn)
-	return Value{scalar: nativeFnType, pointer: unsafe.Pointer(&iface)}
+	return Value{scalar: funcType, pointer: unsafe.Pointer(&iface)}
 }
 
 // BoxArray boxes an evie array
@@ -164,7 +165,7 @@ func (v Value) AsNativeFn() (any, bool) {
 		return nil, false
 	}
 
-	if v.scalar == nativeFnType {
+	if v.scalar == funcType {
 		return *(*any)(v.pointer), true
 	}
 

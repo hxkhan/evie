@@ -32,11 +32,11 @@ import (
 	}
 } */
 
-func (rt *Routine) String() string {
+func (rt *CoRoutine) String() string {
 	return fmt.Sprintf("Program{size: %v, references: %v, functions: %v}", len(m.code), len(m.references), len(m.funcs))
 }
 
-func (rt *Routine) PrintCode() {
+func (rt *CoRoutine) PrintCode() {
 	// number of digits for the biggest index
 	width := digits(len(m.code))
 

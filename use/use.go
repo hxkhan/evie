@@ -106,7 +106,9 @@ func main() {
 		return
 	}
 
-	program, err := ast.Compile(pack, *o, evie.DefaultExports())
+	cs := ast.NewCompiler(*o, evie.DefaultExports())
+
+	program, err := cs.Compile(pack)
 	if err != nil {
 		fmt.Println(err)
 		return

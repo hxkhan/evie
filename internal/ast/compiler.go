@@ -9,7 +9,7 @@ import (
 	"github.com/hk-32/evie/internal/op"
 )
 
-func Compile(node Node, optimise bool, exports map[string]core.Value) (*core.CoRoutine, error) {
+func NewCompiler(optimise bool, exports map[string]core.Value) *CompilerState {
 	cs := &CompilerState{
 		globals:              make(map[string]*core.Value),
 		fns:                  make(map[int]*core.FuncInfo),
@@ -23,11 +23,30 @@ func Compile(node Node, optimise bool, exports map[string]core.Value) (*core.CoR
 	for name, value := range exports {
 		cs.builtins[cs.declare(name)] = value
 	}
-
 	cs.scopeExtend()
-	node.compile(cs)
 
+	return cs
+}
+
+func (cs *CompilerState) Compile(node Node) (*core.CoRoutine, error) {
+	node.compile(cs)
 	return core.SetProgram(cs.output, cs.globals, cs.builtins, cs.globalScope, cs.symbols, cs.fns)
+}
+
+func (cs *CompilerState) BuiltIns() []core.Value {
+	return cs.builtins
+}
+
+func (cs *CompilerState) Globals() []*core.Value {
+	return cs.globalScope
+}
+
+func (cs *CompilerState) ReferenceTable() map[int]string {
+	return cs.symbols
+}
+
+func (cs *CompilerState) FuncTable() map[int]*core.FuncInfo {
+	return cs.fns
 }
 
 type Package struct {
@@ -36,6 +55,18 @@ type Package struct {
 	Code    []Node
 }
 
+// bit of special rules with hoisting
+/* Process:
+All declarations are physically shifted to the top
+
+So this is not possible because the order is maintained:
+	var x = y + 2
+	var y = 10
+
+But this is; becuase the declaration ends up being shifted to the top:
+	println(x)
+	var x = 10
+*/
 func (p Package) compile(cs *CompilerState) int {
 	// 1. declare all symbols
 	for _, node := range p.Code {
@@ -67,6 +98,8 @@ func (p Package) compile(cs *CompilerState) int {
 		if _, isFnDecl := node.(Fn); isFnDecl {
 			continue
 		}
+
+		// compile global variable declarations in a special way
 		if iDec, isIdentDec := node.(IdentDec); isIdentDec {
 			iDec.compileInGlobal(cs)
 			delete(cs.uninitializedGlobals, iDec.Name)
@@ -77,52 +110,6 @@ func (p Package) compile(cs *CompilerState) int {
 
 	return 0
 }
-
-// compile global scope; bit of special rules with hoisting
-/* Process:
-All declarations are physically shifted to the top
-
-So this is not possible because the order is maintained:
-	var x = y + 2
-	var y = 10
-
-But this is; becuase the declaration ends up being shifted to the top:
-	println(x)
-	var x = 10
-*/
-/* func (cs *CompilerState) compile(code []Node) {
-	// 1. declare all symbols
-	for _, node := range code {
-		if fnDec, isFnDecl := node.(Fn); isFnDecl {
-			cs.declare(fnDec.Name)
-		}
-
-		if iGet, isIdentDec := node.(IdentDec); isIdentDec {
-			cs.uninitializedGlobals[iGet.Name] = struct{}{}
-			cs.declare(iGet.Name)
-		}
-	}
-
-	// 2. physically move function declarations to the top
-	for _, node := range code {
-		if fnDec, isFnDecl := node.(Fn); isFnDecl {
-			fnDec.compileInGlobal(cs)
-		}
-	}
-
-	// compile the rest of the code
-	for _, node := range code {
-		if _, isFnDecl := node.(Fn); isFnDecl {
-			continue
-		}
-		if iDec, isIdentDec := node.(IdentDec); isIdentDec {
-			iDec.compileInGlobal(cs)
-			delete(cs.uninitializedGlobals, iDec.Name)
-			continue
-		}
-		node.compile(cs)
-	}
-} */
 
 type reachability struct {
 	lookup   []map[string]int

@@ -73,7 +73,8 @@ fn main() {
 		return fmt.Errorf("failed to parse with %v", err)
 	}
 
-	program, err := ast.Compile(nodes, true, evie.DefaultExports())
+	cs := ast.NewCompiler(true, evie.DefaultExports())
+	program, err := cs.Compile(nodes)
 	if err != nil {
 		return fmt.Errorf("failed to compile with %v", err)
 	}

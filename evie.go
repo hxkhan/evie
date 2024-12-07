@@ -21,6 +21,7 @@ type Options struct {
 }
 
 var Defaults = Options{Optimise: true, Exports: DefaultExports()}
+var cs *ast.CompilerState
 
 func DefaultExports() map[string]core.Value {
 	std.Exports = map[string]core.Value{}
@@ -30,17 +31,21 @@ func DefaultExports() map[string]core.Value {
 	return std.Exports
 }
 
+func Setup(opts Options) {
+	cs = ast.NewCompiler(opts.Optimise, opts.Exports)
+}
+
 func Reset() {
 
 }
 
-func FeedCode(input []byte, opts Options) error {
+func FeedCode(input []byte) error {
 	output, err := parser.Parse(input)
 	if err != nil {
 		return err
 	}
 
-	rt, err := ast.Compile(output, opts.Optimise, opts.Exports)
+	rt, err := cs.Compile(output)
 	if err != nil {
 		return err
 	}
@@ -55,4 +60,8 @@ func FeedCode(input []byte, opts Options) error {
 
 func GetGlobal(name string) *core.Value {
 	return core.GetGlobal(name)
+}
+
+func WaitForNoActivity(name string) {
+	core.WaitForNoActivity()
 }

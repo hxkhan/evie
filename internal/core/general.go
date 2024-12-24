@@ -4,18 +4,41 @@ import (
 	"sync"
 )
 
-func SetProgram(code []byte, globals map[string]*Value, builtins []Value, globalScope []*Value, refs map[int]string, funcInfo map[int]*FuncInfo) (*CoRoutine, error) {
+var m machine
+
+func Setup(builtins []Value, symbols map[int]string, funcInfo map[int]*FuncInfo) {
 	m = machine{
-		code:       code,
-		globals:    globals,
 		boxes:      make(pool[Value], 0, 48), // 48 = pool size of boxes
 		builtins:   builtins,
-		references: refs,
-		funcs:      funcInfo,
+		symbolsMap: symbols,
+		funcsMap:   funcInfo,
+	}
+}
+
+func Run(code []byte, globals []*Value) (Value, error) {
+	b4 := len(m.code)
+	start := 0
+
+	if b4 == 0 {
+		m.code = code
+	} else {
+		// only run the new part
+		start = b4
 	}
 
-	// return main goroutine
-	return &CoRoutine{stack: globalScope}, nil
+	AcquireGIL()
+	defer ReleaseGIL()
+
+	rt := &CoRoutine{stack: globals, basis: []int{0}}
+
+	for rt.ip = start; rt.ip < len(m.code); rt.ip++ {
+		// fetch and execute the instruction
+		if _, err := instructions[m.code[rt.ip]](rt); err != nil {
+			return Value{}, err
+		}
+	}
+
+	return Value{}, nil
 }
 
 type Reference struct {
@@ -33,17 +56,14 @@ type FuncInfo struct {
 	End         int         // associated op.END index
 }
 
-var m machine
-
 type machine struct {
 	code  []byte      // executable bytes
 	boxes pool[Value] // pool of
 
 	builtins []Value // built-in scope; can get from but can't set in
 
-	globals    map[string]*Value
-	references map[int]string    // maps references ip's to their names
-	funcs      map[int]*FuncInfo // generated function information
+	symbolsMap map[int]string    // maps references ip's to their names
+	funcsMap   map[int]*FuncInfo // generated function information
 	trace      []string          // call stack trace
 
 	gil sync.Mutex     // global interpreter lock
@@ -55,10 +75,6 @@ type CoRoutine struct {
 	captured []*Value // currently captured variables
 	stack    []*Value // local variables for all the functions in the call stack
 	basis    []int    // one base per function; basis[-1] is where the current function's locals start at
-}
-
-func GetGlobal(name string) *Value {
-	return m.globals[name]
 }
 
 func WaitForNoActivity() {

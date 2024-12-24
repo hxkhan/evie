@@ -1,13 +1,15 @@
+// contains package level state which means you cannot have multiple instance of evie running at the same time,
+// this was done for performance reasons and for a lack of a better way to make concurrency work with struct level state
 package evie
 
 import (
-	"github.com/hk-32/evie/core"
-	"github.com/hk-32/evie/core/std"
-	"github.com/hk-32/evie/core/std/builtin"
-	"github.com/hk-32/evie/core/std/fs"
-	"github.com/hk-32/evie/core/std/time"
 	"github.com/hk-32/evie/internal/ast"
+	"github.com/hk-32/evie/internal/core"
 	"github.com/hk-32/evie/internal/parser"
+	"github.com/hk-32/evie/std"
+	"github.com/hk-32/evie/std/builtin"
+	"github.com/hk-32/evie/std/fs"
+	"github.com/hk-32/evie/std/time"
 )
 
 type Options struct {
@@ -21,7 +23,6 @@ type Options struct {
 }
 
 var Defaults = Options{Optimise: true, Exports: DefaultExports()}
-var cs *ast.CompilerState
 
 func DefaultExports() map[string]core.Value {
 	std.Exports = map[string]core.Value{}
@@ -32,34 +33,24 @@ func DefaultExports() map[string]core.Value {
 }
 
 func Setup(opts Options) {
-	cs = ast.NewCompiler(opts.Optimise, opts.Exports)
+	ast.Setup(opts.Optimise, opts.Exports)
 }
 
 func Reset() {
 
 }
 
-func FeedCode(input []byte) error {
+func FeedCode(input []byte) (core.Value, error) {
 	output, err := parser.Parse(input)
 	if err != nil {
-		return err
+		return core.Value{}, err
 	}
 
-	rt, err := cs.Compile(output)
-	if err != nil {
-		return err
-	}
-
-	err = rt.Initialize()
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return ast.Feed(output)
 }
 
 func GetGlobal(name string) *core.Value {
-	return core.GetGlobal(name)
+	return ast.GetGlobal(name)
 }
 
 func WaitForNoActivity(name string) {

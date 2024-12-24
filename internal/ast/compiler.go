@@ -5,12 +5,14 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/hk-32/evie/core"
+	"github.com/hk-32/evie/internal/core"
 	"github.com/hk-32/evie/internal/op"
 )
 
-func NewCompiler(optimise bool, exports map[string]core.Value) *CompilerState {
-	cs := &CompilerState{
+var cs *CompilerState
+
+func Setup(optimise bool, exports map[string]core.Value) {
+	cs = &CompilerState{
 		globals:              make(map[string]*core.Value),
 		fns:                  make(map[int]*core.FuncInfo),
 		symbols:              make(map[int]string),
@@ -25,12 +27,16 @@ func NewCompiler(optimise bool, exports map[string]core.Value) *CompilerState {
 	}
 	cs.scopeExtend()
 
-	return cs
+	core.Setup(cs.builtins, cs.symbols, cs.fns)
 }
 
-func (cs *CompilerState) Compile(node Node) (*core.CoRoutine, error) {
+func Feed(node Node) (core.Value, error) {
 	node.compile(cs)
-	return core.SetProgram(cs.output, cs.globals, cs.builtins, cs.globalScope, cs.symbols, cs.fns)
+	return core.Run(cs.output, cs.globalScope)
+}
+
+func GetGlobal(name string) *core.Value {
+	return cs.globals[name]
 }
 
 func (cs *CompilerState) BuiltIns() []core.Value {

@@ -349,7 +349,7 @@ func init() {
 			return Value{}, nil
 		},
 		func(rt *CoRoutine) (Value, error) { // FN_DECL
-			info := m.funcs[rt.ip]
+			info := m.funcsMap[rt.ip]
 			index := int(m.code[rt.ip+1])
 			captured := make([]*Value, len(info.Refs))
 			for i, ref := range info.Refs {
@@ -361,7 +361,7 @@ func init() {
 			return Value{}, nil
 		},
 		func(rt *CoRoutine) (Value, error) { // LAMBDA
-			info := m.funcs[rt.ip]
+			info := m.funcsMap[rt.ip]
 			captured := make([]*Value, len(info.Refs))
 			for i, ref := range info.Refs {
 				base := rt.getScrolledBase(ref.Scroll)
@@ -441,7 +441,7 @@ func init() {
 			// nothing more can be done; throw error
 			switch m.code[start] {
 			case op.LOAD_LOCAL, op.LOAD_CAPTURED, op.LOAD_BUILTIN:
-				return Value{}, CustomError("cannot call '%v', a non-function '%v'", m.references[start], value)
+				return Value{}, CustomError("cannot call '%v', a non-function '%v'", m.symbolsMap[start], value)
 			}
 			return Value{}, CustomError("cannot call a non-function '%v'", value)
 		},
@@ -518,7 +518,7 @@ func init() {
 			// nothing more can be done; throw error
 			switch m.code[start] {
 			case op.LOAD_LOCAL, op.LOAD_CAPTURED, op.LOAD_BUILTIN:
-				return Value{}, CustomError("go on '%s', a non-function '%s' of type '%v'.", m.references[start], value.String(), value.TypeOf())
+				return Value{}, CustomError("go on '%s', a non-function '%s' of type '%v'.", m.symbolsMap[start], value.String(), value.TypeOf())
 			}
 			return Value{}, CustomError("go on a non-function '%s' of type '%s'.", value.String(), value.TypeOf())
 		},
@@ -642,7 +642,7 @@ func init() {
 			} else if i, isInt64 := value.AsInt64(); isInt64 {
 				value = BoxInt64(i + 1)
 			} else {
-				return Value{}, CustomError("cannot increment variable '%v' with a value of type '%v'", m.references[rt.ip], value.TypeOf())
+				return Value{}, CustomError("cannot increment variable '%v' with a value of type '%v'", m.symbolsMap[rt.ip], value.TypeOf())
 			}
 
 			switch OP {
@@ -672,7 +672,7 @@ func init() {
 			} else if i, isInt64 := value.AsInt64(); isInt64 {
 				value = BoxInt64(i - 1)
 			} else {
-				return Value{}, CustomError("cannot decremenent variable '%v' with a value of type '%v'", m.references[rt.ip], value.TypeOf())
+				return Value{}, CustomError("cannot decremenent variable '%v' with a value of type '%v'", m.symbolsMap[rt.ip], value.TypeOf())
 			}
 
 			switch OP {

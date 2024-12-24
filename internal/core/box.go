@@ -124,19 +124,19 @@ func (v Value) IsNull() bool {
 	return v.pointer == nil
 }
 
-func (v Value) AsInt64() (int64, bool) {
+func (v Value) AsInt64() (i int64, ok bool) {
 	return int64(v.scalar), v.pointer == i64Type
 }
 
-func (v Value) AsFloat64() (float64, bool) {
+func (v Value) AsFloat64() (f float64, ok bool) {
 	return math.Float64frombits(v.scalar), v.pointer == f64Type
 }
 
-func (v Value) AsBool() (bool, bool) {
+func (v Value) AsBool() (b bool, ok bool) {
 	return v.scalar != 0, v.pointer == boolType
 }
 
-func (v Value) AsString() (string, bool) {
+func (v Value) AsString() (s string, ok bool) {
 	if isKnown(v.pointer) {
 		return "", false
 	}
@@ -148,7 +148,7 @@ func (v Value) AsString() (string, bool) {
 	return "", false
 }
 
-func (v Value) AsUserFn() (UserFn, bool) {
+func (v Value) AsUserFn() (fn UserFn, ok bool) {
 	if isKnown(v.pointer) {
 		return UserFn{}, false
 	}
@@ -160,7 +160,7 @@ func (v Value) AsUserFn() (UserFn, bool) {
 	return UserFn{}, false
 }
 
-func (v Value) AsNativeFn() (any, bool) {
+func (v Value) AsNativeFn() (iface any, ok bool) {
 	if isKnown(v.pointer) {
 		return nil, false
 	}
@@ -172,7 +172,7 @@ func (v Value) AsNativeFn() (any, bool) {
 	return nil, false
 }
 
-func (v Value) AsArray() ([]Value, bool) {
+func (v Value) AsArray() (array []Value, ok bool) {
 	if isKnown(v.pointer) {
 		return nil, false
 	}
@@ -184,7 +184,7 @@ func (v Value) AsArray() ([]Value, bool) {
 	return nil, false
 }
 
-func (v Value) AsTask() (<-chan TaskResult, bool) {
+func (v Value) AsTask() (task <-chan TaskResult, ok bool) {
 	if isKnown(v.pointer) {
 		return nil, false
 	}
@@ -196,7 +196,7 @@ func (v Value) AsTask() (<-chan TaskResult, bool) {
 	return nil, false
 }
 
-func (v Value) AsBuffer() ([]byte, bool) {
+func (v Value) AsBuffer() (buffer []byte, ok bool) {
 	if isKnown(v.pointer) {
 		return nil, false
 	}
@@ -208,7 +208,7 @@ func (v Value) AsBuffer() ([]byte, bool) {
 	return nil, false
 }
 
-func (v Value) AsCustom() (CustomValue, bool) {
+func (v Value) AsCustom() (cv CustomValue, ok bool) {
 	if isKnown(v.pointer) {
 		return nil, false
 	}

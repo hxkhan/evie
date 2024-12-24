@@ -33,7 +33,7 @@ import (
 } */
 
 func (rt *CoRoutine) String() string {
-	return fmt.Sprintf("Program{size: %v, references: %v, functions: %v}", len(m.code), len(m.references), len(m.funcs))
+	return fmt.Sprintf("Program{size: %v, references: %v, functions: %v}", len(m.code), len(m.symbolsMap), len(m.funcsMap))
 }
 
 func (rt *CoRoutine) PrintCode() {
@@ -70,15 +70,15 @@ func (rt *CoRoutine) PrintCode() {
 			return 1 + 2 + len(str)
 
 		case op.LOAD_LOCAL, op.STORE_LOCAL, op.LOAD_CAPTURED, op.STORE_CAPTURED, op.LOAD_BUILTIN:
-			fmt.Printf("%v : %v %v\n", padding_left(ip, width), op.PublicName(b), m.references[ip])
+			fmt.Printf("%v : %v %v\n", padding_left(ip, width), op.PublicName(b), m.symbolsMap[ip])
 			return 1 + 1
 
 		case op.FN_DECL:
-			fn := m.funcs[ip]
+			fn := m.funcsMap[ip]
 			fmt.Printf("%v : FN_DECL %v(%v) LOCALS(%v) ESC(%v) REFS(%v) <%v>\n", padding_left(ip, width), fn.Name, strings.Join(fn.Args, " "), fn.Capacity, fn.Capacity-len(fn.NonEscaping), len(fn.Refs), fn.End-ip)
 			return 2
 		case op.LAMBDA:
-			fn := m.funcs[ip]
+			fn := m.funcsMap[ip]
 			fmt.Printf("%v : LAMBDA (%v) LOCALS(%v) ESC(%v) REFS(%v) <%v>\n", padding_left(ip, width), strings.Join(fn.Args, " "), fn.Capacity, fn.Capacity-len(fn.NonEscaping), len(fn.Refs), fn.End-ip)
 			return 1
 

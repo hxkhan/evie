@@ -8,35 +8,35 @@ import (
 	"github.com/hk-32/evie/internal/op"
 )
 
-/* func (m *Machine) observe(before func(m *Machine), after func(m *Machine)) {
+func WrapInstructions(before func(rt *CoRoutine), after func(rt *CoRoutine)) {
 	for i, in := range instructions {
-		instructions[i] = func(m *Machine) (v any, err error) {
-			runs[m.code[m.ip]]++
+		instructions[i] = func(rt *CoRoutine) (v Value, err error) {
+			runs[m.code[rt.ip]]++
 			if before != nil {
-				before(m)
+				before(rt)
 			}
-			v, err = in(m)
+			v, err = in(rt)
 			if after != nil {
-				after(m)
+				after(rt)
 			}
 			return v, err
 		}
 	}
-} */
+}
 
-/* func (m *Machine) PrintStats() {
+func PrintInstructionRuns() {
 	for i, runs := range runs {
 		if runs != 0 {
 			fmt.Printf("%v : RAN(%v) \n", op.PublicName(byte(i)), runs)
 		}
 	}
-} */
+}
 
 func (rt *CoRoutine) String() string {
 	return fmt.Sprintf("Program{size: %v, references: %v, functions: %v}", len(m.code), len(m.symbolsMap), len(m.funcsMap))
 }
 
-func (rt *CoRoutine) PrintCode() {
+func DumpCode() {
 	// number of digits for the biggest index
 	width := digits(len(m.code))
 

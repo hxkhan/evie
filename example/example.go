@@ -8,13 +8,10 @@ import (
 	"time"
 
 	"github.com/hk-32/evie"
-	"github.com/hk-32/evie/internal/ast"
-	"github.com/hk-32/evie/internal/core"
-	"github.com/hk-32/evie/internal/parser"
 )
 
 func main() {
-	//p := flag.Bool("p", false, "To print the program before running it")
+	p := flag.Bool("p", false, "To print the program before running it")
 	o := flag.Bool("o", true, "To optimise the program with specialised instructions")
 	d := flag.Bool("d", false, "To print debug stats")
 	t := flag.Bool("t", false, "Print time to run")
@@ -31,27 +28,19 @@ func main() {
 		panic(err)
 	}
 
-	pack, err := parser.Parse(input)
+	evie.Setup(evie.Options{Optimise: *o, ObserveIt: *d, Exports: evie.DefaultExports()})
+	_, err = evie.FeedCode(input)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	ast.Setup(*o, evie.DefaultExports())
-
-	/* if *p {
-		program.PrintCode()
+	if *p {
+		evie.DumpCode()
 		fmt.Println("------------------------------")
-	} */
-
-	before := time.Now()
-	_, err = ast.Feed(pack)
-	if err != nil {
-		fmt.Println(err)
-		return
 	}
 
-	main := ast.GetGlobal("main")
+	main := evie.GetGlobal("main")
 	if main == nil {
 		fmt.Println("Error: program requires a main entry point")
 		return
@@ -63,14 +52,14 @@ func main() {
 		return
 	}
 
+	before := time.Now()
 	res, err := fn.Call()
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	core.WaitForNoActivity()
-
+	evie.WaitForNoActivity()
 	difference := time.Since(before)
 
 	if !res.IsNull() {
@@ -83,5 +72,9 @@ func main() {
 
 	if *t {
 		fmt.Printf("Execution time: %v\n", difference)
+	}
+
+	if *d {
+		evie.PrintInstructionStats()
 	}
 }

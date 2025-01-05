@@ -34,6 +34,13 @@ func DefaultExports() map[string]core.Value {
 
 func Setup(opts Options) {
 	ast.Setup(opts.Optimise, opts.Exports)
+	if opts.ObserveIt {
+		core.WrapInstructions(func(rt *core.CoRoutine) {
+
+		}, func(rt *core.CoRoutine) {
+
+		})
+	}
 }
 
 func Reset() {
@@ -53,6 +60,14 @@ func GetGlobal(name string) *core.Value {
 	return ast.GetGlobal(name)
 }
 
-func WaitForNoActivity(name string) {
+func WaitForNoActivity() {
 	core.WaitForNoActivity()
+}
+
+func DumpCode() {
+	core.DumpCode()
+}
+
+func PrintInstructionStats() {
+	core.PrintInstructionRuns()
 }

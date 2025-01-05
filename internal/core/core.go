@@ -15,7 +15,7 @@ var runs [op.NUM_OPS]int
 
 var mathErrFormat = "operator '%v' expects numbers, got '%v' and '%v'"
 
-func init() {
+func populateInstructions() {
 	instructions = [...]func(rt *CoRoutine) (Value, error){
 		func(rt *CoRoutine) (Value, error) { // NULL
 			return Value{}, nil

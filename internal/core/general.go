@@ -13,6 +13,11 @@ func Setup(builtins []Value, symbols map[int]string, funcInfo map[int]*FuncInfo)
 		symbolsMap: symbols,
 		funcsMap:   funcInfo,
 	}
+	populateInstructions()
+}
+
+func Reset() {
+	populateInstructions()
 }
 
 func Run(code []byte, globals []*Value) (Value, error) {

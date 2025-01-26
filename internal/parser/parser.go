@@ -61,12 +61,12 @@ func Parse(input []byte) (node ast.Node, err error) {
 	}
 }
 
-func (ps *parser) consumeSimple(lit string, skipNewLines bool) bool {
+func (ps *parser) consumeSimple(lit string, eatPrependedNewLines bool) bool {
 AGAIN:
 	if ps.PeekToken().IsSimple(lit) {
 		ps.lastConsumed = ps.NextToken()
 		return true
-	} else if skipNewLines && ps.PeekToken().IsNewLine() {
+	} else if eatPrependedNewLines && ps.PeekToken().IsNewLine() {
 		ps.NextToken()
 		goto AGAIN
 	}
@@ -293,7 +293,7 @@ func (ps *parser) parseFn(main token.Token) ast.Node {
 
 	args := ps.parseNamesList(main)
 
-	if ps.consumeSimple("{", false) {
+	if ps.consumeSimple("{", true) {
 		var block ast.Block
 
 		for !ps.consumeSimple("}", true) {

@@ -17,7 +17,7 @@ fn fib(n) {
 }
 ```
 
-Concurrency example
+Also a concurrency example below
 ```go
 package main
 
@@ -40,8 +40,8 @@ fn main() {
     go print("ten", 1000)
 }
 ```
-To test this exact program cd to `./use` and run `go run . -t go.es`
-- flag `-t` prints the time it took to execute
+To test this exact program, `cd` to `example` and run `go run . -t go.es`
+- flag `-t` prints the execution time
 - flag `-p` prints the *byte code* of the program, before running it
 - flag `-o=true/false` enables or disables specialised instruction optimisations. It's `true` by default
 

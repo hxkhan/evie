@@ -4,37 +4,35 @@ import (
 	"sync"
 )
 
-var m machine
+type InfoSource interface {
+	GetSymbolName(ip int) (symbol string, exists bool)
+	GetFuncInfo(ip int) (info *FuncInfo, exists bool)
+}
 
-func Setup(builtins []Value, symbols map[int]string, funcInfo map[int]*FuncInfo) {
-	m = machine{
+func NewMachine(builtins []Value, infoSource InfoSource) *Machine {
+	return &Machine{
 		boxes:      make(pool[Value], 0, 48), // 48 = pool size of boxes
 		builtins:   builtins,
-		symbolsMap: symbols,
-		funcsMap:   funcInfo,
+		infoSource: infoSource,
 	}
-	populateInstructions()
 }
 
-func Reset() {
-	populateInstructions()
-}
+func (m *Machine) Run(code []byte, numGlobals int) (Value, error) {
+	// starting point for the code execution
+	start := max(len(m.code), 0)
+	m.code = code
 
-func Run(code []byte, globals []*Value) (Value, error) {
-	b4 := len(m.code)
-	start := 0
+	m.AcquireGIL()
+	defer m.ReleaseGIL()
 
-	if b4 == 0 {
-		m.code = code
-	} else {
-		// only run the new part
-		start = b4
+	// ensure that the globals are large enough
+	if len(m.globals) < numGlobals {
+		for range numGlobals - len(m.globals) {
+			m.globals = append(m.globals, m.boxes.new())
+		}
 	}
 
-	AcquireGIL()
-	defer ReleaseGIL()
-
-	rt := &CoRoutine{stack: globals, basis: []int{0}}
+	rt := &CoRoutine{stack: m.globals, code: m.code, vm: m, basis: []int{0}}
 
 	for rt.ip = start; rt.ip < len(m.code); rt.ip++ {
 		// fetch and execute the instruction
@@ -44,6 +42,10 @@ func Run(code []byte, globals []*Value) (Value, error) {
 	}
 
 	return Value{}, nil
+}
+
+func (m *Machine) GetGlobal(address int) *Value {
+	return m.globals[address]
 }
 
 type Reference struct {
@@ -61,15 +63,15 @@ type FuncInfo struct {
 	End         int         // associated op.END index
 }
 
-type machine struct {
+type Machine struct {
 	code  []byte      // executable bytes
-	boxes pool[Value] // pool of
+	boxes pool[Value] // pool of boxes for values
 
+	globals  []*Value
 	builtins []Value // built-in scope; can get from but can't set in
 
-	symbolsMap map[int]string    // maps references ip's to their names
-	funcsMap   map[int]*FuncInfo // generated function information
-	trace      []string          // call stack trace
+	infoSource InfoSource // provides symbol names and user function information
+	trace      []string   // call stack trace
 
 	gil sync.Mutex     // global interpreter lock
 	wg  sync.WaitGroup // wait for all threads
@@ -77,25 +79,27 @@ type machine struct {
 
 type CoRoutine struct {
 	ip       int      // instruction pointer
-	captured []*Value // currently captured variables
-	stack    []*Value // local variables for all the functions in the call stack
+	vm       *Machine // the machine that this co-routine is serving
+	code     []byte   // the code of the whole program for quicker access
+	captured []*Value // captured variables of the current function being executed
+	stack    []*Value // data-stack for local variables accessible in the current call stack
 	basis    []int    // one base per function; basis[-1] is where the current function's locals start at
 }
 
-func WaitForNoActivity() {
+func (m *Machine) WaitForNoActivity() {
 	m.wg.Wait()
 }
 
-func ReleaseGIL() {
+func (m *Machine) ReleaseGIL() {
 	m.gil.Unlock()
 }
 
-func AcquireGIL() {
+func (m *Machine) AcquireGIL() {
 	m.gil.Lock()
 }
 
 func (rt *CoRoutine) newRoutine(ip int, locals []*Value, captured []*Value) *CoRoutine {
-	return &CoRoutine{ip, captured, locals, []int{0}}
+	return &CoRoutine{ip, rt.vm, rt.code, captured, locals, []int{0}}
 }
 
 /* func (rt *Routine) terminate() {
@@ -145,8 +149,13 @@ func (rt *CoRoutine) popLocals(n int) {
 
 // enclosing scope & func combo
 type UserFn struct {
+	vm       *Machine
 	captured []*Value
-	*FuncInfo
+	info     *FuncInfo
+}
+
+func (fn UserFn) NumArgs() int {
+	return len(fn.info.Args)
 }
 
 func (fn UserFn) String() string {
@@ -158,6 +167,7 @@ func NewTask(fn func() (Value, error)) Value {
 	go func() {
 		res, err := fn()
 		task <- TaskResult{res, err}
+		close(task)
 	}()
 	return BoxTask(task)
 }
@@ -168,13 +178,3 @@ type TaskResult struct {
 }
 
 type Tuple []any
-
-func pop[T any](slice *[]T) T {
-	v := (*slice)[len(*slice)-1]
-	*slice = (*slice)[:len(*slice)-1]
-	return v
-}
-
-func peek[T any](slice []T) T {
-	return slice[len(slice)-1]
-}

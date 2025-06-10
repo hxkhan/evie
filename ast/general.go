@@ -1,7 +1,7 @@
 package ast
 
 import (
-	"github.com/hk-32/evie/internal/op"
+	"github.com/hk-32/evie/op"
 )
 
 /* IDEA: Add ensureReachabilty() to Node so this gives an error at compile time

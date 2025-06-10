@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hk-32/evie/internal/ast"
-	"github.com/hk-32/evie/internal/lexer"
-	"github.com/hk-32/evie/internal/op"
-	"github.com/hk-32/evie/internal/token"
+	"github.com/hk-32/evie/ast"
+	"github.com/hk-32/evie/lexer"
+	"github.com/hk-32/evie/op"
+	"github.com/hk-32/evie/token"
 )
 
 var errEOS = errors.New("EOS")

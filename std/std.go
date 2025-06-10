@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/hk-32/evie/internal/core"
+	"github.com/hk-32/evie/core"
 )
 
 var Exports map[string]core.Value

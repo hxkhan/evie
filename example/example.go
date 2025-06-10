@@ -1,80 +1,45 @@
 package main
 
 import (
-	"flag"
 	"fmt"
-	"os"
-	"strings"
-	"time"
 
 	"github.com/hk-32/evie"
+	"github.com/hk-32/evie/core"
 )
 
 func main() {
-	p := flag.Bool("p", false, "To print the program before running it")
-	o := flag.Bool("o", true, "To optimise the program with specialised instructions")
-	d := flag.Bool("d", false, "To print debug stats")
-	t := flag.Bool("t", false, "Print time to run")
-	flag.Parse()
+	ip := evie.New(evie.Defaults)
 
-	fileName := os.Args[len(os.Args)-1]
-	if !strings.HasSuffix(fileName, ".es") {
-		fmt.Println("Provide a file with a .es extension as the last argument!")
-		return
-	}
+	_, err := ip.Feed([]byte(
+		`package main
+		
+		fn fib(n) {
+    		if (n < 2) return n
+    		return fib(n-1) + fib(n-2)
+		}`))
 
-	input, err := os.ReadFile(fileName)
+	// Check for errors
 	if err != nil {
 		panic(err)
 	}
 
-	evie.Setup(evie.Options{Optimise: *o, ObserveIt: *d, Exports: evie.DefaultExports()})
-	_, err = evie.FeedCode(input)
-	if err != nil {
-		fmt.Println(err)
-		return
+	// Get a reference to the global symbol 'fib'
+	fib := ip.GetGlobal("fib")
+	if fib == nil {
+		panic("fib not found")
 	}
 
-	if *p {
-		evie.DumpCode()
-		fmt.Println("------------------------------")
-	}
-
-	main := evie.GetGlobal("main")
-	if main == nil {
-		fmt.Println("Error: program requires a main entry point")
-		return
-	}
-
-	fn, ok := main.AsUserFn()
+	// Type assert the value to a function
+	fn, ok := fib.AsUserFn()
 	if !ok {
-		fmt.Println("Error: program requires main to be a function")
-		return
+		panic("fib is not a function")
 	}
 
-	before := time.Now()
-	res, err := fn.Call()
+	// Call it
+	result, err := fn.Call(core.BoxInt64(35))
 	if err != nil {
-		fmt.Println(err)
-		return
+		panic(err)
 	}
 
-	evie.WaitForNoActivity()
-	difference := time.Since(before)
-
-	if !res.IsNull() {
-		fmt.Println(res)
-	}
-
-	if *d || *t {
-		fmt.Println("------------------------------")
-	}
-
-	if *t {
-		fmt.Printf("Execution time: %v\n", difference)
-	}
-
-	if *d {
-		evie.PrintInstructionStats()
-	}
+	fmt.Println("Result:", result)
 }

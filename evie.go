@@ -3,9 +3,9 @@
 package evie
 
 import (
-	"github.com/hk-32/evie/internal/ast"
-	"github.com/hk-32/evie/internal/core"
-	"github.com/hk-32/evie/internal/parser"
+	"github.com/hk-32/evie/ast"
+	"github.com/hk-32/evie/core"
+	"github.com/hk-32/evie/parser"
 	"github.com/hk-32/evie/std"
 	"github.com/hk-32/evie/std/builtin"
 	"github.com/hk-32/evie/std/fs"
@@ -14,8 +14,6 @@ import (
 
 type Options struct {
 	Optimise      bool // use specialised instructions
-	PrintCode     bool // print the resulting byte-code
-	TimeIt        bool // measure the execution time
 	ObserveIt     bool // collect metrics (affects performance)
 	TopLevelLogic bool // whether to only allow declarations at top level
 
@@ -23,6 +21,11 @@ type Options struct {
 }
 
 var Defaults = Options{Optimise: true, Exports: DefaultExports()}
+
+type Interpreter struct {
+	cs *ast.CompilerState
+	vm *core.Machine
+}
 
 func DefaultExports() map[string]core.Value {
 	std.Exports = map[string]core.Value{}
@@ -32,40 +35,46 @@ func DefaultExports() map[string]core.Value {
 	return std.Exports
 }
 
-func Setup(opts Options) {
-	ast.Setup(opts.Optimise, opts.Exports)
-	if opts.ObserveIt {
+func New(opts Options) *Interpreter {
+	cs := ast.NewCompiler(opts.Exports)
+	vm := cs.GetVM()
+
+	/* if opts.ObserveIt {
 		core.WrapInstructions(func(rt *core.CoRoutine) {
 
 		}, func(rt *core.CoRoutine) {
 
 		})
-	}
+	} */
+
+	return &Interpreter{cs, vm}
 }
 
-func Reset() {
-
-}
-
-func FeedCode(input []byte) (core.Value, error) {
+func (ip *Interpreter) Feed(input []byte) (core.Value, error) {
 	output, err := parser.Parse(input)
 	if err != nil {
 		return core.Value{}, err
 	}
 
-	return ast.Feed(output)
+	return ip.cs.Compile(output)
 }
 
-func GetGlobal(name string) *core.Value {
-	return ast.GetGlobal(name)
+// GetGlobal retrieves a global variable by its name and returns a pointer to it.
+// If the global variable does not exist, it returns nil.
+func (ip *Interpreter) GetGlobal(name string) *core.Value {
+	addr, exists := ip.cs.GetGlobalAddress(name)
+	if !exists {
+		return nil
+	}
+	return ip.vm.GetGlobal(addr)
 }
 
-func WaitForNoActivity() {
-	core.WaitForNoActivity()
+func (ip *Interpreter) WaitForNoActivity() {
+	ip.cs.GetVM().WaitForNoActivity()
 }
 
-func DumpCode() {
-	core.DumpCode()
+func (ip *Interpreter) DumpCode() {
+	ip.cs.GetVM().DumpCode()
 }
 
 func PrintInstructionStats() {

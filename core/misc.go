@@ -5,10 +5,10 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/hk-32/evie/internal/op"
+	"github.com/hk-32/evie/op"
 )
 
-func WrapInstructions(before func(rt *CoRoutine), after func(rt *CoRoutine)) {
+func (m *Machine) WrapInstructions(before func(rt *CoRoutine), after func(rt *CoRoutine)) {
 	for i, in := range instructions {
 		instructions[i] = func(rt *CoRoutine) (v Value, err error) {
 			runs[m.code[rt.ip]]++
@@ -32,11 +32,7 @@ func PrintInstructionRuns() {
 	}
 }
 
-func (rt *CoRoutine) String() string {
-	return fmt.Sprintf("Program{size: %v, references: %v, functions: %v}", len(m.code), len(m.symbolsMap), len(m.funcsMap))
-}
-
-func DumpCode() {
+func (m *Machine) DumpCode() {
 	// number of digits for the biggest index
 	width := digits(len(m.code))
 
@@ -70,15 +66,16 @@ func DumpCode() {
 			return 1 + 2 + len(str)
 
 		case op.LOAD_LOCAL, op.STORE_LOCAL, op.LOAD_CAPTURED, op.STORE_CAPTURED, op.LOAD_BUILTIN:
-			fmt.Printf("%v : %v %v\n", padding_left(ip, width), op.PublicName(b), m.symbolsMap[ip])
+			name, _ := m.infoSource.GetSymbolName(ip)
+			fmt.Printf("%v : %v %v\n", padding_left(ip, width), op.PublicName(b), name)
 			return 1 + 1
 
 		case op.FN_DECL:
-			fn := m.funcsMap[ip]
+			fn, _ := m.infoSource.GetFuncInfo(ip)
 			fmt.Printf("%v : FN_DECL %v(%v) LOCALS(%v) ESC(%v) REFS(%v) <%v>\n", padding_left(ip, width), fn.Name, strings.Join(fn.Args, " "), fn.Capacity, fn.Capacity-len(fn.NonEscaping), len(fn.Refs), fn.End-ip)
 			return 2
 		case op.LAMBDA:
-			fn := m.funcsMap[ip]
+			fn, _ := m.infoSource.GetFuncInfo(ip)
 			fmt.Printf("%v : LAMBDA (%v) LOCALS(%v) ESC(%v) REFS(%v) <%v>\n", padding_left(ip, width), strings.Join(fn.Args, " "), fn.Capacity, fn.Capacity-len(fn.NonEscaping), len(fn.Refs), fn.End-ip)
 			return 1
 

@@ -5,46 +5,57 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/hk-32/evie/internal/core"
-	"github.com/hk-32/evie/internal/op"
+	"github.com/hk-32/evie/core"
+	"github.com/hk-32/evie/op"
 )
 
-var cs *CompilerState
+func (cs *CompilerState) Compile(node Node) (core.Value, error) {
+	node.compile(cs)
+	return cs.vm.Run(cs.output, len(cs.globals))
+}
 
-func Setup(optimise bool, exports map[string]core.Value) {
-	cs = &CompilerState{
-		globals:              make(map[string]*core.Value),
+func NewCompiler(exports map[string]core.Value) *CompilerState {
+	cs := &CompilerState{
+		globals:              make(map[string]int),
 		fns:                  make(map[int]*core.FuncInfo),
 		symbols:              make(map[int]string),
 		rc:                   &reachability{[]map[string]int{make(map[string]int, len(exports))}, 0, 0, nil},
 		uninitializedGlobals: make(map[string]struct{}),
-		optimise:             optimise,
+		optimise:             true,
 	}
 
 	cs.builtins = make([]core.Value, len(exports))
 	for name, value := range exports {
 		cs.builtins[cs.declare(name)] = value
 	}
+	// extend from builtin to global scope
 	cs.scopeExtend()
 
-	core.Setup(cs.builtins, cs.symbols, cs.fns)
+	cs.vm = core.NewMachine(cs.builtins, cs)
+	return cs
 }
 
-func Feed(node Node) (core.Value, error) {
-	node.compile(cs)
-	return core.Run(cs.output, cs.globalScope)
+func (cs *CompilerState) GetSymbolName(ip int) (symbol string, exists bool) {
+	symbol, exists = cs.symbols[ip]
+	return
 }
 
-func GetGlobal(name string) *core.Value {
-	return cs.globals[name]
+func (cs *CompilerState) GetFuncInfo(ip int) (info *core.FuncInfo, exists bool) {
+	info, exists = cs.fns[ip]
+	return
+}
+
+func (cs *CompilerState) GetGlobalAddress(name string) (addr int, exists bool) {
+	addr, exists = cs.globals[name]
+	return
+}
+
+func (cs *CompilerState) GetVM() *core.Machine {
+	return cs.vm
 }
 
 func (cs *CompilerState) BuiltIns() []core.Value {
 	return cs.builtins
-}
-
-func (cs *CompilerState) Globals() []*core.Value {
-	return cs.globalScope
 }
 
 func (cs *CompilerState) ReferenceTable() map[int]string {
@@ -77,18 +88,12 @@ func (p Package) compile(cs *CompilerState) int {
 	// 1. declare all symbols
 	for _, node := range p.Code {
 		if fnDec, isFnDecl := node.(Fn); isFnDecl {
-			cs.declare(fnDec.Name)
-			v := new(core.Value)
-			cs.globals[fnDec.Name] = v
-			cs.globalScope = append(cs.globalScope, v)
+			cs.globals[fnDec.Name] = cs.declare(fnDec.Name)
 		}
 
 		if iGet, isIdentDec := node.(IdentDec); isIdentDec {
 			cs.uninitializedGlobals[iGet.Name] = struct{}{}
-			cs.declare(iGet.Name)
-			v := new(core.Value)
-			cs.globals[iGet.Name] = v
-			cs.globalScope = append(cs.globalScope, v)
+			cs.globals[iGet.Name] = cs.declare(iGet.Name)
 		}
 	}
 
@@ -148,9 +153,9 @@ func (rc *reachability) String() string {
 }
 
 type CompilerState struct {
-	output      []byte
-	globals     map[string]*core.Value
-	globalScope []*core.Value
+	vm      *core.Machine
+	output  []byte
+	globals map[string]int
 
 	builtins      []core.Value
 	fns           map[int]*core.FuncInfo

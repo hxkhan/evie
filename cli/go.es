@@ -23,11 +23,11 @@ fn main() {
     go print("one", 100)
 
     echo "before"
-    await time.sleep(2000)
+    await time.timer(2000)
     echo "after"
 }
 
 fn print(message, duration) {
-    await time.sleep(duration)
+    await time.timer(duration)
     echo message
 } */

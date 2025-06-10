@@ -1,6 +1,6 @@
 package ast
 
-import "github.com/hk-32/evie/internal/op"
+import "github.com/hk-32/evie/op"
 
 type Conditional struct {
 	Condition Node // [required]

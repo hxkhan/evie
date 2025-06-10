@@ -54,7 +54,7 @@ To test this exact program, `cd` to `example` and run `go run . -t go.es`
 - No cgo, written in pure Go
 
 ## Benchmarks
-| | fib(35)  |
+| Language | fib(35)  |
 | :--- |    ---: |
-| [**Evie**](https://github.com/hxkhan/evie) | `692ms` |
-| [Tengo](https://github.com/d5/tengo) | `1533ms` |
+| [**Evie**](https://github.com/hxkhan/evie) | `723ms` |
+| [Tengo](https://github.com/d5/tengo) | `1562ms` |

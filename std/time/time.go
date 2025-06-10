@@ -3,7 +3,7 @@ package time
 import (
 	"time"
 
-	"github.com/hk-32/evie/internal/core"
+	"github.com/hk-32/evie/core"
 	"github.com/hk-32/evie/std"
 )
 

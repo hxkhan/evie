@@ -1,7 +1,7 @@
 package ast
 
 import (
-	"github.com/hk-32/evie/internal/op"
+	"github.com/hk-32/evie/op"
 )
 
 type ApplyBinOp struct {

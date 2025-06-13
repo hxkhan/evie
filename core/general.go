@@ -1,17 +1,16 @@
 package core
 
-import (
-	"sync"
-)
+import "sync"
 
 type InfoSource interface {
-	GetSymbolName(ip int) (symbol string, exists bool)
-	GetFuncInfo(ip int) (info *FuncInfo, exists bool)
+	GetSymbolName(ip int) (symbol string, exists bool) // Only used when errors occur
+	GetFuncInfo(ip int) (info *FuncInfo, exists bool)  // Used to get vital function information upon creation
 }
 
 func NewMachine(builtins []Value, infoSource InfoSource) *Machine {
 	return &Machine{
-		boxes:      make(pool[Value], 0, 48), // 48 = pool size of boxes
+		boxes:      make(pool[Value], 0, 48),    // starting with a capacity of storing 48 boxed values
+		coroutines: make(pool[CoRoutine], 0, 3), // starting with a capacity of storing 3 co-routines
 		builtins:   builtins,
 		infoSource: infoSource,
 	}
@@ -32,8 +31,14 @@ func (m *Machine) Run(code []byte, numGlobals int) (Value, error) {
 		}
 	}
 
-	rt := &CoRoutine{stack: m.globals, code: m.code, vm: m, basis: []int{0}}
+	// fetch a coroutine and prepare it
+	rt := m.coroutines.new()
+	rt.vm = m
+	rt.code = m.code
+	rt.stack = m.globals
+	rt.basis = []int{0}
 
+	// start code execution
 	for rt.ip = start; rt.ip < len(m.code); rt.ip++ {
 		// fetch and execute the instruction
 		if _, err := instructions[m.code[rt.ip]](rt); err != nil {
@@ -64,8 +69,10 @@ type FuncInfo struct {
 }
 
 type Machine struct {
-	code  []byte      // executable bytes
-	boxes pool[Value] // pool of boxes for values
+	code []byte // executable bytes
+
+	boxes      pool[Value]     // pool of boxes for values
+	coroutines pool[CoRoutine] // pool of co-routines
 
 	globals  []*Value
 	builtins []Value // built-in scope; can get from but can't set in

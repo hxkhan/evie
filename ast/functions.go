@@ -58,10 +58,6 @@ func (fn Fn) compile(cs *CompilerState) int {
 
 func (fn Fn) compileInGlobal(cs *CompilerState) int {
 	index := cs.get(fn.Name)
-	/* if fn.Name == "main" {
-		cs.entryPoint = index
-	} */
-
 	pos := cs.emit(op.FN_DECL, byte(index))
 	cs.openFunction(pos)
 
@@ -72,7 +68,6 @@ func (fn Fn) compileInGlobal(cs *CompilerState) int {
 
 	// get/create the info obj if it does not exist
 	info := cs.getFnInfoFor(pos)
-
 	fn.Action.compile(cs)
 
 	info.Name = fn.Name

@@ -884,21 +884,6 @@ func init() {
 	}
 }
 
-func (rt *CoRoutine) Initialize() error {
-	rt.vm.AcquireGIL()
-	defer rt.vm.ReleaseGIL()
-
-	rt.pushBase(0)
-	for rt.ip = 0; rt.ip < len(rt.code); rt.ip++ {
-		// fetch and execute the instruction
-		if _, err := instructions[rt.code[rt.ip]](rt); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // evaluates the next value and returns it
 func (rt *CoRoutine) next() (Value, error) {
 	rt.ip++
@@ -931,13 +916,21 @@ func (fn *UserFn) Call(args ...Value) (Value, error) {
 		return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.info.Args), len(args))
 	}
 
-	fn.vm.AcquireGIL()
-	defer fn.vm.ReleaseGIL()
+	vm := fn.vm
+	vm.AcquireGIL()
+	defer vm.ReleaseGIL()
 
-	// Routines could later be pooled for better performance
-	rt := &CoRoutine{stack: make([]*Value, fn.info.Capacity), code: fn.vm.code, vm: fn.vm, basis: []int{0}, captured: fn.captured}
+	// fetch a coroutine and prepare it
+	rt := vm.coroutines.new()
+	rt.vm = vm
+	rt.code = vm.code
+	rt.basis = []int{0}
+	rt.captured = fn.captured
+
+	// allocate space on stack for arguments & local variables
+	rt.stack = make([]*Value, fn.info.Capacity)
 	for i := range fn.info.Capacity {
-		rt.stack[i] = fn.vm.boxes.new()
+		rt.stack[i] = vm.boxes.new()
 	}
 
 	// set arguments
@@ -951,13 +944,13 @@ func (fn *UserFn) Call(args ...Value) (Value, error) {
 			if err == errReturnSignal {
 				return v, nil
 			}
-			return v, errWithTrace{err, fn.vm.trace}
+			return v, errWithTrace{err, vm.trace}
 		}
 	}
 
 	// release non-escaping locals
 	for _, index := range fn.info.NonEscaping {
-		fn.vm.boxes.put(rt.stack[index])
+		vm.boxes.put(rt.stack[index])
 	}
 
 	return Value{}, nil

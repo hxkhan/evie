@@ -19,10 +19,11 @@ func NewCompiler(exports map[string]core.Value) *CompilerState {
 		globals:              make(map[string]int),
 		fns:                  make(map[int]*core.FuncInfo),
 		symbols:              make(map[int]string),
-		rc:                   &reachability{[]map[string]int{make(map[string]int, len(exports))}, 0, 0, nil},
+		rcRoot:               &reachability{[]map[string]int{make(map[string]int, len(exports))}, 0, 0, nil},
 		uninitializedGlobals: make(map[string]struct{}),
 		optimise:             true,
 	}
+	cs.rc = cs.rcRoot
 
 	cs.builtins = make([]core.Value, len(exports))
 	for name, value := range exports {
@@ -72,17 +73,22 @@ type Package struct {
 	Code    []Node
 }
 
-// bit of special rules with hoisting
-/* Process:
-All declarations are physically shifted to the top
+/*
+Hoisting rules etc.
+All symbols are first symbolically pre-declared without initialization.
+This is so when we later initialize them; they can reference each other.
+Then function initializations are physically moved to the top of the code.
+And finally the rest of the code follows right after.
 
 So this is not possible because the order is maintained:
-	var x = y + 2
-	var y = 10
+
+	x := y + 2
+	y := 10
 
 But this is; becuase the declaration ends up being shifted to the top:
-	println(x)
-	var x = 10
+
+	x := 10
+	echo x
 */
 func (p Package) compile(cs *CompilerState) int {
 	// 1. declare all symbols
@@ -97,7 +103,7 @@ func (p Package) compile(cs *CompilerState) int {
 		}
 	}
 
-	// 2. physically move function declarations to the top
+	// 2. physically move function initialization to the top
 	for _, node := range p.Code {
 		if fnDec, isFnDecl := node.(Fn); isFnDecl {
 			fnDec.compileInGlobal(cs)
@@ -165,103 +171,104 @@ type CompilerState struct {
 		escapedLocals map[int]struct{}
 	} // open functions and their escape'e locals
 	rc                   *reachability
+	rcRoot               *reachability
 	uninitializedGlobals map[string]struct{}
 	optimise             bool
 }
 
-func (s *CompilerState) emit(bytes ...byte) (pos int) {
-	pos = len(s.output)
-	s.output = append(s.output, bytes...)
+func (cs *CompilerState) emit(bytes ...byte) (pos int) {
+	pos = len(cs.output)
+	cs.output = append(cs.output, bytes...)
 	return pos
 }
 
-func (s *CompilerState) set(ip int, b byte) {
-	s.output[ip] = b
+func (cs *CompilerState) set(ip int, b byte) {
+	cs.output[ip] = b
 }
 
-func (s *CompilerState) emitString(str string) (pos int) {
-	pos = len(s.output)
+func (cs *CompilerState) emitString(str string) (pos int) {
+	pos = len(cs.output)
 	size := uint16(len(str))
-	s.output = append(s.output, op.STR)
-	s.output = append(s.output, byte(size))
-	s.output = append(s.output, byte(size>>8))
-	s.output = append(s.output, str...)
+	cs.output = append(cs.output, op.STR)
+	cs.output = append(cs.output, byte(size))
+	cs.output = append(cs.output, byte(size>>8))
+	cs.output = append(cs.output, str...)
 	return pos
 }
 
-func (s *CompilerState) emitInt64(n int64) (pos int) {
-	pos = len(s.output)
-	s.output = append(s.output, op.INT)
-	s.output = append(s.output, (*[8]byte)(unsafe.Pointer(&n))[:]...)
+func (cs *CompilerState) emitInt64(n int64) (pos int) {
+	pos = len(cs.output)
+	cs.output = append(cs.output, op.INT)
+	cs.output = append(cs.output, (*[8]byte)(unsafe.Pointer(&n))[:]...)
 	return pos
 }
 
-func (s *CompilerState) emitFloat64(n float64) (pos int) {
-	pos = len(s.output)
-	s.output = append(s.output, op.FLOAT)
-	s.output = append(s.output, (*[8]byte)(unsafe.Pointer(&n))[:]...)
+func (cs *CompilerState) emitFloat64(n float64) (pos int) {
+	pos = len(cs.output)
+	cs.output = append(cs.output, op.FLOAT)
+	cs.output = append(cs.output, (*[8]byte)(unsafe.Pointer(&n))[:]...)
 	return pos
 }
 
-func (s *CompilerState) len() int {
-	return len(s.output)
+func (cs *CompilerState) len() int {
+	return len(cs.output)
 }
 
-func (s *CompilerState) scopeExtend() {
-	s.rc = &reachability{lookup: []map[string]int{{}}, previous: s.rc}
+func (cs *CompilerState) scopeExtend() {
+	cs.rc = &reachability{lookup: []map[string]int{{}}, previous: cs.rc}
 	//fmt.Println("AFTER scopeExtend():", s.rc)
 }
 
-func (s *CompilerState) scopeDeExtend() {
-	s.rc = s.rc.previous
+func (cs *CompilerState) scopeDeExtend() {
+	cs.rc = cs.rc.previous
 	//fmt.Println("AFTER scopeDeExtend():", s.rc)
 }
 
-func (s *CompilerState) scopeCapacity() int {
-	return max(s.rc.index, s.rc.cap)
+func (cs *CompilerState) scopeCapacity() int {
+	return max(cs.rc.index, cs.rc.cap)
 }
 
-func (s *CompilerState) scopeOpenBlock() {
-	s.rc.lookup = append(s.rc.lookup, map[string]int{})
+func (cs *CompilerState) scopeOpenBlock() {
+	cs.rc.lookup = append(cs.rc.lookup, map[string]int{})
 }
 
-func (s *CompilerState) scopeCloseBlock() {
-	s.rc.lookup = s.rc.lookup[:len(s.rc.lookup)-1]
+func (cs *CompilerState) scopeCloseBlock() {
+	cs.rc.lookup = cs.rc.lookup[:len(cs.rc.lookup)-1]
 }
 
-func (s *CompilerState) scopeReuseBlock() {
-	top := s.rc.lookup[len(s.rc.lookup)-1]
+func (cs *CompilerState) scopeReuseBlock() {
+	top := cs.rc.lookup[len(cs.rc.lookup)-1]
 	// save current cap, might be bigger than the reused cap later; in that case, we want the biggest
-	if s.rc.cap < s.rc.index {
-		s.rc.cap = s.rc.index
+	if cs.rc.cap < cs.rc.index {
+		cs.rc.cap = cs.rc.index
 	}
-	s.rc.index -= len(top)
+	cs.rc.index -= len(top)
 	for k := range top {
 		delete(top, k)
 	}
 }
 
-func (s *CompilerState) declare(name string) (index int) {
-	scope := s.rc.lookup[len(s.rc.lookup)-1]
+func (cs *CompilerState) declare(name string) (index int) {
+	scope := cs.rc.lookup[len(cs.rc.lookup)-1]
 	if _, exists := scope[name]; exists {
 		panic(fmt.Sprintf("declare(\"%v\") -> double declaration of symbol!", name))
 	}
-	scope[name] = s.rc.index
-	s.rc.index++
-	return s.rc.index - 1
+	scope[name] = cs.rc.index
+	cs.rc.index++
+	return cs.rc.index - 1
 }
 
 // like reach but it has to be already declared alr locally
-func (s *CompilerState) get(name string) (index int) {
-	scope := s.rc.lookup[len(s.rc.lookup)-1]
+func (cs *CompilerState) get(name string) (index int) {
+	scope := cs.rc.lookup[len(cs.rc.lookup)-1]
 	if i, exists := scope[name]; exists {
 		return i
 	}
 	panic("get() -> why is it not declared already?")
 }
 
-func (s *CompilerState) reach(name string) core.Reference {
-	this := s.rc
+func (cs *CompilerState) reach(name string) core.Reference {
+	this := cs.rc
 	for scroll := 0; this != nil; scroll++ {
 		for i := len(this.lookup) - 1; i >= 0; i-- {
 			if index, exists := this.lookup[i][name]; exists {
@@ -270,8 +277,8 @@ func (s *CompilerState) reach(name string) core.Reference {
 					return core.Reference{Index: index, Scroll: -1}
 				}
 				// if accessing global from global; make sure it is initialized
-				if this.previous != nil && this.previous.previous == nil && scroll == 0 {
-					if _, has := s.uninitializedGlobals[name]; has {
+				if this.previous == cs.rcRoot && scroll == 0 {
+					if _, has := cs.uninitializedGlobals[name]; has {
 						panic(fmt.Sprintf("scope.reach(\"%v\") -> unitialized symbol!", name))
 					}
 				}
@@ -283,8 +290,8 @@ func (s *CompilerState) reach(name string) core.Reference {
 	panic(fmt.Sprintf("scope.reach(\"%v\") -> unreachable symbol!", name))
 }
 
-func (s *CompilerState) isInBuiltIn(name string) bool {
-	this := s.rc
+func (cs *CompilerState) isInBuiltIn(name string) bool {
+	this := cs.rc
 	for scroll := 0; this != nil; scroll++ {
 		for i := len(this.lookup) - 1; i >= 0; i-- {
 			if _, exists := this.lookup[i][name]; exists {
@@ -320,20 +327,20 @@ func (s *CompilerState) isInBuiltIn(name string) bool {
 	return len(info.Refs) - 1
 } */
 
-func (s *CompilerState) addToCaptured(ref core.Reference) (index int) {
+func (cs *CompilerState) addToCaptured(ref core.Reference) (index int) {
 	// find most recent fn
-	fn := s.openFunctions[len(s.openFunctions)-1]
+	fn := cs.openFunctions[len(cs.openFunctions)-1]
 
-	accessingGlobal := len(s.openFunctions) == ref.Scroll
+	accessingGlobal := len(cs.openFunctions) == ref.Scroll
 	if !accessingGlobal {
 		// owner of variable needs to know that we capture its variable too
-		owner := s.openFunctions[len(s.openFunctions)-1-ref.Scroll]
+		owner := cs.openFunctions[len(cs.openFunctions)-1-ref.Scroll]
 		if _, exists := owner.escapedLocals[ref.Index]; !exists {
 			owner.escapedLocals[ref.Index] = struct{}{}
 		}
 	}
 
-	ourInfo := s.fns[fn.ip]
+	ourInfo := cs.fns[fn.ip]
 	for i, v := range ourInfo.Refs {
 		if v.Scroll == ref.Scroll && v.Index == ref.Index {
 			return i
@@ -344,40 +351,40 @@ func (s *CompilerState) addToCaptured(ref core.Reference) (index int) {
 	return len(ourInfo.Refs) - 1
 }
 
-func (s *CompilerState) addReferenceNameFor(pos int, name string) {
-	s.symbols[pos] = name
+func (cs *CompilerState) addReferenceNameFor(pos int, name string) {
+	cs.symbols[pos] = name
 }
 
-func (s *CompilerState) addU16OffsetFor(pos int, offset uint16) {
-	s.output[pos+1] = byte(offset)
-	s.output[pos+2] = byte(offset >> 8)
+func (cs *CompilerState) addU16OffsetFor(pos int, offset uint16) {
+	cs.output[pos+1] = byte(offset)
+	cs.output[pos+2] = byte(offset >> 8)
 }
 
-func (s *CompilerState) addU8OffsetFor(pos int, offset byte) {
-	s.output[pos+1] = offset
+func (cs *CompilerState) addU8OffsetFor(pos int, offset byte) {
+	cs.output[pos+1] = offset
 }
 
-func (s *CompilerState) getFnInfoFor(pos int) *core.FuncInfo {
-	if info, exists := s.fns[pos]; exists {
+func (cs *CompilerState) getFnInfoFor(pos int) *core.FuncInfo {
+	if info, exists := cs.fns[pos]; exists {
 		return info
 	}
 	info := new(core.FuncInfo)
-	s.fns[pos] = info
+	cs.fns[pos] = info
 	return info
 }
 
-func (s *CompilerState) openFunction(pos int) {
-	s.openFunctions = append(s.openFunctions, struct {
+func (cs *CompilerState) openFunction(pos int) {
+	cs.openFunctions = append(cs.openFunctions, struct {
 		ip            int
 		escapedLocals map[int]struct{}
 	}{pos, map[int]struct{}{}})
 }
 
-func (s *CompilerState) closeFunction() {
-	fn := s.openFunctions[len(s.openFunctions)-1]
-	s.openFunctions = s.openFunctions[:len(s.openFunctions)-1]
+func (cs *CompilerState) closeFunction() {
+	fn := cs.openFunctions[len(cs.openFunctions)-1]
+	cs.openFunctions = cs.openFunctions[:len(cs.openFunctions)-1]
 
-	funcInfo := s.fns[fn.ip]
+	funcInfo := cs.fns[fn.ip]
 
 	for index := range funcInfo.Capacity {
 		if _, exists := fn.escapedLocals[index]; !exists {

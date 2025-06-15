@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/hk-32/evie/internal/lexer"
+	"github.com/hk-32/evie/lexer"
 )
 
 func main() {
@@ -13,7 +13,7 @@ func main() {
 		return
 	}
 
-	input, err := os.ReadFile(os.Args[1]) // ./lexer/test/input.hx
+	input, err := os.ReadFile(os.Args[1])
 	if err != nil {
 		panic(err)
 	}
@@ -28,14 +28,17 @@ func main() {
 			break
 		}
 
-		fmt.Printf("%v : %-8v -> %-20v\n", padding_left(v.Line, width), v.Type, v.Literal)
-		//fmt.Printf("%v\n", v)
+		if v.IsNewLine() {
+			fmt.Println()
+		} else {
+			fmt.Printf("%v : %-7v -> %-20v\n", padding_left(v.Line, width), v.Type, v.Literal)
+		}
 	}
 }
 
 func duplicate(x byte, num int) string {
 	container := make([]byte, num)
-	for n := 0; n < num; n++ {
+	for n := range num {
 		container[n] = x
 	}
 	return string(container)

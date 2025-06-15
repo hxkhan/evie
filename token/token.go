@@ -18,7 +18,7 @@ const (
 // A simple 3 tuple of (type, literal, line)
 // where type is one of (Simple, Keyword, Name, String, Boolean, Number, Invalid)
 type Token struct {
-	Type
+	Type    Type
 	Literal string
 	Line    int
 }

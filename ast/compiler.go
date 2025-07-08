@@ -9,11 +9,6 @@ import (
 	"github.com/hk-32/evie/op"
 )
 
-func (cs *CompilerState) Compile(node Node) (core.Value, error) {
-	node.compile(cs)
-	return cs.vm.Run(cs.output, len(cs.globals))
-}
-
 func NewCompiler(exports map[string]core.Value) *CompilerState {
 	cs := &CompilerState{
 		globals:              make(map[string]int),
@@ -34,6 +29,11 @@ func NewCompiler(exports map[string]core.Value) *CompilerState {
 
 	cs.vm = core.NewMachine(cs.builtins, cs)
 	return cs
+}
+
+func (cs *CompilerState) Compile(node Node) (core.Value, error) {
+	node.compile(cs)
+	return cs.vm.Run(cs.output, len(cs.globals))
 }
 
 func (cs *CompilerState) GetSymbolName(ip int) (symbol string, exists bool) {
@@ -170,9 +170,10 @@ type CompilerState struct {
 		ip            int
 		escapedLocals map[int]struct{}
 	} // open functions and their escape'e locals
-	rc                   *reachability
-	rcRoot               *reachability
-	uninitializedGlobals map[string]struct{}
+
+	rc                   *reachability       // current scope
+	rcRoot               *reachability       // built-in scope
+	uninitializedGlobals map[string]struct{} // IDEA: make it initializedGlobals of type map[string]bool
 	optimise             bool
 }
 

@@ -11,8 +11,6 @@ import (
 // order should be consistent with ast/op.go
 var instructions [op.NUM_OPS]func(rt *CoRoutine) (Value, error)
 
-var runs [op.NUM_OPS]int
-
 var mathErrFormat = "operator '%v' expects numbers, got '%v' and '%v'"
 
 func init() {
@@ -276,23 +274,24 @@ func init() {
 			}
 
 			if !v.IsTruthy() {
-				// this would make rt.ip point to an op.ELIF or op.ELSE or op.END
+				// this would make rt.ip point to an op.ELIF or op.ELSE or op.END; which we have to check for
 				rt.ip = jmp
-				if rt.code[rt.ip] == op.ELIF {
+				switch rt.code[rt.ip] {
+				case op.ELIF:
 					goto IF
-				} else if rt.code[rt.ip] == op.ELSE {
+				case op.ELSE:
 					rt.ip += 2
 				}
 				// we are sure rt.ip is pointing at an op.ELSE or op.END
 				return Value{}, nil
 			}
-			// Basically fallthrough the byte rt.code to the true section...
+			// Basically fallthrough to the true section...
 			return Value{}, nil
 		},
 		func(rt *CoRoutine) (Value, error) { // ELIF (runaway) so skip
 		AGAIN:
-			// The last op.IF/ELIF was successful, so skip all remaining op.ELIF's and a potential op.ELSE
-			// this would make rt.ip point to an op.ELIF or op.ELSE or op.END; former 2 need to be skipped
+			// The last op.IF/ELIF was successful, so skip all remaining op.ELIFs and a potential op.ELSE
+			// this would make rt.ip point to an op.ELIF or op.ELSE or op.END; former two need to be skipped
 			rt.ip += int(rt.code[rt.ip+1])
 			if rt.code[rt.ip] == op.ELIF || rt.code[rt.ip] == op.ELSE {
 				goto AGAIN
@@ -405,15 +404,24 @@ func init() {
 				}
 				rt.pushBase(base)
 
-				// return to caller context
-				retAddr, retEnc := rt.ip, rt.captured
+				// so we can return to caller context later
+				currentIp, currentlyCaptured := rt.ip, rt.captured
 
-				// reset
+				// declare return values
 				var value Value
 				var err error
 
+				// get fresh code because this function might be from newly loaded code
+				if len(rt.code) != len(rt.vm.code) {
+					rt.code = rt.vm.code
+				}
 				rt.captured = fn.captured
-				for rt.ip = fn.info.Start; rt.ip < fn.info.End; rt.ip++ {
+
+				start := fn.info.Start
+				end := fn.info.End
+
+				// run fn
+				for rt.ip = start; rt.ip < end; rt.ip++ {
 					value, err = instructions[rt.code[rt.ip]](rt)
 					if err != nil {
 						if err == errReturnSignal {
@@ -431,7 +439,7 @@ func init() {
 					rt.vm.boxes.put(rt.stack[base+index])
 				}
 
-				rt.exitUserFN(retAddr, fn.info.Capacity, retEnc)
+				rt.exitUserFN(currentIp, fn.info.Capacity, currentlyCaptured)
 				return value, err
 			} else if res, err := rt.tryNativeCall(value, nargsProvided); err != errNotFunction {
 				return res, err
@@ -486,12 +494,17 @@ func init() {
 					*locals[i] = v
 				}
 
+				task := make(chan TaskResult, 1)
+
 				rt.vm.wg.Add(1)
 				go func(rt *CoRoutine) {
 					rt.vm.gil.Lock()
 
+					var value Value
+					var err error
+
 					for rt.ip < fn.info.End {
-						_, err := instructions[rt.code[rt.ip]](rt)
+						value, err = instructions[rt.code[rt.ip]](rt)
 						if err != nil {
 							if err != errReturnSignal {
 								fmt.Println(err)
@@ -508,9 +521,12 @@ func init() {
 					}
 
 					rt.vm.wg.Done()
+					task <- TaskResult{value, err}
+					close(task)
+
 					rt.vm.gil.Unlock()
 				}(rt.newRoutine(fn.info.Start, locals, fn.captured))
-				return Value{}, nil
+				return BoxTask(task), nil
 			} else if value.TypeOf() == "function" {
 				return Value{}, CustomError("go on native functions is not supported")
 			}
@@ -938,13 +954,20 @@ func (fn *UserFn) Call(args ...Value) (Value, error) {
 		*rt.stack[i] = v
 	}
 
+	var value Value
+	var err error
+
+	start := fn.info.Start
+	end := fn.info.End
+
 	// run fn
-	for rt.ip = fn.info.Start; rt.ip < fn.info.End; rt.ip++ {
-		if v, err := instructions[rt.code[rt.ip]](rt); err != nil {
+	for rt.ip = start; rt.ip < end; rt.ip++ {
+		if value, err = instructions[rt.code[rt.ip]](rt); err != nil {
 			if err == errReturnSignal {
-				return v, nil
+				err = nil
+				break
 			}
-			return v, errWithTrace{err, vm.trace}
+			err = errWithTrace{err, vm.trace}
 		}
 	}
 
@@ -953,7 +976,7 @@ func (fn *UserFn) Call(args ...Value) (Value, error) {
 		vm.boxes.put(rt.stack[index])
 	}
 
-	return Value{}, nil
+	return value, err
 }
 
 func (rt *CoRoutine) tryNativeCall(value Value, nargsP int) (result Value, err error) {

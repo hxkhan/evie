@@ -8,10 +8,12 @@ import (
 	"github.com/hk-32/evie/op"
 )
 
-func (m *Machine) WrapInstructions(before func(rt *CoRoutine), after func(rt *CoRoutine)) {
+var runs [op.NUM_OPS]int
+
+func WrapInstructions(before func(rt *CoRoutine), after func(rt *CoRoutine)) {
 	for i, in := range instructions {
 		instructions[i] = func(rt *CoRoutine) (v Value, err error) {
-			runs[m.code[rt.ip]]++
+			runs[rt.vm.code[rt.ip]]++
 			if before != nil {
 				before(rt)
 			}
@@ -36,7 +38,6 @@ func (m *Machine) DumpCode() {
 	// number of digits for the biggest index
 	width := digits(len(m.code))
 
-	// remember! the returned size here is of the internal representation and not the public one
 	op.Walk(m.code, func(ip int) (size int) {
 		switch b := m.code[ip]; b {
 		case op.RETURN_IF:

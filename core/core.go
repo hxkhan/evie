@@ -507,7 +507,7 @@ func init() {
 						value, err = instructions[rt.code[rt.ip]](rt)
 						if err != nil {
 							if err != errReturnSignal {
-								fmt.Println(err)
+								fmt.Println("ERROR:", err)
 								os.Exit(0)
 							}
 							break
@@ -964,7 +964,6 @@ func (fn *UserFn) Call(args ...Value) (Value, error) {
 	for rt.ip = start; rt.ip < end; rt.ip++ {
 		if value, err = instructions[rt.code[rt.ip]](rt); err != nil {
 			if err == errReturnSignal {
-				err = nil
 				break
 			}
 			err = errWithTrace{err, vm.trace}
@@ -976,7 +975,15 @@ func (fn *UserFn) Call(args ...Value) (Value, error) {
 		vm.boxes.put(rt.stack[index])
 	}
 
-	return value, err
+	// don't implicitly return the return value of the last executed instruction
+	switch err {
+	case nil:
+		return Value{}, nil
+	case errReturnSignal:
+		return value, nil
+	default:
+		return value, err
+	}
 }
 
 func (rt *CoRoutine) tryNativeCall(value Value, nargsP int) (result Value, err error) {

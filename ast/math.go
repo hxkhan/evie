@@ -1,19 +1,11 @@
 package ast
 
 import (
+	"slices"
+
+	"github.com/hk-32/evie/core"
 	"github.com/hk-32/evie/op"
 )
-
-func isBinOpLike(n Node, ops ...byte) bool {
-	if binOp, isBinOp := n.(BinOp); isBinOp {
-		for _, op := range ops {
-			if binOp.OP == op {
-				return true
-			}
-		}
-	}
-	return false
-}
 
 type BinOp struct {
 	OP byte // [required]
@@ -21,48 +13,197 @@ type BinOp struct {
 	B  Node // [required]
 }
 
-func (bop BinOp) compile(cs *CompilerState) int {
-	pos := cs.emit(bop.OP)
-	bop.A.compile(cs)
-	bop.B.compile(cs)
+func (bop BinOp) isOpOneOf(ops ...byte) bool {
+	return slices.Contains(ops, bop.OP)
+}
 
-	// optimise: n + literal
+func (bop BinOp) compile(cs *Machine) core.Instruction {
+	lhs := bop.A.compile(cs)
+	rhs := bop.B.compile(cs)
+
+	// optimise: x + constant
 	if in, isInput := bop.B.(Input); isInput && cs.optimise {
-		switch in.Value.(type) {
-		case int64, float64:
-			cs.set(pos, opRightConst(bop.OP))
+		switch b := in.Value.(type) {
+		case int64:
+			switch bop.OP {
+			case op.ADD:
+				return func(rt *core.CoRoutine) (core.Value, error) {
+					a, err := lhs(rt)
+					if err != nil {
+						return a, err
+					}
+
+					if a, ok := a.AsInt64(); ok {
+						return core.BoxInt64(a + b), nil
+					}
+
+					if a, ok := a.AsFloat64(); ok {
+						return core.BoxFloat64(a + float64(b)), nil
+					}
+
+					return core.Value{}, core.OperatorTypesError("+", a, b)
+				}
+
+			case op.SUB:
+				return func(rt *core.CoRoutine) (core.Value, error) {
+					a, err := lhs(rt)
+					if err != nil {
+						return a, err
+					}
+
+					if a, ok := a.AsInt64(); ok {
+						return core.BoxInt64(a - b), nil
+					}
+
+					if a, ok := a.AsFloat64(); ok {
+						return core.BoxFloat64(a - float64(b)), nil
+					}
+
+					return core.Value{}, core.OperatorTypesError("-", a, b)
+				}
+
+			case op.LS:
+				return func(rt *core.CoRoutine) (core.Value, error) {
+					a, err := lhs(rt)
+					if err != nil {
+						return a, err
+					}
+
+					if a, ok := a.AsInt64(); ok {
+						return core.BoxBool(a < b), nil
+					}
+
+					if a, ok := a.AsFloat64(); ok {
+						return core.BoxBool(a < float64(b)), nil
+					}
+
+					return core.Value{}, core.OperatorTypesError("<", a, b)
+				}
+			case op.MR:
+				return func(rt *core.CoRoutine) (core.Value, error) {
+					a, err := lhs(rt)
+					if err != nil {
+						return a, err
+					}
+
+					if a, ok := a.AsInt64(); ok {
+						return core.BoxBool(a > b), nil
+					}
+
+					if a, ok := a.AsFloat64(); ok {
+						return core.BoxBool(a > float64(b)), nil
+					}
+
+					return core.Value{}, core.OperatorTypesError(">", a, b)
+				}
+			}
 		}
 	}
 
-	return pos
-}
-
-func opRightConst(opcode byte) byte {
-	switch opcode {
+	// generic compilation
+	switch bop.OP {
 	case op.ADD:
-		return op.ADD_RIGHT_CONST
+		return func(rt *core.CoRoutine) (core.Value, error) {
+			a, err := lhs(rt)
+			if err != nil {
+				return a, err
+			}
+			b, err := rhs(rt)
+			if err != nil {
+				return a, err
+			}
+			if a, ok := a.AsInt64(); ok {
+				if b, ok := b.AsInt64(); ok {
+					return core.BoxInt64(a + b), nil
+				}
+				if b, ok := b.AsFloat64(); ok {
+					return core.BoxFloat64(float64(a) + b), nil
+				}
+			}
+
+			if a, ok := a.AsFloat64(); ok {
+				if b, ok := b.AsInt64(); ok {
+					return core.BoxFloat64(a + float64(b)), nil
+				}
+				if b, ok := b.AsFloat64(); ok {
+					return core.BoxFloat64(a + b), nil
+				}
+			}
+
+			return core.Value{}, core.OperatorTypesError("+", a, b)
+		}
+
 	case op.SUB:
-		return op.SUB_RIGHT_CONST
-	case op.DIV:
-		return op.DIV
-	case op.MUL:
-		return op.MUL
+		return func(rt *core.CoRoutine) (core.Value, error) {
+			a, err := lhs(rt)
+			if err != nil {
+				return a, err
+			}
+			b, err := rhs(rt)
+			if err != nil {
+				return a, err
+			}
+			if a, ok := a.AsInt64(); ok {
+				if b, ok := b.AsInt64(); ok {
+					return core.BoxInt64(a - b), nil
+				}
+				if b, ok := b.AsFloat64(); ok {
+					return core.BoxFloat64(float64(a) - b), nil
+				}
+			}
+
+			if a, ok := a.AsFloat64(); ok {
+				if b, ok := b.AsInt64(); ok {
+					return core.BoxFloat64(a - float64(b)), nil
+				}
+				if b, ok := b.AsFloat64(); ok {
+					return core.BoxFloat64(a - b), nil
+				}
+			}
+
+			return core.Value{}, core.OperatorTypesError("-", a, b)
+		}
+
 	case op.LS:
-		return op.LS_RIGHT_CONST
-	case op.EQ:
-		return op.EQ
-	case op.MR:
-		return op.MR
+		return func(rt *core.CoRoutine) (core.Value, error) {
+			a, err := lhs(rt)
+			if err != nil {
+				return a, err
+			}
+			b, err := rhs(rt)
+			if err != nil {
+				return a, err
+			}
+			if a, ok := a.AsInt64(); ok {
+				if b, ok := b.AsInt64(); ok {
+					return core.BoxBool(a < b), nil
+				}
+				if b, ok := b.AsFloat64(); ok {
+					return core.BoxBool(float64(a) < b), nil
+				}
+			}
+
+			if a, ok := a.AsFloat64(); ok {
+				if b, ok := b.AsInt64(); ok {
+					return core.BoxBool(a < float64(b)), nil
+				}
+				if b, ok := b.AsFloat64(); ok {
+					return core.BoxBool(a < b), nil
+				}
+			}
+
+			return core.Value{}, core.OperatorTypesError("<", a, b)
+		}
 	}
-	panic("opRightConst(op) not implemented for op")
+	panic("OP not implemented")
 }
 
 type Neg struct {
 	O Node // [required]
 }
 
-func (neg Neg) compile(cs *CompilerState) (pos int) {
-	if in, isInput := neg.O.(Input); isInput {
+func (neg Neg) compile(cs *Machine) core.Instruction {
+	/* if in, isInput := neg.O.(Input); isInput {
 		switch v := in.Value.(type) {
 		case int64:
 			pos = cs.emitInt64(-v)
@@ -76,5 +217,90 @@ func (neg Neg) compile(cs *CompilerState) (pos int) {
 		neg.O.compile(cs)
 	}
 
-	return pos
+	return pos */
+
+	panic("implement")
 }
+
+func adder(lhs core.Value, rhs any) (core.Value, error) {
+	if a, ok := lhs.AsInt64(); ok {
+		if b, ok := rhs.(int64); ok {
+			return core.BoxInt64(a + b), nil
+		}
+		if b, ok := rhs.(float64); ok {
+			return core.BoxFloat64(float64(a) + b), nil
+		}
+	}
+
+	if a, ok := lhs.AsFloat64(); ok {
+		if b, ok := rhs.(int64); ok {
+			return core.BoxFloat64(a + float64(b)), nil
+		}
+		if b, ok := rhs.(float64); ok {
+			return core.BoxFloat64(a + b), nil
+		}
+	}
+
+	return core.Value{}, core.OperatorTypesError("+", lhs, rhs)
+}
+
+/* if in, isInput := bop.B.(Input); isInput && cs.optimise {
+	switch b := in.Value.(type) {
+	case int64:
+		switch bop.OP {
+		case op.ADD:
+			return func(rt *core.CoRoutine) (core.Value, error) {
+				a, err := lhs(rt)
+				if err != nil {
+					return a, err
+				}
+
+				if a, ok := a.AsInt64(); ok {
+					return core.BoxInt64(a + b), nil
+				}
+
+				if a, ok := a.AsFloat64(); ok {
+					return core.BoxFloat64(a + float64(b)), nil
+				}
+
+				return core.Value{}, core.OperatorTypesError("+", a, b)
+			}
+
+		case op.SUB:
+			return func(rt *core.CoRoutine) (core.Value, error) {
+				a, err := lhs(rt)
+				if err != nil {
+					return a, err
+				}
+
+				if a, ok := a.AsInt64(); ok {
+					return core.BoxInt64(a - b), nil
+				}
+
+				if a, ok := a.AsFloat64(); ok {
+					return core.BoxFloat64(a - float64(b)), nil
+				}
+
+				return core.Value{}, core.OperatorTypesError("-", a, b)
+			}
+
+		case op.LS:
+			return func(rt *core.CoRoutine) (core.Value, error) {
+				a, err := lhs(rt)
+				if err != nil {
+					return a, err
+				}
+
+				if a, ok := a.AsInt64(); ok {
+					return core.BoxBool(a < b), nil
+				}
+
+				if a, ok := a.AsFloat64(); ok {
+					return core.BoxBool(a < float64(b)), nil
+				}
+
+				return core.Value{}, core.OperatorTypesError("<", a, b)
+			}
+		}
+	}
+} */

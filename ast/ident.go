@@ -1,17 +1,8 @@
 package ast
 
 import (
-	"github.com/hk-32/evie/op"
+	"github.com/hk-32/evie/core"
 )
-
-/*
-
-var x = something(10)
-var y = something(10)
-
-IdentDec{Name: "x", Value: Call{Fn: IdentGet{Name: "something"}, Args: [Input{Value: 10}]}}
-
-*/
 
 type IdentDec struct {
 	Name  string
@@ -27,92 +18,157 @@ type IdentSet struct {
 	Value Node
 }
 
-func (iDec IdentDec) compile(cs *CompilerState) int {
+func (iDec IdentDec) compile(cs *Machine) core.Instruction {
 	index := cs.declare(iDec.Name)
-	pos := cs.emit(op.STORE_LOCAL, byte(index))
-	cs.addReferenceNameFor(pos, iDec.Name)
+	value := iDec.Value.compile(cs)
 
-	iDec.Value.compile(cs)
-	return pos
+	return func(rt *core.CoRoutine) (core.Value, error) {
+		v, err := value(rt)
+		if err != nil {
+			return v, err
+		}
+
+		rt.StoreLocal(index, v)
+		return core.Value{}, nil
+	}
 }
 
-func (iDec IdentDec) compileInGlobal(cs *CompilerState) int {
+func (iDec IdentDec) compileInGlobal(cs *Machine) core.Instruction {
 	index := cs.get(iDec.Name)
-	pos := cs.emit(op.STORE_LOCAL, byte(index))
-	cs.addReferenceNameFor(pos, iDec.Name)
+	value := iDec.Value.compile(cs)
 
-	iDec.Value.compile(cs)
-	return pos
+	return func(rt *core.CoRoutine) (core.Value, error) {
+		v, err := value(rt)
+		if err != nil {
+			return v, err
+		}
+
+		rt.StoreLocal(index, v)
+		return core.Value{}, nil
+	}
 }
 
-func (iGet IdentGet) compile(cs *CompilerState) (pos int) {
+func (iGet IdentGet) compile(cs *Machine) core.Instruction {
 	ref := cs.reach(iGet.Name)
 
 	switch {
 	case ref.Scroll < 0:
-		pos = cs.emit(op.LOAD_BUILTIN, byte(ref.Index))
-		cs.addReferenceNameFor(pos, iGet.Name)
+		return func(rt *core.CoRoutine) (core.Value, error) {
+			return cs.Builtins[ref.Index], nil
+		}
 
 	case ref.Scroll == 0:
-		pos = cs.emit(op.LOAD_LOCAL, byte(ref.Index))
-		cs.addReferenceNameFor(pos, iGet.Name)
+		return func(rt *core.CoRoutine) (core.Value, error) {
+			return rt.GetLocal(ref.Index), nil
+		}
 
 	case ref.Scroll > 0:
-		pos = cs.emit(op.LOAD_CAPTURED, byte(cs.addToCaptured(ref)))
-		cs.addReferenceNameFor(pos, iGet.Name)
+		index := cs.addToCaptured(ref)
+		return func(rt *core.CoRoutine) (core.Value, error) {
+			return rt.GetCaptured(index), nil
+		}
 	}
 
-	return pos
+	panic("impossible")
 }
 
-func (iSet IdentSet) compile(cs *CompilerState) (pos int) {
+func (iSet IdentSet) compile(cs *Machine) core.Instruction {
 	ref := cs.reach(iSet.Name)
 
-	// optimise: n = n+x or n = n-x
-	/* if isBinOpLike(iSet.Value, op.ADD, op.SUB) {
-		operation := iSet.Value.(BinOp)
-
-		iGet, isIdentGet := operation.A.(IdentGet)
-		in, isInput := operation.B.(Input)
-
-		// if left is not load then try flipping if operation is commutative
-		if !isIdentGet && (operation.OP == op.ADD || operation.OP == op.MUL) {
-			iGet, isIdentGet = operation.B.(IdentGet)
-			in, isInput = operation.A.(Input)
-		}
-
-		if isIdentGet && iGet.Name == iSet.Name {
-			// n++ or n--
-			if isInput && (in.Value == int64(1) || in.Value == float64(1)) {
-				if operation.OP == op.ADD {
-					cs.emit(op.INC)
-				} else {
-					cs.emit(op.DEC)
-				}
-				iGet.compile(cs)
-				return
-			}
-
-			cs.emit(op.STORE_ADD)
-			iGet.compile(cs)
-			operation.B.compile(cs)
-			return
-		}
-	} */
-
+	value := iSet.Value.compile(cs)
 	switch {
 	case ref.Scroll < 0:
 		panic("cannot set the value of a built-in")
 
 	case ref.Scroll == 0:
-		pos = cs.emit(op.STORE_LOCAL, byte(ref.Index))
-		cs.addReferenceNameFor(pos, iSet.Name)
+		return func(rt *core.CoRoutine) (core.Value, error) {
+			v, err := value(rt)
+			if err != nil {
+				return v, err
+			}
+
+			rt.StoreLocal(ref.Index, v)
+			return core.Value{}, nil
+		}
 
 	case ref.Scroll > 0:
-		pos = cs.emit(op.STORE_CAPTURED, byte(cs.addToCaptured(ref)))
-		cs.addReferenceNameFor(pos, iSet.Name)
+		index := cs.addToCaptured(ref)
+		return func(rt *core.CoRoutine) (core.Value, error) {
+			v, err := value(rt)
+			if err != nil {
+				return v, err
+			}
+
+			rt.StoreCaptured(index, v)
+			return core.Value{}, nil
+		}
 	}
 
-	iSet.Value.compile(cs)
-	return pos
+	panic("impossible")
 }
+
+/*
+// optimise: n = n+x or n = n-x or n = n*x or n = n/x
+if bop, isBinOp := iSet.Value.(BinOp); isBinOp {
+	if bop.isOpOneOf(op.ADD, op.SUB, op.MUL) {
+		iGet, isIdentGet := bop.A.(IdentGet)
+		in, isInput := bop.B.(Input)
+
+		// if left is not IdentGet then try flipping if operation is commutative
+		if !isIdentGet && (bop.OP == op.ADD || bop.OP == op.MUL) {
+			iGet, isIdentGet = bop.B.(IdentGet)
+			in, isInput = bop.A.(Input)
+		}
+
+		if isIdentGet && iGet.Name == iSet.Name {
+			// n++ or n--
+			if isInput {
+				switch b := in.Value.(type) {
+				case int64:
+					switch bop.OP {
+					case op.ADD:
+						if ref.Scroll == 0 {
+							return func(rt *core.CoRoutine) (result core.Value, err error) {
+								a := rt.GetLocal(index)
+
+								if i64, ok := a.AsInt64(); ok {
+									result = core.BoxInt64(i64 + b)
+								} else if f64, ok := a.AsFloat64(); ok {
+									result = core.BoxFloat64(f64 + float64(b))
+								} else {
+									err = core.OperatorTypesError("+", a, b)
+								}
+								if err != nil {
+									return result, err
+								}
+
+								rt.StoreLocal(index, result)
+								return core.Value{}, nil
+							}
+						} else {
+							return func(rt *core.CoRoutine) (result core.Value, err error) {
+								a := rt.GetCaptured(index)
+
+								if i64, ok := a.AsInt64(); ok {
+									result = core.BoxInt64(i64 + b)
+								} else if f64, ok := a.AsFloat64(); ok {
+									result = core.BoxFloat64(f64 + float64(b))
+								} else {
+									err = core.OperatorTypesError("+", a, b)
+								}
+								if err != nil {
+									return result, err
+								}
+
+								rt.StoreCaptured(index, result)
+								return core.Value{}, nil
+							}
+						}
+					}
+				}
+			}
+
+			// compile dynamic x aswell
+		}
+	}
+} */

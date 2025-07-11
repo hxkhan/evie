@@ -1,6 +1,8 @@
 package ast
 
-import "github.com/hk-32/evie/op"
+import (
+	"github.com/hk-32/evie/core"
+)
 
 type Conditional struct {
 	Condition Node // [required]
@@ -8,68 +10,113 @@ type Conditional struct {
 	Otherwise Node // [optional]
 }
 
-func (cond Conditional) compile(cs *CompilerState) int {
-	// OP_RETURN_IF optimisation
+func (cond Conditional) compile(cs *Machine) core.Instruction {
+	// optimise: if (something) return x
 	if cond.Otherwise == nil && cs.optimise {
 		if ret, isReturn := cond.Action.(Return); isReturn {
-			pos := cs.emit(op.RETURN_IF, 0)
-			cond.Condition.compile(cs)
-			ret.Value.compile(cs)
-			offset := cs.len() - pos
-			cs.emit(op.END)
-			cs.addU8OffsetFor(pos, byte(offset))
-			return pos
+			condition := cond.Condition.compile(cs)
+			what := ret.Value.compile(cs)
+
+			return func(rt *core.CoRoutine) (core.Value, error) {
+				v, err := condition(rt)
+				if err != nil {
+					return v, err
+				}
+
+				if v.IsTruthy() {
+					v, err := what(rt)
+					if err != nil {
+						return v, err
+					}
+					return v, core.ErrReturnSignal
+				}
+				return core.Value{}, nil
+			}
 		}
 	}
 
-	pos := cs.emit(op.IF, 0, 0)
+	// generic compilation
+	condition := cond.Condition.compile(cs)
 
-	cond.Condition.compile(cs)
 	cs.scopeOpenBlock()
-	cond.Action.compile(cs)
-	offset := cs.len() - pos
+	action := cond.Action.compile(cs)
 
 	if cond.Otherwise != nil {
+		var otherwise core.Instruction
 		if o, isELIF := cond.Otherwise.(Conditional); isELIF {
-			o.compileAsELIF(cs)
+			otherwise = o.compileAsELIF(cs)
 		} else {
 			// means it's an else
-			posELSE := cs.emit(op.ELSE, 0, 0)
 			cs.scopeReuseBlock()
-			cond.Otherwise.compile(cs)
-			offset := cs.len() - posELSE
-			cs.addU16OffsetFor(posELSE, uint16(offset))
+			otherwise = cond.Otherwise.compile(cs)
+		}
+
+		cs.scopeCloseBlock()
+		return func(rt *core.CoRoutine) (core.Value, error) {
+			v, err := condition(rt)
+			if err != nil {
+				return v, err
+			}
+
+			if v.IsTruthy() {
+				return action(rt)
+			}
+			return otherwise(rt)
 		}
 	}
-
 	cs.scopeCloseBlock()
-	cs.emit(op.END)
-	cs.addU16OffsetFor(pos, uint16(offset))
 
-	return pos
+	return func(rt *core.CoRoutine) (core.Value, error) {
+		v, err := condition(rt)
+		if err != nil {
+			return v, err
+		}
+
+		if v.IsTruthy() {
+			return action(rt)
+		}
+		return core.Value{}, nil
+	}
 }
 
-func (cond Conditional) compileAsELIF(cs *CompilerState) int {
-	pos := cs.emit(op.ELIF, 0, 0)
+func (cond Conditional) compileAsELIF(cs *Machine) core.Instruction {
+	condition := cond.Condition.compile(cs)
 
-	cond.Condition.compile(cs)
 	cs.scopeReuseBlock()
-	cond.Action.compile(cs)
-	offset := cs.len() - pos
+	action := cond.Action.compile(cs)
 
 	if cond.Otherwise != nil {
+		var otherwise core.Instruction
 		if o, isELIF := cond.Otherwise.(Conditional); isELIF {
-			o.compileAsELIF(cs)
+			otherwise = o.compileAsELIF(cs)
 		} else {
 			// means it's an else
-			posELSE := cs.emit(op.ELSE, 0, 0)
 			cs.scopeReuseBlock()
-			cond.Otherwise.compile(cs)
-			offset := cs.len() - posELSE
-			cs.addU16OffsetFor(posELSE, uint16(offset))
+			otherwise = cond.Otherwise.compile(cs)
+		}
+
+		return func(rt *core.CoRoutine) (core.Value, error) {
+			v, err := condition(rt)
+			if err != nil {
+				return v, err
+			}
+
+			if v.IsTruthy() {
+				return action(rt)
+			}
+			return otherwise(rt)
 		}
 	}
-	cs.addU16OffsetFor(pos, uint16(offset))
 
-	return pos
+	return func(rt *core.CoRoutine) (core.Value, error) {
+		v, err := condition(rt)
+		if err != nil {
+			return v, err
+		}
+
+		if v.IsTruthy() {
+			return action(rt)
+		}
+		return core.Value{}, nil
+	}
 }

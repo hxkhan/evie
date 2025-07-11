@@ -1,7 +1,9 @@
 package ast
 
 import (
-	"github.com/hk-32/evie/op"
+	"fmt"
+
+	"github.com/hk-32/evie/core"
 )
 
 /* IDEA: Add ensureReachabilty() to Node so this gives an error at compile time
@@ -23,31 +25,35 @@ END
 */
 
 type Node interface {
-	compile(cs *CompilerState) (pos int)
+	compile(cs *Machine) core.Instruction
 }
 
 type Input struct {
 	Value any
 }
 
-func (in Input) compile(cs *CompilerState) int {
+func (in Input) compile(cs *Machine) core.Instruction {
 	switch v := in.Value.(type) {
 	case nil:
-		return cs.emit(op.NULL)
-	case string:
-		return cs.emitString(v)
-	case int64:
-		return cs.emitInt64(v)
-	case float64:
-		return cs.emitFloat64(v)
-	case bool:
-		if v {
-			return cs.emit(op.TRUE)
-		} else {
-			return cs.emit(op.FALSE)
+		return func(rt *core.CoRoutine) (core.Value, error) {
+			return core.Value{}, nil
 		}
-	case int: // convenience
-		return cs.emitInt64(int64(v))
+	case string:
+		return func(rt *core.CoRoutine) (core.Value, error) {
+			return core.BoxString(v), nil
+		}
+	case int64:
+		return func(rt *core.CoRoutine) (core.Value, error) {
+			return core.BoxInt64(v), nil
+		}
+	case float64:
+		return func(rt *core.CoRoutine) (core.Value, error) {
+			return core.BoxFloat64(v), nil
+		}
+	case bool:
+		return func(rt *core.CoRoutine) (core.Value, error) {
+			return core.BoxBool(v), nil
+		}
 	}
 
 	panic("Input.compile -> unimplemented type")
@@ -55,21 +61,36 @@ func (in Input) compile(cs *CompilerState) int {
 
 type Block []Node
 
-func (b Block) compile(cs *CompilerState) int {
-	pos := cs.len()
-	for _, node := range b {
-		node.compile(cs)
+func (b Block) compile(cs *Machine) core.Instruction {
+	block := make([]core.Instruction, len(b))
+	for i, statement := range b {
+		block[i] = statement.compile(cs)
 	}
-	return pos
+
+	return func(rt *core.CoRoutine) (core.Value, error) {
+		for _, statement := range block {
+			if v, err := statement(rt); err != nil {
+				return v, err
+			}
+		}
+		return core.Value{}, nil
+	}
 }
 
 type Echo struct {
 	Value Node
 }
 
-func (out Echo) compile(cs *CompilerState) int {
-	pos := cs.emit(op.ECHO)
-	out.Value.compile(cs)
+func (out Echo) compile(cs *Machine) core.Instruction {
+	what := out.Value.compile(cs)
 
-	return pos
+	return func(rt *core.CoRoutine) (core.Value, error) {
+		v, err := what(rt)
+		if err != nil {
+			return v, err
+		}
+
+		fmt.Println(v)
+		return core.Value{}, nil
+	}
 }

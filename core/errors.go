@@ -23,7 +23,7 @@ func (t errWithTrace) Error() string {
 	return bytes.String()
 }
 
-var errReturnSignal error = errors.New("<return signal>")
+var ErrReturnSignal error = errors.New("<return signal>")
 var errNotFunction error = errors.New("not a native function")
 var ErrNotCallable error = errors.New("not a callable")
 

@@ -238,11 +238,11 @@ func (ps *parser) handleNames(main token.Token) ast.Node {
 		return ast.IdentSet{Name: main.Literal, Value: ps.parseExpression(0)}
 
 	case ps.consumeSimple("+=", false) || ps.consumeSimple("-=", false):
-		return ast.ApplyBinOp{
+		return ast.IdentSet{Name: main.Literal, Value: ast.BinOp{
 			OP: maps[ps.lastConsumed.Literal],
 			A:  ast.IdentGet{Name: main.Literal},
 			B:  ps.parseExpression(0),
-		}
+		}}
 
 	case ps.consumeSimple("(", false):
 		var args []ast.Node

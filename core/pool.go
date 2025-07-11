@@ -2,7 +2,7 @@ package core
 
 type pool[T any] []*T
 
-func (p *pool[T]) new() *T {
+func (p *pool[T]) New() *T {
 	if len(*p) == 0 {
 		return new(T)
 	}
@@ -12,7 +12,7 @@ func (p *pool[T]) new() *T {
 	return obj
 }
 
-func (p *pool[T]) put(obj *T) {
+func (p *pool[T]) Put(obj *T) {
 	if len(*p) < cap(*p) {
 		*p = append(*p, obj)
 	}

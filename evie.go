@@ -23,8 +23,7 @@ type Options struct {
 var Defaults = Options{Optimise: true, Exports: DefaultExports()}
 
 type Interpreter struct {
-	cs *ast.CompilerState
-	vm *core.Machine
+	vm *ast.Machine
 }
 
 func DefaultExports() map[string]core.Value {
@@ -36,8 +35,7 @@ func DefaultExports() map[string]core.Value {
 }
 
 func New(opts Options) *Interpreter {
-	cs := ast.NewCompiler(opts.Exports)
-	vm := cs.GetVM()
+	cs := ast.NewVM(opts.Exports)
 
 	/* if opts.ObserveIt {
 		core.WrapInstructions(func(rt *core.CoRoutine) {
@@ -47,7 +45,7 @@ func New(opts Options) *Interpreter {
 		})
 	} */
 
-	return &Interpreter{cs, vm}
+	return &Interpreter{cs}
 }
 
 func (ip *Interpreter) Feed(input []byte) (core.Value, error) {
@@ -56,27 +54,15 @@ func (ip *Interpreter) Feed(input []byte) (core.Value, error) {
 		return core.Value{}, err
 	}
 
-	return ip.cs.Compile(output)
+	return ip.vm.Run(output)
 }
 
 // GetGlobal retrieves a global variable by its name and returns a pointer to it.
 // If the global variable does not exist, it returns nil.
 func (ip *Interpreter) GetGlobal(name string) *core.Value {
-	addr, exists := ip.cs.GetGlobalAddress(name)
-	if !exists {
-		return nil
-	}
-	return ip.vm.GetGlobal(addr)
+	return ip.vm.GetGlobal(name)
 }
 
 func (ip *Interpreter) WaitForNoActivity() {
-	ip.cs.GetVM().WaitForNoActivity()
-}
-
-func (ip *Interpreter) DumpCode() {
-	ip.cs.GetVM().DumpCode()
-}
-
-func PrintInstructionStats() {
-	core.PrintInstructionRuns()
+	ip.vm.WaitForNoActivity()
 }

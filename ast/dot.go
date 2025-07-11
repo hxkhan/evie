@@ -1,7 +1,7 @@
 package ast
 
 import (
-	"github.com/hk-32/evie/op"
+	"github.com/hk-32/evie/core"
 )
 
 type DotCall struct {
@@ -10,9 +10,9 @@ type DotCall struct {
 	Args  []Node
 }
 
-func (dot DotCall) compile(cs *CompilerState) int {
+func (dot DotCall) compile(cs *Machine) core.Instruction {
 	// namespaces e.g. json.decode(...)
-	iGetLeft, isLeftIdentGet := dot.Left.(IdentGet)
+	/* iGetLeft, isLeftIdentGet := dot.Left.(IdentGet)
 	iGetRight, isRightIdentGet := dot.Right.(IdentGet)
 	if isLeftIdentGet && isRightIdentGet {
 		name := iGetLeft.Name + "." + iGetRight.Name
@@ -37,11 +37,15 @@ func (dot DotCall) compile(cs *CompilerState) int {
 		arg.compile(cs)
 	}
 
-	return pos
+	return pos */
+
+	panic("implement")
 }
 
-func (dot DotCall) compile2(cs *CompilerState) int {
-	pos := len(cs.output)
+func (dot DotCall) compile2(cs *Machine) int {
+	/* pos := len(cs.output)
 	dot.compile(cs)
-	return pos
+	return pos */
+
+	panic("implement")
 }

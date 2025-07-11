@@ -11,7 +11,20 @@ import (
 )
 
 func main() {
-	p := flag.Bool("p", false, "Print the program before running it")
+	/* f, err := os.Create("cpu.prof")
+	if err != nil {
+		log.Fatal("could not create CPU profile: ", err)
+	}
+	defer f.Close() // error handling omitted for example
+	if err := pprof.StartCPUProfile(f); err != nil {
+		log.Fatal("could not start CPU profile: ", err)
+	}
+	defer pprof.StopCPUProfile()
+
+	if err != nil {
+		panic(err)
+	} */
+
 	o := flag.Bool("o", true, "Optimise the program with specialised instructions")
 	d := flag.Bool("d", false, "Print debug stats")
 	t := flag.Bool("t", false, "Print execution time")
@@ -33,11 +46,6 @@ func main() {
 	if err != nil {
 		fmt.Println(err)
 		return
-	}
-
-	if *p {
-		ip.DumpCode()
-		fmt.Println("------------------------------")
 	}
 
 	main := ip.GetGlobal("main")
@@ -72,9 +80,5 @@ func main() {
 
 	if *t {
 		fmt.Printf("Execution time: %v\n", difference)
-	}
-
-	if *d {
-		evie.PrintInstructionStats()
 	}
 }

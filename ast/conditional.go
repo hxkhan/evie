@@ -10,113 +10,88 @@ type Conditional struct {
 	Otherwise Node // [optional]
 }
 
-func (cond Conditional) compile(cs *Machine) core.Instruction {
-	// optimise: if (something) return x
-	if cond.Otherwise == nil && cs.optimise {
-		if ret, isReturn := cond.Action.(Return); isReturn {
-			condition := cond.Condition.compile(cs)
-			what := ret.Value.compile(cs)
+func (cond Conditional) compile(cs *Machine) {
+	cond.Condition.compile(cs)
 
-			return func(rt *core.CoRoutine) (core.Value, error) {
-				v, err := condition(rt)
-				if err != nil {
-					return v, err
-				}
-
-				if v.IsTruthy() {
-					v, err := what(rt)
-					if err != nil {
-						return v, err
-					}
-					return v, core.ErrReturnSignal
-				}
-				return core.Value{}, nil
-			}
-		}
-	}
-
-	// generic compilation
-	condition := cond.Condition.compile(cs)
+	start := len(cs.Code)
+	cs.emit(nil)
 
 	cs.scopeOpenBlock()
-	action := cond.Action.compile(cs)
+	cond.Action.compile(cs)
+	skip := len(cs.Code) - start
 
 	if cond.Otherwise != nil {
-		var otherwise core.Instruction
-		if o, isELIF := cond.Otherwise.(Conditional); isELIF {
-			otherwise = o.compileAsELIF(cs)
+		panic("fix")
+		/* if o, isELIF := cond.Otherwise.(Conditional); isELIF {
+			o.compileAsELIF(cs)
 		} else {
 			// means it's an else
 			cs.scopeReuseBlock()
-			otherwise = cond.Otherwise.compile(cs)
+			cond.Otherwise.compile(cs)
 		}
 
 		cs.scopeCloseBlock()
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			v, err := condition(rt)
-			if err != nil {
-				return v, err
-			}
+		cs.Code[start] = func(rt *core.CoRoutine) (int, error) {
+			v := rt.Stack[len(rt.Stack)-1]
+			rt.Stack = rt.Stack[:len(rt.Stack)-1]
 
-			if v.IsTruthy() {
-				return action(rt)
+			if !v.IsTruthy() {
+				return skip, nil
 			}
-			return otherwise(rt)
+			return 1, nil
 		}
+		return */
 	}
+
 	cs.scopeCloseBlock()
+	cs.Code[start] = func(rt *core.CoRoutine) (int, error) {
+		v := rt.Stack[len(rt.Stack)-1]
+		rt.Stack = rt.Stack[:len(rt.Stack)-1]
 
-	return func(rt *core.CoRoutine) (core.Value, error) {
-		v, err := condition(rt)
-		if err != nil {
-			return v, err
+		if !v.IsTruthy() {
+			return skip, nil
 		}
-
-		if v.IsTruthy() {
-			return action(rt)
-		}
-		return core.Value{}, nil
+		return 1, nil
 	}
 }
 
-func (cond Conditional) compileAsELIF(cs *Machine) core.Instruction {
-	condition := cond.Condition.compile(cs)
+func (cond Conditional) compileAsELIF(cs *Machine) {
+	cond.Condition.compile(cs)
 
 	cs.scopeReuseBlock()
-	action := cond.Action.compile(cs)
+
+	start := len(cs.Code)
+	cond.Action.compile(cs)
+	actionSize := len(cs.Code) - start
 
 	if cond.Otherwise != nil {
-		var otherwise core.Instruction
 		if o, isELIF := cond.Otherwise.(Conditional); isELIF {
-			otherwise = o.compileAsELIF(cs)
+			o.compileAsELIF(cs)
 		} else {
 			// means it's an else
 			cs.scopeReuseBlock()
-			otherwise = cond.Otherwise.compile(cs)
+			cond.Otherwise.compile(cs)
 		}
 
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			v, err := condition(rt)
-			if err != nil {
-				return v, err
-			}
+		cs.emit(func(rt *core.CoRoutine) (int, error) {
+			v := rt.Stack[len(rt.Stack)-1]
+			rt.Stack = rt.Stack[:len(rt.Stack)-1]
 
-			if v.IsTruthy() {
-				return action(rt)
+			if !v.IsTruthy() {
+				return actionSize, nil
 			}
-			return otherwise(rt)
-		}
+			return 1, nil
+		})
+		return
 	}
 
-	return func(rt *core.CoRoutine) (core.Value, error) {
-		v, err := condition(rt)
-		if err != nil {
-			return v, err
-		}
+	cs.emit(func(rt *core.CoRoutine) (int, error) {
+		v := rt.Stack[len(rt.Stack)-1]
+		rt.Stack = rt.Stack[:len(rt.Stack)-1]
 
-		if v.IsTruthy() {
-			return action(rt)
+		if !v.IsTruthy() {
+			return actionSize, nil
 		}
-		return core.Value{}, nil
-	}
+		return 1, nil
+	})
 }

@@ -11,6 +11,8 @@ func NewMachine(builtins []Value) Machine {
 }
 
 type Machine struct {
+	Code []Instruction
+
 	Boxes      pool[Value]     // pool of boxes for values
 	Coroutines pool[CoRoutine] // pool of co-routines
 
@@ -24,9 +26,12 @@ type Machine struct {
 }
 
 type CoRoutine struct {
-	Captured []*Value // captured variables of the current function being executed
-	Stack    []*Value // stack for local variables accessible in the current call stack
-	Basis    []int    // one base per function; basis[-1] is where the current function's locals start at
+	Ip        int          // instruction pointer
+	Captured  []*Value     // captured variables of the current function being executed
+	Locals    []*Value     // local variables accessible in the current call stack
+	Basis     []int        // one base per function; basis[-1] is where the current function's locals start at
+	Stack     []Value      // data-stack for the current coroutine
+	Callbacks []func() int // cleanup callbacks
 }
 
 func (m *Machine) WaitForNoActivity() {
@@ -51,7 +56,7 @@ func (m *Machine) AcquireGIL() {
 } */
 
 func (rt *CoRoutine) StoreLocal(index int, value Value) {
-	*(rt.Stack[rt.GetCurrentBase()+index]) = value
+	*(rt.Locals[rt.GetCurrentBase()+index]) = value
 }
 
 func (rt *CoRoutine) StoreCaptured(index int, value Value) {
@@ -59,13 +64,13 @@ func (rt *CoRoutine) StoreCaptured(index int, value Value) {
 }
 
 func (rt *CoRoutine) GetLocal(index int) Value {
-	return *(rt.Stack[rt.GetCurrentBase()+index])
+	return *(rt.Locals[rt.GetCurrentBase()+index])
 }
 
 // Generic variant providing both GetLocal & GetCaptured
 func (rt *CoRoutine) Get(index int, local bool) Value {
 	if local {
-		return *(rt.Stack[rt.GetCurrentBase()+index])
+		return *(rt.Locals[rt.GetCurrentBase()+index])
 	}
 	return *(rt.Captured[index])
 }
@@ -73,14 +78,14 @@ func (rt *CoRoutine) Get(index int, local bool) Value {
 // Generic variant providing both GetLocal & GetCaptured
 func (rt *CoRoutine) Store(index int, local bool, v Value) {
 	if local {
-		*(rt.Stack[rt.GetCurrentBase()+index]) = v
+		*(rt.Locals[rt.GetCurrentBase()+index]) = v
 		return
 	}
 	*(rt.Captured[index]) = v
 }
 
 func (rt *CoRoutine) Capture(index int, scroll int) *Value {
-	return rt.Stack[rt.GetScrolledBase(scroll)+index]
+	return rt.Locals[rt.GetScrolledBase(scroll)+index]
 }
 
 func (rt *CoRoutine) GetCaptured(index int) Value {
@@ -104,7 +109,7 @@ func (rt *CoRoutine) PopBase() {
 }
 
 func (rt *CoRoutine) PopLocals(n int) {
-	rt.Stack = rt.Stack[:len(rt.Stack)-n]
+	rt.Locals = rt.Locals[:len(rt.Locals)-n]
 }
 
 type Reference struct {
@@ -118,7 +123,8 @@ type FuncInfoStatic struct {
 	Refs        []Reference // captured references
 	NonEscaping []int       // the locals that do not escape
 	Capacity    int         // total required scope-capacity
-	Code        Instruction // the actual function code
+	Start       int         // the start of the function code
+	Size        int         // the size of the function code
 	Machine     *Machine    // the corresponding vm
 }
 

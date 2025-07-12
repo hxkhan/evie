@@ -1,16 +1,12 @@
 package ast
 
-import (
-	"github.com/hk-32/evie/core"
-)
-
 type DotCall struct {
 	Left  Node
 	Right Node
 	Args  []Node
 }
 
-func (dot DotCall) compile(cs *Machine) core.Instruction {
+func (dot DotCall) compile(cs *Machine) {
 	// namespaces e.g. json.decode(...)
 	/* iGetLeft, isLeftIdentGet := dot.Left.(IdentGet)
 	iGetRight, isRightIdentGet := dot.Right.(IdentGet)

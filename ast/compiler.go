@@ -28,7 +28,9 @@ func NewVM(exports map[string]core.Value) *Machine {
 }
 
 func (cs *Machine) Run(node Node) (core.Value, error) {
-	code := node.compile(cs)
+	start := len(cs.Code)
+	node.compile(cs)
+	end := len(cs.Code)
 
 	cs.AcquireGIL()
 	defer cs.ReleaseGIL()
@@ -42,17 +44,22 @@ func (cs *Machine) Run(node Node) (core.Value, error) {
 
 	// fetch a coroutine and prepare it
 	rt := cs.Coroutines.New()
-	rt.Stack = cs.Globals
+	rt.Locals = cs.Globals
 	rt.Basis = []int{0}
 
 	// run code
-	v, err := code(rt)
+	rt.Ip = start
+	for rt.Ip < end {
+		i, err := cs.Code[rt.Ip](rt)
+		if err != nil {
+			return core.Value{}, err
+		}
+
+		rt.Ip += i
+	}
+
 	// free coroutine
 	cs.Coroutines.Put(rt)
-	// check errors
-	if err == core.ErrReturnSignal {
-		return v, nil
-	}
 	return core.Value{}, nil
 }
 
@@ -86,9 +93,7 @@ But this is; becuase the declaration ends up being shifted to the top:
 	x := 10
 	echo x
 */
-func (p Package) compile(cs *Machine) core.Instruction {
-	var code []core.Instruction
-
+func (p Package) compile(cs *Machine) {
 	// 1. declare all symbols
 	for _, node := range p.Code {
 		if fnDec, isFnDecl := node.(Fn); isFnDecl {
@@ -104,8 +109,7 @@ func (p Package) compile(cs *Machine) core.Instruction {
 	// 2. physically move function initialization to the top
 	for _, node := range p.Code {
 		if fnDec, isFnDecl := node.(Fn); isFnDecl {
-			in := fnDec.compileInGlobal(cs)
-			code = append(code, in)
+			fnDec.compileInGlobal(cs)
 		}
 	}
 
@@ -117,24 +121,13 @@ func (p Package) compile(cs *Machine) core.Instruction {
 
 		// compile global variable declarations in a special way
 		if iDec, isIdentDec := node.(IdentDec); isIdentDec {
-			in := iDec.compileInGlobal(cs)
+			iDec.compileInGlobal(cs)
 			delete(cs.uninitializedGlobals, iDec.Name)
-			code = append(code, in)
 			continue
 		}
 
 		// other code
-		in := node.compile(cs)
-		code = append(code, in)
-	}
-
-	return func(rt *core.CoRoutine) (core.Value, error) {
-		for _, in := range code {
-			if v, err := in(rt); err != nil {
-				return v, err
-			}
-		}
-		return core.Value{}, nil
+		node.compile(cs)
 	}
 }
 
@@ -179,6 +172,10 @@ type Machine struct {
 	rcRoot               *reachability // built-in scope
 	uninitializedGlobals map[string]struct{}
 	optimise             bool
+}
+
+func (cs *Machine) emit(in core.Instruction) {
+	cs.Code = append(cs.Code, in)
 }
 
 func (cs *Machine) scopeExtend() {

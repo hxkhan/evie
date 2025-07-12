@@ -25,55 +25,48 @@ END
 */
 
 type Node interface {
-	compile(cs *Machine) core.Instruction
+	compile(cs *Machine)
 }
 
 type Input struct {
 	Value any
 }
 
-func (in Input) compile(cs *Machine) core.Instruction {
+func (in Input) compile(cs *Machine) {
 	switch v := in.Value.(type) {
 	case nil:
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			return core.Value{}, nil
-		}
+		cs.emit(func(rt *core.CoRoutine) (int, error) {
+			rt.Stack = append(rt.Stack, core.Value{})
+			return 1, nil
+		})
 	case string:
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			return core.BoxString(v), nil
-		}
+		cs.emit(func(rt *core.CoRoutine) (int, error) {
+			rt.Stack = append(rt.Stack, core.BoxString(v))
+			return 1, nil
+		})
 	case int64:
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			return core.BoxInt64(v), nil
-		}
+		cs.emit(func(rt *core.CoRoutine) (int, error) {
+			rt.Stack = append(rt.Stack, core.BoxInt64(v))
+			return 1, nil
+		})
 	case float64:
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			return core.BoxFloat64(v), nil
-		}
+		cs.emit(func(rt *core.CoRoutine) (int, error) {
+			rt.Stack = append(rt.Stack, core.BoxFloat64(v))
+			return 1, nil
+		})
 	case bool:
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			return core.BoxBool(v), nil
-		}
+		cs.emit(func(rt *core.CoRoutine) (int, error) {
+			rt.Stack = append(rt.Stack, core.BoxBool(v))
+			return 1, nil
+		})
 	}
-
-	panic("Input.compile -> unimplemented type")
 }
 
 type Block []Node
 
-func (b Block) compile(cs *Machine) core.Instruction {
-	block := make([]core.Instruction, len(b))
-	for i, statement := range b {
-		block[i] = statement.compile(cs)
-	}
-
-	return func(rt *core.CoRoutine) (core.Value, error) {
-		for _, statement := range block {
-			if v, err := statement(rt); err != nil {
-				return v, err
-			}
-		}
-		return core.Value{}, nil
+func (b Block) compile(cs *Machine) {
+	for _, statement := range b {
+		statement.compile(cs)
 	}
 }
 
@@ -81,16 +74,12 @@ type Echo struct {
 	Value Node
 }
 
-func (out Echo) compile(cs *Machine) core.Instruction {
-	what := out.Value.compile(cs)
+func (out Echo) compile(cs *Machine) {
+	out.Value.compile(cs)
 
-	return func(rt *core.CoRoutine) (core.Value, error) {
-		v, err := what(rt)
-		if err != nil {
-			return v, err
-		}
-
+	cs.emit(func(rt *core.CoRoutine) (int, error) {
+		v := rt.Stack[len(rt.Stack)-1]
 		fmt.Println(v)
-		return core.Value{}, nil
-	}
+		return 1, nil
+	})
 }

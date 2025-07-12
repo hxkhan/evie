@@ -23,11 +23,7 @@ type Return struct {
 	Value Node
 }
 
-func (fn Fn) compile(vm *Machine) core.Instruction {
-	if fn.Name != "" {
-		panic("named functions are only allowed as top level declarations")
-	}
-
+func (fn Fn) compile(vm *Machine) {
 	vm.openFunction()
 	vm.scopeExtend()
 
@@ -35,7 +31,11 @@ func (fn Fn) compile(vm *Machine) core.Instruction {
 	for _, arg := range fn.Args {
 		vm.declare(arg)
 	}
-	action := fn.Action.compile(vm)
+
+	init := len(vm.Code)
+	vm.emit(nil)
+	fn.Action.compile(vm)
+	skip := len(vm.Code) - init
 
 	capacity := vm.scopeCapacity()
 	refs, escapees := vm.closeFunction()
@@ -55,21 +55,24 @@ func (fn Fn) compile(vm *Machine) core.Instruction {
 		Refs:        refs,
 		NonEscaping: freeable,
 		Capacity:    capacity,
-		Code:        action,
+		Start:       init + 1,
+		Size:        skip - 1,
 		Machine:     &vm.Machine}
 
-	return func(rt *core.CoRoutine) (core.Value, error) {
+	vm.Code[init] = func(rt *core.CoRoutine) (int, error) {
 		captured := make([]*core.Value, len(refs))
 		for i, ref := range refs {
 			captured[i] = rt.Capture(ref.Index, ref.Scroll)
 		}
 
-		// create the user fn & return it
-		return core.BoxUserFn(core.UserFn{Captured: captured, FuncInfoStatic: info}), nil
+		// create the user fn & push it to the stack
+		fn := core.BoxUserFn(core.UserFn{Captured: captured, FuncInfoStatic: info})
+		rt.Stack = append(rt.Stack, fn)
+		return skip, nil
 	}
 }
 
-func (fn Fn) compileInGlobal(vm *Machine) core.Instruction {
+func (fn Fn) compileInGlobal(vm *Machine) {
 	index := vm.get(fn.Name)
 
 	vm.openFunction()
@@ -79,7 +82,12 @@ func (fn Fn) compileInGlobal(vm *Machine) core.Instruction {
 	for _, arg := range fn.Args {
 		vm.declare(arg)
 	}
-	action := fn.Action.compile(vm)
+
+	init := len(vm.Code)
+	vm.emit(nil)
+	fn.Action.compile(vm)
+	vm.emitImplicitReturn()
+	skip := len(vm.Code) - init
 
 	capacity := vm.scopeCapacity()
 	refs, escapees := vm.closeFunction()
@@ -99,96 +107,38 @@ func (fn Fn) compileInGlobal(vm *Machine) core.Instruction {
 		Refs:        refs,
 		NonEscaping: freeable,
 		Capacity:    capacity,
-		Code:        action,
+		Start:       init + 1,
+		Size:        skip - 1,
 		Machine:     &vm.Machine}
 
-	return func(rt *core.CoRoutine) (core.Value, error) {
+	vm.Code[init] = func(rt *core.CoRoutine) (int, error) {
 		captured := make([]*core.Value, len(refs))
 		for i, ref := range refs {
 			captured[i] = rt.Capture(ref.Index, ref.Scroll)
 		}
 
-		// create the user fn
+		// create the user fn & store it locally
 		fn := core.BoxUserFn(core.UserFn{Captured: captured, FuncInfoStatic: info})
-
-		// declare the function locally
 		rt.StoreLocal(index, fn)
-		return core.Value{}, nil
+		return skip, nil
 	}
 }
 
-func (call Call) compile(vm *Machine) core.Instruction {
-	// compile function fetcher
-	fnFetcher := call.Fn.compile(vm)
-
+func (call Call) compile(vm *Machine) {
 	// compile arguments
-	argsFetchers := make([]core.Instruction, len(call.Args))
-	for i, arg := range call.Args {
-		argsFetchers[i] = arg.compile(vm)
+	for _, arg := range call.Args {
+		arg.compile(vm)
 	}
 
-	return func(rt *core.CoRoutine) (core.Value, error) {
-		value, err := fnFetcher(rt)
-		if err != nil {
-			return value, err
-		}
+	// compile function fetcher
+	call.Fn.compile(vm)
 
-		// check if its a user function
-		if fn, isUserFn := value.AsUserFn(); isUserFn {
-			if len(fn.Args) != len(argsFetchers) {
-				if fn.Name != "λ" {
-					return core.Value{}, core.CustomError("function '%v' requires %v argument(s), %v provided", fn.Name, len(fn.Args), len(argsFetchers))
-				}
-				return core.Value{}, core.CustomError("function requires %v argument(s), %v provided", len(fn.Args), len(argsFetchers))
-			}
-
-			// create space for all the locals
-			base := len(rt.Stack)
-			for range fn.Capacity {
-				rt.Stack = append(rt.Stack, vm.Boxes.New())
-			}
-
-			// set arguments
-			for i, fetcher := range argsFetchers {
-				v, err := fetcher(rt)
-				if err != nil {
-					return v, err
-				}
-				*rt.Stack[base+i] = v
-			}
-			rt.PushBase(base)
-
-			// save old state
-			oldCaptured := rt.Captured
-
-			rt.Captured = fn.Captured
-			// run fn code
-			value, err = fn.Code(rt)
-
-			// release non-escaping locals
-			for _, index := range fn.NonEscaping {
-				vm.Boxes.Put(rt.Stack[base+index])
-			}
-
-			// restore old state
-			rt.ExitUserFN(fn.Capacity, oldCaptured)
-
-			// don't implicitly return the return value of the last executed instruction
-			switch err {
-			case nil:
-				return core.Value{}, nil
-			case core.ErrReturnSignal:
-				return value, nil
-			default:
-				return value, err
-			}
-		}
-
-		return core.Value{}, core.CustomError("cannot call a non-function '%v'", value)
-	}
+	vm.emit(func(rt *core.CoRoutine) (int, error) {
+		return runner(rt, vm, len(call.Args))
+	})
 }
 
-func (g Go) compile(vm *Machine) core.Instruction {
+func (g Go) compile(vm *Machine) {
 	/* if call, isCall := g.Routine.(Call); isCall {
 		pos := vm.emit(op.GO, byte(len(call.Args)))
 		call.Fn.compile(vm)
@@ -200,45 +150,82 @@ func (g Go) compile(vm *Machine) core.Instruction {
 		pos := call.compile2(vm)
 		vm.set(pos, op.GO)
 		return pos
-	}
+	} */
 
-	panic("go expected call, got something else") */
+	panic("go expected call, got something else")
 
-	return func(rt *core.CoRoutine) (core.Value, error) {
-		return core.Value{}, nil
-	}
 }
 
-func (ret Return) compile(vm *Machine) core.Instruction {
-	// optimise: returning contants
-	if in, isInput := ret.Value.(Input); isInput && vm.optimise {
-		switch c := in.Value.(type) {
-		case int64:
-			return func(rt *core.CoRoutine) (core.Value, error) {
-				return core.BoxInt64(c), core.ErrReturnSignal
+func (ret Return) compile(vm *Machine) {
+	ret.Value.compile(vm)
+	vm.emit(RET)
+}
+
+func (vm *Machine) emitImplicitReturn() {
+	vm.emit(NULL)
+	vm.emit(RET)
+}
+
+func RET(rt *core.CoRoutine) (int, error) {
+	returnIp := rt.Callbacks[len(rt.Callbacks)-1]()
+	rt.Callbacks = rt.Callbacks[:len(rt.Callbacks)-1]
+
+	offset := returnIp + 1 - rt.Ip
+	return offset, nil
+}
+
+func NULL(rt *core.CoRoutine) (int, error) {
+	rt.Stack = append(rt.Stack, core.Value{})
+	return 1, nil
+}
+
+func runner(rt *core.CoRoutine, vm *Machine, nargsProvided int) (int, error) {
+	value := rt.Stack[len(rt.Stack)-1]
+	rt.Stack = rt.Stack[:len(rt.Stack)-1]
+
+	// check if its a user function
+	if fn, isUserFn := value.AsUserFn(); isUserFn {
+		if len(fn.Args) != nargsProvided {
+			if fn.Name != "λ" {
+				return 1, core.CustomError("function '%v' requires %v argument(s), %v provided", fn.Name, len(fn.Args), nargsProvided)
 			}
-		case float64:
-			return func(rt *core.CoRoutine) (core.Value, error) {
-				return core.BoxFloat64(c), core.ErrReturnSignal
-			}
-		case bool:
-			return func(rt *core.CoRoutine) (core.Value, error) {
-				return core.BoxBool(c), core.ErrReturnSignal
-			}
-		case string:
-			return func(rt *core.CoRoutine) (core.Value, error) {
-				return core.BoxString(c), core.ErrReturnSignal
-			}
+			return 1, core.CustomError("function requires %v argument(s), %v provided", len(fn.Args), nargsProvided)
 		}
+
+		// create space for all the locals
+		base := len(rt.Locals)
+		for range fn.Capacity {
+			rt.Locals = append(rt.Locals, vm.Boxes.New())
+		}
+
+		// set arguments
+		for i := range nargsProvided {
+			v := rt.Stack[len(rt.Stack)-1-i]
+			rt.Stack = rt.Stack[:len(rt.Stack)-1]
+
+			index := nargsProvided - i - 1
+			*rt.Locals[base+index] = v
+		}
+		rt.PushBase(base)
+
+		// save old state
+		oldIp, oldCaptured := rt.Ip, rt.Captured
+		rt.Callbacks = append(rt.Callbacks, func() int {
+			// release non-escaping locals
+			for _, index := range fn.NonEscaping {
+				vm.Boxes.Put(rt.Locals[base+index])
+			}
+			// restore state
+			rt.ExitUserFN(fn.Capacity)
+			rt.Captured = oldCaptured
+			return oldIp
+		})
+
+		rt.Captured = fn.Captured
+		// jump to function code
+		offset := fn.Start - rt.Ip
+		return offset, nil
 	}
 
-	what := ret.Value.compile(vm)
-	return func(rt *core.CoRoutine) (core.Value, error) {
-		v, err := what(rt)
-		if err != nil {
-			return v, err
-		}
-
-		return v, core.ErrReturnSignal
-	}
+	return 1, core.CustomError("cannot call a non-function '%v'", value)
 }

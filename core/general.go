@@ -62,23 +62,6 @@ func (rt *CoRoutine) GetLocal(index int) Value {
 	return *(rt.Stack[rt.GetCurrentBase()+index])
 }
 
-// Generic variant providing both GetLocal & GetCaptured
-func (rt *CoRoutine) Get(index int, local bool) Value {
-	if local {
-		return *(rt.Stack[rt.GetCurrentBase()+index])
-	}
-	return *(rt.Captured[index])
-}
-
-// Generic variant providing both GetLocal & GetCaptured
-func (rt *CoRoutine) Store(index int, local bool, v Value) {
-	if local {
-		*(rt.Stack[rt.GetCurrentBase()+index]) = v
-		return
-	}
-	*(rt.Captured[index]) = v
-}
-
 func (rt *CoRoutine) Capture(index int, scroll int) *Value {
 	return rt.Stack[rt.GetScrolledBase(scroll)+index]
 }
@@ -110,6 +93,10 @@ func (rt *CoRoutine) PopLocals(n int) {
 type Reference struct {
 	Index  int
 	Scroll int
+}
+
+func (ref Reference) IsLocal() bool {
+	return ref.Scroll == 0
 }
 
 type FuncInfoStatic struct {

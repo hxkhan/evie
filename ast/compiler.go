@@ -45,7 +45,7 @@ func (cs *Machine) Run(node Node) (core.Value, error) {
 	// fetch a coroutine and prepare it
 	rt := cs.Coroutines.New()
 	rt.Locals = cs.Globals
-	rt.Basis = []int{0}
+	rt.CallFrame.Base = 0
 
 	// run code
 	rt.Ip = start

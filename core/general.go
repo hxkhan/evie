@@ -1,6 +1,8 @@
 package core
 
-import "sync"
+import (
+	"sync"
+)
 
 func NewMachine(builtins []Value) Machine {
 	return Machine{
@@ -26,12 +28,17 @@ type Machine struct {
 }
 
 type CoRoutine struct {
-	Ip        int          // instruction pointer
-	Captured  []*Value     // captured variables of the current function being executed
-	Locals    []*Value     // local variables accessible in the current call stack
-	Basis     []int        // one base per function; basis[-1] is where the current function's locals start at
-	Stack     []Value      // data-stack for the current coroutine
-	Callbacks []func() int // cleanup callbacks
+	CallFrame             // current frame
+	Locals    []*Value    // local variables accessible in the current call stack
+	Stack     []Value     // data-stack for the current coroutine
+	CallStack []CallFrame // one base per function
+}
+
+type CallFrame struct {
+	Ip       int      // instruction pointer
+	Captured []*Value // captured variables of the current function being executed
+	Base     int      // base index in the Locals for the current function
+	Locals   int      // how many locals it owns in CoRoutine.Locals
 }
 
 func (m *Machine) WaitForNoActivity() {
@@ -56,7 +63,7 @@ func (m *Machine) AcquireGIL() {
 } */
 
 func (rt *CoRoutine) StoreLocal(index int, value Value) {
-	*(rt.Locals[rt.GetCurrentBase()+index]) = value
+	*(rt.Locals[rt.Base+index]) = value
 }
 
 func (rt *CoRoutine) StoreCaptured(index int, value Value) {
@@ -64,24 +71,7 @@ func (rt *CoRoutine) StoreCaptured(index int, value Value) {
 }
 
 func (rt *CoRoutine) GetLocal(index int) Value {
-	return *(rt.Locals[rt.GetCurrentBase()+index])
-}
-
-// Generic variant providing both GetLocal & GetCaptured
-func (rt *CoRoutine) Get(index int, local bool) Value {
-	if local {
-		return *(rt.Locals[rt.GetCurrentBase()+index])
-	}
-	return *(rt.Captured[index])
-}
-
-// Generic variant providing both GetLocal & GetCaptured
-func (rt *CoRoutine) Store(index int, local bool, v Value) {
-	if local {
-		*(rt.Locals[rt.GetCurrentBase()+index]) = v
-		return
-	}
-	*(rt.Captured[index]) = v
+	return *(rt.Locals[rt.Base+index])
 }
 
 func (rt *CoRoutine) Capture(index int, scroll int) *Value {
@@ -92,20 +82,28 @@ func (rt *CoRoutine) GetCaptured(index int) Value {
 	return *(rt.Captured[index])
 }
 
-func (rt *CoRoutine) GetCurrentBase() int {
-	return rt.Basis[len(rt.Basis)-1]
-}
-
 func (rt *CoRoutine) GetScrolledBase(scroll int) int {
-	return rt.Basis[len(rt.Basis)-scroll]
+	if scroll == 1 {
+		return rt.CallFrame.Base
+	}
+	return rt.CallStack[len(rt.CallStack)-scroll+1].Base
 }
 
-func (rt *CoRoutine) PushBase(base int) {
-	rt.Basis = append(rt.Basis, base)
+func (rt *CoRoutine) PushFrame() {
+	rt.CallStack = append(rt.CallStack, rt.CallFrame)
 }
 
-func (rt *CoRoutine) PopBase() {
-	rt.Basis = rt.Basis[:len(rt.Basis)-1]
+func (rt *CoRoutine) PopFrame(vm *Machine) {
+	// cleanup current
+	for index := range rt.CallFrame.Locals {
+		// free all for now
+		vm.Boxes.Put(rt.Locals[rt.CallFrame.Base+index])
+	}
+	rt.PopLocals(rt.CallFrame.Locals)
+
+	// restore top
+	rt.CallFrame = rt.CallStack[len(rt.CallStack)-1]
+	rt.CallStack = rt.CallStack[:len(rt.CallStack)-1]
 }
 
 func (rt *CoRoutine) PopLocals(n int) {

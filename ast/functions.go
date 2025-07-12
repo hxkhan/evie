@@ -158,20 +158,18 @@ func (g Go) compile(vm *Machine) {
 
 func (ret Return) compile(vm *Machine) {
 	ret.Value.compile(vm)
-	vm.emit(RET)
+	vm.emit(func(rt *core.CoRoutine) (int, error) {
+		rt.PopFrame(&vm.Machine)
+		return 1, nil
+	})
 }
 
 func (vm *Machine) emitImplicitReturn() {
 	vm.emit(NULL)
-	vm.emit(RET)
-}
-
-func RET(rt *core.CoRoutine) (int, error) {
-	returnIp := rt.Callbacks[len(rt.Callbacks)-1]()
-	rt.Callbacks = rt.Callbacks[:len(rt.Callbacks)-1]
-
-	offset := returnIp + 1 - rt.Ip
-	return offset, nil
+	vm.emit(func(rt *core.CoRoutine) (int, error) {
+		rt.PopFrame(&vm.Machine)
+		return 1, nil
+	})
 }
 
 func NULL(rt *core.CoRoutine) (int, error) {
@@ -200,30 +198,23 @@ func runner(rt *core.CoRoutine, vm *Machine, nargsProvided int) (int, error) {
 
 		// set arguments
 		for i := range nargsProvided {
-			v := rt.Stack[len(rt.Stack)-1-i]
+			v := rt.Stack[len(rt.Stack)-1]
 			rt.Stack = rt.Stack[:len(rt.Stack)-1]
 
 			index := nargsProvided - i - 1
 			*rt.Locals[base+index] = v
 		}
-		rt.PushBase(base)
 
 		// save old state
-		oldIp, oldCaptured := rt.Ip, rt.Captured
-		rt.Callbacks = append(rt.Callbacks, func() int {
-			// release non-escaping locals
-			for _, index := range fn.NonEscaping {
-				vm.Boxes.Put(rt.Locals[base+index])
-			}
-			// restore state
-			rt.ExitUserFN(fn.Capacity)
-			rt.Captured = oldCaptured
-			return oldIp
-		})
+		rt.PushFrame()
 
-		rt.Captured = fn.Captured
+		// prepare new frame
+		rt.CallFrame.Base = base
+		rt.CallFrame.Captured = fn.Captured
+		rt.CallFrame.Locals = fn.Capacity
+
 		// jump to function code
-		offset := fn.Start - rt.Ip
+		offset := fn.Start - rt.CallFrame.Ip
 		return offset, nil
 	}
 

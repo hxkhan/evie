@@ -16,8 +16,9 @@ func (fn *UserFn) Call(args ...Value) (Value, error) {
 
 	// fetch a coroutine and prepare it
 	rt := vm.Coroutines.New()
-	rt.Basis = []int{0}
-	rt.Captured = fn.Captured
+	rt.CallFrame.Base = 0
+	rt.CallFrame.Captured = fn.Captured
+	rt.CallFrame.Locals = fn.Capacity
 
 	// allocate space on stack for arguments & local variables
 	rt.Locals = make([]*Value, fn.Capacity)
@@ -31,13 +32,7 @@ func (fn *UserFn) Call(args ...Value) (Value, error) {
 	}
 
 	var errors error
-	rt.Callbacks = append(rt.Callbacks, func() int {
-		// release non-escaping locals
-		for _, index := range fn.NonEscaping {
-			vm.Boxes.Put(rt.Locals[index])
-		}
-		return len(vm.Code)
-	})
+	rt.CallStack = append(rt.CallStack, CallFrame{Ip: len(vm.Code)})
 
 	// run function code
 	rt.Ip = fn.Start
@@ -61,10 +56,4 @@ func (fn *UserFn) Call(args ...Value) (Value, error) {
 	default:
 		return Value{}, errors
 	}
-}
-
-func (rt *CoRoutine) ExitUserFN(popLocals int) {
-	// return to caller context
-	rt.PopLocals(popLocals)
-	rt.PopBase()
 }

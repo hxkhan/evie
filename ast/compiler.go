@@ -7,12 +7,12 @@ import (
 	"github.com/hk-32/evie/core"
 )
 
-func NewVM(exports map[string]core.Value) *Machine {
+func NewVM(exports map[string]core.Value, optimise bool) *Machine {
 	cs := &Machine{
 		globals:              make(map[string]int),
 		rcRoot:               &reachability{[]map[string]int{make(map[string]int, len(exports))}, 0, 0, nil},
 		uninitializedGlobals: make(map[string]struct{}),
-		optimise:             true,
+		optimise:             optimise,
 	}
 	cs.rc = cs.rcRoot
 

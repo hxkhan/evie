@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/hk-32/evie/ast"
 	"github.com/hk-32/evie/lexer"
@@ -146,20 +145,20 @@ func (ps *parser) next() ast.Node {
 }
 
 func parseNumber(literal string) any {
-	if strings.Contains(literal, ".") {
-		num, err := strconv.ParseFloat(literal, 64)
-		if err != nil {
-			panic(fmt.Errorf("error when parsing number, got %v", err))
-		}
+	//if strings.Contains(literal, ".") {
+	num, err := strconv.ParseFloat(literal, 64)
+	if err != nil {
+		panic(fmt.Errorf("error when parsing number, got %v", err))
+	}
 
-		return num
-	} else {
+	return num
+	/* } else {
 		num, err := strconv.ParseInt(literal, 10, 64)
 		if err != nil {
 			panic(fmt.Errorf("error when parsing number, got %v", err))
 		}
 		return int64(num)
-	}
+	} */
 }
 
 func (ps *parser) handleKeywords(main token.Token) ast.Node {

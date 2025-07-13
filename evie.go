@@ -35,7 +35,7 @@ func DefaultExports() map[string]core.Value {
 }
 
 func New(opts Options) *Interpreter {
-	cs := ast.NewVM(opts.Exports)
+	cs := ast.NewVM(opts.Exports, opts.Optimise)
 
 	/* if opts.ObserveIt {
 		core.WrapInstructions(func(rt *core.CoRoutine) {

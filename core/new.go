@@ -32,11 +32,6 @@ func (fn *UserFn) Call(args ...Value) (Value, error) {
 
 	// run function code
 	value, err := fn.Code(rt)
-	if err != nil {
-		if err != ErrReturnSignal {
-			err = errWithTrace{err, vm.trace}
-		}
-	}
 
 	// release non-escaping locals
 	for _, index := range fn.NonEscaping {
@@ -50,7 +45,7 @@ func (fn *UserFn) Call(args ...Value) (Value, error) {
 	case ErrReturnSignal:
 		return value, nil
 	default:
-		return value, err
+		return value, ErrWithTrace{err, vm.trace}
 	}
 }
 

@@ -6,17 +6,17 @@ import (
 	"strings"
 )
 
-type errWithTrace struct {
-	err   error
-	trace []string
+type ErrWithTrace struct {
+	Err   error
+	Trace []string
 }
 
-func (t errWithTrace) Error() string {
+func (t ErrWithTrace) Error() string {
 	var bytes strings.Builder
 
-	bytes.WriteString(t.err.Error())
+	bytes.WriteString(t.Err.Error())
 	bytes.WriteByte('\n')
-	for _, name := range t.trace {
+	for _, name := range t.Trace {
 		bytes.WriteString(fmt.Sprintf("\tin '%v'\n", name))
 	}
 

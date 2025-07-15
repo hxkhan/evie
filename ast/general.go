@@ -29,34 +29,13 @@ type Node interface {
 }
 
 type Input struct {
-	Value any
+	Value core.Value
 }
 
 func (in Input) compile(cs *Machine) core.Instruction {
-	switch v := in.Value.(type) {
-	case nil:
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			return core.Value{}, nil
-		}
-	case string:
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			return core.BoxString(v), nil
-		}
-	case int64:
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			return core.BoxInt64(v), nil
-		}
-	case float64:
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			return core.BoxFloat64(v), nil
-		}
-	case bool:
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			return core.BoxBool(v), nil
-		}
+	return func(rt *core.CoRoutine) (core.Value, error) {
+		return in.Value, nil
 	}
-
-	panic("Input.compile -> unimplemented type")
 }
 
 type Block []Node

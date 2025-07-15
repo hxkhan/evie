@@ -15,8 +15,41 @@ func (cond Conditional) compile(cs *Machine) core.Instruction {
 	if cond.Otherwise == nil && cs.optimise {
 		if ret, isReturn := cond.Action.(Return); isReturn {
 			condition := cond.Condition.compile(cs)
-			what := ret.Value.compile(cs)
+			// optimise: returning contants
+			if in, isInput := ret.Value.(Input); isInput {
+				return func(rt *core.CoRoutine) (core.Value, error) {
+					v, err := condition(rt)
+					if err != nil {
+						return v, err
+					}
 
+					if v.IsTruthy() {
+						return in.Value, core.ErrReturnSignal
+					}
+					return core.Value{}, nil
+				}
+			}
+
+			// optimise: returning local variables
+			if iGet, isIdentGet := ret.Value.(IdentGet); isIdentGet && cs.optimise {
+				ref := cs.reach(iGet.Name)
+				if ref.IsLocal() {
+					return func(rt *core.CoRoutine) (core.Value, error) {
+						v, err := condition(rt)
+						if err != nil {
+							return v, err
+						}
+
+						if v.IsTruthy() {
+							return rt.GetLocal(ref.Index), core.ErrReturnSignal
+						}
+						return core.Value{}, nil
+					}
+				}
+			}
+
+			// generic compilation
+			what := ret.Value.compile(cs)
 			return func(rt *core.CoRoutine) (core.Value, error) {
 				v, err := condition(rt)
 				if err != nil {

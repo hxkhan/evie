@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/hk-32/evie/ast"
+	"github.com/hk-32/evie/core"
 	"github.com/hk-32/evie/lexer"
 	"github.com/hk-32/evie/op"
 	"github.com/hk-32/evie/token"
@@ -128,7 +129,7 @@ func (ps *parser) next() ast.Node {
 	} else if main.Type == token.Name {
 		return ps.handleNames(ps.NextToken())
 	} else if main.Type == token.String {
-		return ast.Input{Value: ps.NextToken().Literal}
+		return ast.Input{Value: core.BoxString(ps.NextToken().Literal)}
 	} else if main.Type == token.Number {
 		return ast.Input{Value: parseNumber(ps.NextToken().Literal)}
 	} else if main.IsSimple("-") {
@@ -144,14 +145,14 @@ func (ps *parser) next() ast.Node {
 	return ps.parseExpression(0)
 }
 
-func parseNumber(literal string) any {
+func parseNumber(literal string) core.Value {
 	//if strings.Contains(literal, ".") {
 	num, err := strconv.ParseFloat(literal, 64)
 	if err != nil {
 		panic(fmt.Errorf("error when parsing number, got %v", err))
 	}
 
-	return num
+	return core.BoxFloat64(num)
 	/* } else {
 		num, err := strconv.ParseInt(literal, 10, 64)
 		if err != nil {
@@ -169,7 +170,7 @@ func (ps *parser) handleKeywords(main token.Token) ast.Node {
 	case "return":
 		if ps.PeekToken().IsNewLine() {
 			ps.NextToken()
-			return ast.Return{Value: ast.Input{Value: nil}}
+			return ast.Return{Value: ast.Input{}}
 		}
 		return ast.Return{Value: ps.parseExpression(0)}
 
@@ -193,13 +194,13 @@ func (ps *parser) handleKeywords(main token.Token) ast.Node {
 		return ast.Await{What: ps.parseExpression(0)}
 
 	case "null":
-		return ast.Input{Value: nil}
+		return ast.Input{}
 
 	case "true":
-		return ast.Input{Value: true}
+		return ast.Input{Value: core.BoxBool(true)}
 
 	case "false":
-		return ast.Input{Value: false}
+		return ast.Input{Value: core.BoxBool(false)}
 
 	case "if":
 		if !ps.consumeSimple("(", false) {

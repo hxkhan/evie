@@ -212,22 +212,17 @@ func (g Go) compile(vm *Machine) core.Instruction {
 func (ret Return) compile(vm *Machine) core.Instruction {
 	// optimise: returning contants
 	if in, isInput := ret.Value.(Input); isInput && vm.optimise {
-		switch c := in.Value.(type) {
-		case int64:
+		return func(rt *core.CoRoutine) (core.Value, error) {
+			return in.Value, core.ErrReturnSignal
+		}
+	}
+
+	// optimise: returning local variables
+	if iGet, isIdentGet := ret.Value.(IdentGet); isIdentGet && vm.optimise {
+		ref := vm.reach(iGet.Name)
+		if ref.IsLocal() {
 			return func(rt *core.CoRoutine) (core.Value, error) {
-				return core.BoxInt64(c), core.ErrReturnSignal
-			}
-		case float64:
-			return func(rt *core.CoRoutine) (core.Value, error) {
-				return core.BoxFloat64(c), core.ErrReturnSignal
-			}
-		case bool:
-			return func(rt *core.CoRoutine) (core.Value, error) {
-				return core.BoxBool(c), core.ErrReturnSignal
-			}
-		case string:
-			return func(rt *core.CoRoutine) (core.Value, error) {
-				return core.BoxString(c), core.ErrReturnSignal
+				return rt.GetLocal(ref.Index), core.ErrReturnSignal
 			}
 		}
 	}

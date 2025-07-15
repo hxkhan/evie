@@ -24,8 +24,7 @@ func (bop BinOp) compile(cs *Machine) core.Instruction {
 		if ref.IsLocal() {
 			// optimise: rhs being a constant
 			if in, isInput := bop.B.(Input); isInput && cs.optimise {
-				switch b := in.Value.(type) {
-				case float64:
+				if b, isFloat := in.Value.AsFloat64(); isFloat {
 					switch bop.OP {
 					case op.ADD:
 						return func(rt *core.CoRoutine) (core.Value, error) {
@@ -113,8 +112,7 @@ func (bop BinOp) compile(cs *Machine) core.Instruction {
 	lhs := bop.A.compile(cs)
 	// optimise: rhs being a constant
 	if in, isInput := bop.B.(Input); isInput && cs.optimise {
-		switch b := in.Value.(type) {
-		case int64:
+		if b, isFloat := in.Value.AsFloat64(); isFloat {
 			switch bop.OP {
 			case op.ADD:
 				return func(rt *core.CoRoutine) (core.Value, error) {

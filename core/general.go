@@ -99,6 +99,10 @@ func (ref Reference) IsLocal() bool {
 	return ref.Scroll == 0
 }
 
+func (ref Reference) IsCaptured() bool {
+	return ref.Scroll > 0
+}
+
 type FuncInfoStatic struct {
 	Name        string      // name of the function
 	Args        []string    // argument names

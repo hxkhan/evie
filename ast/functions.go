@@ -118,15 +118,78 @@ func (fn Fn) compileInGlobal(vm *Machine) core.Instruction {
 }
 
 func (call Call) compile(vm *Machine) core.Instruction {
-	// compile function fetcher
-	fnFetcher := call.Fn.compile(vm)
-
 	// compile arguments
 	argsFetchers := make([]core.Instruction, len(call.Args))
 	for i, arg := range call.Args {
 		argsFetchers[i] = arg.compile(vm)
 	}
 
+	// optimise: calling captured functions
+	if iGet, isIdentGet := call.Fn.(IdentGet); isIdentGet && vm.optimise {
+		ref := vm.reach(iGet.Name)
+		if ref.IsCaptured() {
+			index := vm.addToCaptured(ref)
+			return func(rt *core.CoRoutine) (core.Value, error) {
+				value := rt.GetCaptured(index)
+
+				// check if its a user function
+				if fn, isUserFn := value.AsUserFn(); isUserFn {
+					if len(fn.Args) != len(argsFetchers) {
+						if fn.Name != "λ" {
+							return core.Value{}, core.CustomError("function '%v' requires %v argument(s), %v provided", fn.Name, len(fn.Args), len(argsFetchers))
+						}
+						return core.Value{}, core.CustomError("function requires %v argument(s), %v provided", len(fn.Args), len(argsFetchers))
+					}
+
+					// create space for all the locals
+					base := len(rt.Stack)
+					for range fn.Capacity {
+						rt.Stack = append(rt.Stack, vm.Boxes.New())
+					}
+
+					// set arguments
+					for i, fetcher := range argsFetchers {
+						v, err := fetcher(rt)
+						if err != nil {
+							return v, err
+						}
+						*rt.Stack[base+i] = v
+					}
+					rt.PushBase(base)
+
+					// save old state
+					oldCaptured := rt.Captured
+
+					rt.Captured = fn.Captured
+					// run fn code
+					result, err := fn.Code(rt)
+
+					// release non-escaping locals
+					for _, index := range fn.NonEscaping {
+						vm.Boxes.Put(rt.Stack[base+index])
+					}
+
+					// restore old state
+					rt.ExitUserFN(fn.Capacity, oldCaptured)
+
+					// don't implicitly return the return value of the last executed instruction
+					switch err {
+					case nil:
+						return core.Value{}, nil
+					case core.ErrReturnSignal:
+						return result, nil
+					default:
+						return result, err
+					}
+				}
+
+				return core.Value{}, core.CustomError("cannot call a non-function '%v'", value)
+			}
+		}
+	}
+
+	// compile function fetcher
+	fnFetcher := call.Fn.compile(vm)
 	return func(rt *core.CoRoutine) (core.Value, error) {
 		value, err := fnFetcher(rt)
 		if err != nil {

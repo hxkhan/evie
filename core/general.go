@@ -17,7 +17,7 @@ type Machine struct {
 	Globals  []*Value // globally scoped variables declared by the user
 	Builtins []Value  // built-in scope; can get from but can't set in
 
-	trace []string // call stack trace
+	trace []string // call-stack trace
 
 	gil sync.Mutex     // global interpreter lock
 	wg  sync.WaitGroup // wait for all threads
@@ -86,8 +86,22 @@ func (rt *CoRoutine) PopBase() {
 	rt.Basis = rt.Basis[:len(rt.Basis)-1]
 }
 
+func (rt *CoRoutine) PushLocal(v *Value) {
+	rt.Stack = append(rt.Stack, v)
+}
+
 func (rt *CoRoutine) PopLocals(n int) {
 	rt.Stack = rt.Stack[:len(rt.Stack)-n]
+}
+
+func (rt *CoRoutine) StackSize() int {
+	return len(rt.Stack)
+}
+
+func (rt *CoRoutine) SwapCaptured(new []*Value) (old []*Value) {
+	old = rt.Captured
+	rt.Captured = new
+	return old
 }
 
 type Reference struct {
@@ -103,6 +117,8 @@ func (ref Reference) IsCaptured() bool {
 	return ref.Scroll > 0
 }
 
+type Instruction func(rt *CoRoutine) (Value, error)
+
 type FuncInfoStatic struct {
 	Name        string      // name of the function
 	Args        []string    // argument names
@@ -116,6 +132,54 @@ type FuncInfoStatic struct {
 type UserFn struct {
 	*FuncInfoStatic
 	Captured []*Value
+}
+
+func (fn *UserFn) Call(args ...Value) (result Value, err error) {
+	if len(fn.Args) != len(args) {
+		if fn.Name != "λ" {
+			return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.Name, len(fn.Args), len(args))
+		}
+		return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.Args), len(args))
+	}
+
+	vm := fn.Machine
+	vm.AcquireGIL()
+	defer vm.ReleaseGIL()
+
+	// fetch a coroutine and prepare it
+	rt := vm.Coroutines.New()
+	rt.Captured = fn.Captured
+	rt.Basis = rt.Basis[:0]
+	rt.Stack = rt.Stack[:0]
+
+	// create space for all the locals
+	for range fn.Capacity {
+		rt.PushLocal(vm.Boxes.New())
+	}
+
+	// set arguments
+	for idx, arg := range args {
+		*rt.Stack[idx] = arg
+	}
+
+	// prep for execution & save currently captured values
+	rt.PushBase(0)
+	result, err = fn.Code(rt)
+
+	// release non-escaping locals
+	for _, idx := range fn.NonEscaping {
+		vm.Boxes.Put(rt.Stack[idx])
+	}
+
+	// don't implicitly return the return value of the last executed instruction
+	switch err {
+	case nil:
+		return Value{}, nil
+	case ErrReturnSignal:
+		return result, nil
+	default:
+		return result, err
+	}
 }
 
 func (fn UserFn) String() string {

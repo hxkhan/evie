@@ -18,9 +18,9 @@ type IdentSet struct {
 	Value Node
 }
 
-func (iDec IdentDec) compile(cs *Machine) core.Instruction {
-	index := cs.declare(iDec.Name)
-	value := iDec.Value.compile(cs)
+func (iDec IdentDec) compile(vm *Machine) core.Instruction {
+	index := vm.declare(iDec.Name)
+	value := iDec.Value.compile(vm)
 
 	return func(rt *core.CoRoutine) (core.Value, error) {
 		v, err := value(rt)
@@ -33,9 +33,9 @@ func (iDec IdentDec) compile(cs *Machine) core.Instruction {
 	}
 }
 
-func (iDec IdentDec) compileInGlobal(cs *Machine) core.Instruction {
-	index := cs.get(iDec.Name)
-	value := iDec.Value.compile(cs)
+func (iDec IdentDec) compileInGlobal(vm *Machine) core.Instruction {
+	index := vm.get(iDec.Name)
+	value := iDec.Value.compile(vm)
 
 	return func(rt *core.CoRoutine) (core.Value, error) {
 		v, err := value(rt)
@@ -48,51 +48,37 @@ func (iDec IdentDec) compileInGlobal(cs *Machine) core.Instruction {
 	}
 }
 
-func (iGet IdentGet) compile(cs *Machine) core.Instruction {
-	ref := cs.reach(iGet.Name)
+func (iGet IdentGet) compile(vm *Machine) core.Instruction {
+	ref := vm.reach(iGet.Name)
 
 	switch {
 	case ref.Scroll < 0:
 		return func(rt *core.CoRoutine) (core.Value, error) {
-			return cs.Builtins[ref.Index], nil
-		}
-
-	case ref.Scroll == 0:
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			return rt.GetLocal(ref.Index), nil
+			return vm.Builtins[ref.Index], nil
 		}
 
 	case ref.Scroll > 0:
-		index := cs.addToCaptured(ref)
+		index := vm.addToCaptured(ref)
 		return func(rt *core.CoRoutine) (core.Value, error) {
 			return rt.GetCaptured(index), nil
 		}
 	}
 
-	panic("impossible")
+	return func(rt *core.CoRoutine) (core.Value, error) {
+		return rt.GetLocal(ref.Index), nil
+	}
 }
 
-func (iSet IdentSet) compile(cs *Machine) core.Instruction {
-	ref := cs.reach(iSet.Name)
+func (iSet IdentSet) compile(vm *Machine) core.Instruction {
+	ref := vm.reach(iSet.Name)
 
-	value := iSet.Value.compile(cs)
+	value := iSet.Value.compile(vm)
 	switch {
 	case ref.Scroll < 0:
 		panic("cannot set the value of a built-in")
 
-	case ref.Scroll == 0:
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			v, err := value(rt)
-			if err != nil {
-				return v, err
-			}
-
-			rt.StoreLocal(ref.Index, v)
-			return core.Value{}, nil
-		}
-
 	case ref.Scroll > 0:
-		index := cs.addToCaptured(ref)
+		index := vm.addToCaptured(ref)
 		return func(rt *core.CoRoutine) (core.Value, error) {
 			v, err := value(rt)
 			if err != nil {
@@ -104,7 +90,15 @@ func (iSet IdentSet) compile(cs *Machine) core.Instruction {
 		}
 	}
 
-	panic("impossible")
+	return func(rt *core.CoRoutine) (core.Value, error) {
+		v, err := value(rt)
+		if err != nil {
+			return v, err
+		}
+
+		rt.StoreLocal(ref.Index, v)
+		return core.Value{}, nil
+	}
 }
 
 /*

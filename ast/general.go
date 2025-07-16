@@ -25,14 +25,14 @@ END
 */
 
 type Node interface {
-	compile(cs *Machine) core.Instruction
+	compile(vm *Machine) core.Instruction
 }
 
 type Input struct {
 	Value core.Value
 }
 
-func (in Input) compile(cs *Machine) core.Instruction {
+func (in Input) compile(vm *Machine) core.Instruction {
 	return func(rt *core.CoRoutine) (core.Value, error) {
 		return in.Value, nil
 	}
@@ -40,10 +40,10 @@ func (in Input) compile(cs *Machine) core.Instruction {
 
 type Block []Node
 
-func (b Block) compile(cs *Machine) core.Instruction {
+func (b Block) compile(vm *Machine) core.Instruction {
 	block := make([]core.Instruction, len(b))
 	for i, statement := range b {
-		block[i] = statement.compile(cs)
+		block[i] = statement.compile(vm)
 	}
 
 	return func(rt *core.CoRoutine) (core.Value, error) {
@@ -60,8 +60,8 @@ type Echo struct {
 	Value Node
 }
 
-func (out Echo) compile(cs *Machine) core.Instruction {
-	what := out.Value.compile(cs)
+func (out Echo) compile(vm *Machine) core.Instruction {
+	what := out.Value.compile(vm)
 
 	return func(rt *core.CoRoutine) (core.Value, error) {
 		v, err := what(rt)

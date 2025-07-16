@@ -10,12 +10,12 @@ type Conditional struct {
 	Otherwise Node // [optional]
 }
 
-func (cond Conditional) compile(cs *Machine) core.Instruction {
+func (cond Conditional) compile(vm *Machine) core.Instruction {
 	// optimise: if (something) return x
-	if cond.Otherwise == nil && cs.optimise {
+	if cond.Otherwise == nil && vm.optimise {
 		if ret, isReturn := cond.Action.(Return); isReturn {
-			condition := cond.Condition.compile(cs)
-			// optimise: returning contants
+			condition := cond.Condition.compile(vm)
+			// optimise: returning constants
 			if in, isInput := ret.Value.(Input); isInput {
 				return func(rt *core.CoRoutine) (core.Value, error) {
 					v, err := condition(rt)
@@ -31,8 +31,8 @@ func (cond Conditional) compile(cs *Machine) core.Instruction {
 			}
 
 			// optimise: returning local variables
-			if iGet, isIdentGet := ret.Value.(IdentGet); isIdentGet && cs.optimise {
-				ref := cs.reach(iGet.Name)
+			if iGet, isIdentGet := ret.Value.(IdentGet); isIdentGet && vm.optimise {
+				ref := vm.reach(iGet.Name)
 				if ref.IsLocal() {
 					return func(rt *core.CoRoutine) (core.Value, error) {
 						v, err := condition(rt)
@@ -49,7 +49,7 @@ func (cond Conditional) compile(cs *Machine) core.Instruction {
 			}
 
 			// generic compilation
-			what := ret.Value.compile(cs)
+			what := ret.Value.compile(vm)
 			return func(rt *core.CoRoutine) (core.Value, error) {
 				v, err := condition(rt)
 				if err != nil {
@@ -69,22 +69,22 @@ func (cond Conditional) compile(cs *Machine) core.Instruction {
 	}
 
 	// generic compilation
-	condition := cond.Condition.compile(cs)
+	condition := cond.Condition.compile(vm)
 
-	cs.scopeOpenBlock()
-	action := cond.Action.compile(cs)
+	vm.scopeOpenBlock()
+	action := cond.Action.compile(vm)
 
 	if cond.Otherwise != nil {
 		var otherwise core.Instruction
 		if o, isELIF := cond.Otherwise.(Conditional); isELIF {
-			otherwise = o.compileAsELIF(cs)
+			otherwise = o.compileAsELIF(vm)
 		} else {
 			// means it's an else
-			cs.scopeReuseBlock()
-			otherwise = cond.Otherwise.compile(cs)
+			vm.scopeReuseBlock()
+			otherwise = cond.Otherwise.compile(vm)
 		}
 
-		cs.scopeCloseBlock()
+		vm.scopeCloseBlock()
 		return func(rt *core.CoRoutine) (core.Value, error) {
 			v, err := condition(rt)
 			if err != nil {
@@ -97,7 +97,7 @@ func (cond Conditional) compile(cs *Machine) core.Instruction {
 			return otherwise(rt)
 		}
 	}
-	cs.scopeCloseBlock()
+	vm.scopeCloseBlock()
 
 	return func(rt *core.CoRoutine) (core.Value, error) {
 		v, err := condition(rt)
@@ -112,20 +112,20 @@ func (cond Conditional) compile(cs *Machine) core.Instruction {
 	}
 }
 
-func (cond Conditional) compileAsELIF(cs *Machine) core.Instruction {
-	condition := cond.Condition.compile(cs)
+func (cond Conditional) compileAsELIF(vm *Machine) core.Instruction {
+	condition := cond.Condition.compile(vm)
 
-	cs.scopeReuseBlock()
-	action := cond.Action.compile(cs)
+	vm.scopeReuseBlock()
+	action := cond.Action.compile(vm)
 
 	if cond.Otherwise != nil {
 		var otherwise core.Instruction
 		if o, isELIF := cond.Otherwise.(Conditional); isELIF {
-			otherwise = o.compileAsELIF(cs)
+			otherwise = o.compileAsELIF(vm)
 		} else {
 			// means it's an else
-			cs.scopeReuseBlock()
-			otherwise = cond.Otherwise.compile(cs)
+			vm.scopeReuseBlock()
+			otherwise = cond.Otherwise.compile(vm)
 		}
 
 		return func(rt *core.CoRoutine) (core.Value, error) {

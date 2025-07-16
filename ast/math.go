@@ -17,13 +17,13 @@ func (bop BinOp) isOpOneOf(ops ...byte) bool {
 	return slices.Contains(ops, bop.OP)
 }
 
-func (bop BinOp) compile(cs *Machine) core.Instruction {
+func (bop BinOp) compile(vm *Machine) core.Instruction {
 	// optimise: lhs being a local variable
-	if iGet, isIdentGet := bop.A.(IdentGet); isIdentGet && cs.optimise {
-		ref := cs.reach(iGet.Name)
+	if iGet, isIdentGet := bop.A.(IdentGet); isIdentGet && vm.optimise {
+		ref := vm.reach(iGet.Name)
 		if ref.IsLocal() {
 			// optimise: rhs being a constant
-			if in, isInput := bop.B.(Input); isInput && cs.optimise {
+			if in, isInput := bop.B.(Input); isInput && vm.optimise {
 				if b, isFloat := in.Value.AsFloat64(); isFloat {
 					switch bop.OP {
 					case op.ADD:
@@ -57,7 +57,7 @@ func (bop BinOp) compile(cs *Machine) core.Instruction {
 			}
 
 			// generic rhs
-			rhs := bop.B.compile(cs)
+			rhs := bop.B.compile(vm)
 			switch bop.OP {
 			case op.ADD:
 				return func(rt *core.CoRoutine) (core.Value, error) {
@@ -109,9 +109,9 @@ func (bop BinOp) compile(cs *Machine) core.Instruction {
 		}
 	}
 
-	lhs := bop.A.compile(cs)
+	lhs := bop.A.compile(vm)
 	// optimise: rhs being a constant
-	if in, isInput := bop.B.(Input); isInput && cs.optimise {
+	if in, isInput := bop.B.(Input); isInput && vm.optimise {
 		if b, isFloat := in.Value.AsFloat64(); isFloat {
 			switch bop.OP {
 			case op.ADD:
@@ -156,7 +156,7 @@ func (bop BinOp) compile(cs *Machine) core.Instruction {
 		}
 	}
 
-	rhs := bop.B.compile(cs)
+	rhs := bop.B.compile(vm)
 
 	// generic compilation
 	switch bop.OP {
@@ -227,7 +227,7 @@ type Neg struct {
 	O Node // [required]
 }
 
-func (neg Neg) compile(cs *Machine) core.Instruction {
+func (neg Neg) compile(vm *Machine) core.Instruction {
 	/* if in, isInput := neg.O.(Input); isInput {
 		switch v := in.Value.(type) {
 		case int64:
@@ -239,7 +239,7 @@ func (neg Neg) compile(cs *Machine) core.Instruction {
 		}
 	} else {
 		pos = cs.emit(op.NEG)
-		neg.O.compile(cs)
+		neg.O.compile(vm)
 	}
 
 	return pos */

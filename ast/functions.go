@@ -59,10 +59,10 @@ func (fn Fn) compile(vm *Machine) core.Instruction {
 		Code:        code,
 		Machine:     &vm.Machine}
 
-	return func(rt *core.CoRoutine) (core.Value, error) {
+	return func(fbr *core.Fiber) (core.Value, error) {
 		captured := make([]*core.Value, len(refs))
 		for i, ref := range refs {
-			captured[i] = rt.Capture(ref.Index, ref.Scroll)
+			captured[i] = fbr.Capture(ref.Index, ref.Scroll)
 		}
 
 		// create the user fn & return it
@@ -102,17 +102,17 @@ func (fn Fn) compileInGlobal(vm *Machine, idx int) core.Instruction {
 		Code:        code,
 		Machine:     &vm.Machine}
 
-	return func(rt *core.CoRoutine) (core.Value, error) {
+	return func(fbr *core.Fiber) (core.Value, error) {
 		captured := make([]*core.Value, len(refs))
 		for i, ref := range refs {
-			captured[i] = rt.Capture(ref.Index, ref.Scroll)
+			captured[i] = fbr.Capture(ref.Index, ref.Scroll)
 		}
 
 		// create the user fn
 		fn := core.BoxUserFn(core.UserFn{Captured: captured, FuncInfoStatic: info})
 
 		// declare the function locally
-		rt.StoreLocal(idx, fn)
+		fbr.StoreLocal(idx, fn)
 		return core.Value{}, nil
 	}
 }
@@ -133,8 +133,8 @@ func (call Call) compile(vm *Machine) core.Instruction {
 
 		if ref.IsCaptured() {
 			index := vm.addToCaptured(ref)
-			return func(rt *core.CoRoutine) (result core.Value, err error) {
-				value := rt.GetCaptured(index)
+			return func(fbr *core.Fiber) (result core.Value, err error) {
+				value := fbr.GetCaptured(index)
 
 				// check if its a user function
 				if fn, isUserFn := value.AsUserFn(); isUserFn {
@@ -146,34 +146,34 @@ func (call Call) compile(vm *Machine) core.Instruction {
 					}
 
 					// create space for all the locals
-					base := rt.StackSize()
+					base := fbr.StackSize()
 					for range fn.Capacity {
-						rt.PushLocal(vm.Boxes.New())
+						fbr.PushLocal(vm.Boxes.Get())
 					}
 
 					// set arguments
 					for idx, fetcher := range argsFetchers {
-						v, err := fetcher(rt)
+						v, err := fetcher(fbr)
 						if err != nil {
 							return v, err
 						}
-						*rt.Stack[base+idx] = v
+						*fbr.Stack[base+idx] = v
 					}
 
 					// prep for execution & save currently captured values
-					rt.PushBase(base)
-					old := rt.SwapCaptured(fn.Captured)
-					result, err = fn.Code(rt)
+					fbr.PushBase(base)
+					old := fbr.SwapActive(fn)
+					result, err = fn.Code(fbr)
 
 					// release non-escaping locals
 					for _, idx := range fn.NonEscaping {
-						vm.Boxes.Put(rt.Stack[base+idx])
+						vm.Boxes.Put(fbr.Stack[base+idx])
 					}
 
 					// restore old state
-					rt.PopLocals(fn.Capacity)
-					rt.PopBase()
-					rt.SwapCaptured(old)
+					fbr.PopLocals(fn.Capacity)
+					fbr.PopBase()
+					fbr.SwapActive(old)
 
 					// don't implicitly return the return value of the last executed instruction
 					switch err {
@@ -193,8 +193,8 @@ func (call Call) compile(vm *Machine) core.Instruction {
 
 	// generic compilation
 	fnFetcher := call.Fn.compile(vm)
-	return func(rt *core.CoRoutine) (result core.Value, err error) {
-		value, err := fnFetcher(rt)
+	return func(fbr *core.Fiber) (result core.Value, err error) {
+		value, err := fnFetcher(fbr)
 		if err != nil {
 			return value, err
 		}
@@ -209,34 +209,34 @@ func (call Call) compile(vm *Machine) core.Instruction {
 			}
 
 			// create space for all the locals
-			base := rt.StackSize()
+			base := fbr.StackSize()
 			for range fn.Capacity {
-				rt.PushLocal(vm.Boxes.New())
+				fbr.PushLocal(vm.Boxes.Get())
 			}
 
 			// set arguments
 			for idx, fetcher := range argsFetchers {
-				v, err := fetcher(rt)
+				v, err := fetcher(fbr)
 				if err != nil {
 					return v, err
 				}
-				*rt.Stack[base+idx] = v
+				*fbr.Stack[base+idx] = v
 			}
 
 			// prep for execution & save currently captured values
-			rt.PushBase(base)
-			old := rt.SwapCaptured(fn.Captured)
-			result, err = fn.Code(rt)
+			fbr.PushBase(base)
+			old := fbr.SwapActive(fn)
+			result, err = fn.Code(fbr)
 
 			// release non-escaping locals
 			for _, idx := range fn.NonEscaping {
-				vm.Boxes.Put(rt.Stack[base+idx])
+				vm.Boxes.Put(fbr.Stack[base+idx])
 			}
 
 			// restore old state
-			rt.PopLocals(fn.Capacity)
-			rt.PopBase()
-			rt.SwapCaptured(old)
+			fbr.PopLocals(fn.Capacity)
+			fbr.PopBase()
+			fbr.SwapActive(old)
 
 			// don't implicitly return the return value of the last executed instruction
 			switch err {
@@ -269,7 +269,7 @@ func (g Go) compile(vm *Machine) core.Instruction {
 
 	panic("go expected call, got something else") */
 
-	return func(rt *core.CoRoutine) (core.Value, error) {
+	return func(fbr *core.Fiber) (core.Value, error) {
 		return core.Value{}, nil
 	}
 }
@@ -277,7 +277,7 @@ func (g Go) compile(vm *Machine) core.Instruction {
 func (ret Return) compile(vm *Machine) core.Instruction {
 	// optimise: returning constants
 	if in, isInput := ret.Value.(Input); isInput && vm.optimise {
-		return func(rt *core.CoRoutine) (core.Value, error) {
+		return func(fbr *core.Fiber) (core.Value, error) {
 			return in.Value, core.ErrReturnSignal
 		}
 	}
@@ -290,15 +290,15 @@ func (ret Return) compile(vm *Machine) core.Instruction {
 		}
 
 		if ref.IsLocal() {
-			return func(rt *core.CoRoutine) (core.Value, error) {
-				return rt.GetLocal(ref.Index), core.ErrReturnSignal
+			return func(fbr *core.Fiber) (core.Value, error) {
+				return fbr.GetLocal(ref.Index), core.ErrReturnSignal
 			}
 		}
 	}
 
 	what := ret.Value.compile(vm)
-	return func(rt *core.CoRoutine) (core.Value, error) {
-		v, err := what(rt)
+	return func(fbr *core.Fiber) (core.Value, error) {
+		v, err := what(fbr)
 		if err != nil {
 			return v, err
 		}

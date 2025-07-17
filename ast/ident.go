@@ -27,26 +27,26 @@ func (iDec IdentDec) compile(vm *Machine) core.Instruction {
 	}
 
 	value := iDec.Value.compile(vm)
-	return func(rt *core.CoRoutine) (core.Value, error) {
-		v, err := value(rt)
+	return func(fbr *core.Fiber) (core.Value, error) {
+		v, err := value(fbr)
 		if err != nil {
 			return v, err
 		}
 
-		rt.StoreLocal(index, v)
+		fbr.StoreLocal(index, v)
 		return core.Value{}, nil
 	}
 }
 
 func (iDec IdentDec) compileInGlobal(vm *Machine, idx int) core.Instruction {
 	value := iDec.Value.compile(vm)
-	return func(rt *core.CoRoutine) (core.Value, error) {
-		v, err := value(rt)
+	return func(fbr *core.Fiber) (core.Value, error) {
+		v, err := value(fbr)
 		if err != nil {
 			return v, err
 		}
 
-		rt.StoreLocal(idx, v)
+		fbr.StoreLocal(idx, v)
 		return core.Value{}, nil
 	}
 }
@@ -59,19 +59,19 @@ func (iGet IdentGet) compile(vm *Machine) core.Instruction {
 
 	switch {
 	case ref.Scroll < 0:
-		return func(rt *core.CoRoutine) (core.Value, error) {
+		return func(fbr *core.Fiber) (core.Value, error) {
 			return vm.Builtins[ref.Index], nil
 		}
 
 	case ref.Scroll > 0:
 		index := vm.addToCaptured(ref)
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			return rt.GetCaptured(index), nil
+		return func(fbr *core.Fiber) (core.Value, error) {
+			return fbr.GetCaptured(index), nil
 		}
 	}
 
-	return func(rt *core.CoRoutine) (core.Value, error) {
-		return rt.GetLocal(ref.Index), nil
+	return func(fbr *core.Fiber) (core.Value, error) {
+		return fbr.GetLocal(ref.Index), nil
 	}
 }
 
@@ -88,24 +88,24 @@ func (iSet IdentSet) compile(vm *Machine) core.Instruction {
 
 	case ref.Scroll > 0:
 		index := vm.addToCaptured(ref)
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			v, err := value(rt)
+		return func(fbr *core.Fiber) (core.Value, error) {
+			v, err := value(fbr)
 			if err != nil {
 				return v, err
 			}
 
-			rt.StoreCaptured(index, v)
+			fbr.StoreCaptured(index, v)
 			return core.Value{}, nil
 		}
 	}
 
-	return func(rt *core.CoRoutine) (core.Value, error) {
-		v, err := value(rt)
+	return func(fbr *core.Fiber) (core.Value, error) {
+		v, err := value(fbr)
 		if err != nil {
 			return v, err
 		}
 
-		rt.StoreLocal(ref.Index, v)
+		fbr.StoreLocal(ref.Index, v)
 		return core.Value{}, nil
 	}
 }
@@ -132,7 +132,7 @@ if bop, isBinOp := iSet.Value.(BinOp); isBinOp {
 					case op.ADD:
 						if ref.Scroll == 0 {
 							return func(rt *core.CoRoutine) (result core.Value, err error) {
-								a := rt.GetLocal(index)
+								a := fbr.GetLocal(index)
 
 								if i64, ok := a.AsInt64(); ok {
 									result = core.BoxInt64(i64 + b)
@@ -145,12 +145,12 @@ if bop, isBinOp := iSet.Value.(BinOp); isBinOp {
 									return result, err
 								}
 
-								rt.StoreLocal(index, result)
+								fbr.StoreLocal(index, result)
 								return core.Value{}, nil
 							}
 						} else {
 							return func(rt *core.CoRoutine) (result core.Value, err error) {
-								a := rt.GetCaptured(index)
+								a := fbr.GetCaptured(index)
 
 								if i64, ok := a.AsInt64(); ok {
 									result = core.BoxInt64(i64 + b)
@@ -163,7 +163,7 @@ if bop, isBinOp := iSet.Value.(BinOp); isBinOp {
 									return result, err
 								}
 
-								rt.StoreCaptured(index, result)
+								fbr.StoreCaptured(index, result)
 								return core.Value{}, nil
 							}
 						}

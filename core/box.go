@@ -38,7 +38,7 @@ Although arguably simpler in design, we lose 64 bit integers so idk.
 const (
 	stringType = iota
 	userFnType
-	funcType
+	goFuncType
 	arrayType
 	taskType
 	bufferType
@@ -85,10 +85,10 @@ func BoxUserFn(fn UserFn) Value {
 	return Value{scalar: userFnType, pointer: unsafe.Pointer(&fn)}
 }
 
-// BoxFunc boxes a golang function
-func BoxFunc[T ValidFuncTypes](fn T) Value {
+// BoxGoFunc boxes a golang function
+func BoxGoFunc[T GoFunc](fn T) Value {
 	iface := any(fn)
-	return Value{scalar: funcType, pointer: unsafe.Pointer(&iface)}
+	return Value{scalar: goFuncType, pointer: unsafe.Pointer(&iface)}
 }
 
 // BoxArray boxes an evie array
@@ -142,8 +142,8 @@ func (x Value) AsUserFn() (fn *UserFn, ok bool) {
 	return (*UserFn)(x.pointer), true
 }
 
-func (x Value) AsNativeFn() (iface any, ok bool) {
-	if x.scalar != funcType || isKnown(x.pointer) {
+func (x Value) AsGoFunc() (iface any, ok bool) {
+	if x.scalar != goFuncType || isKnown(x.pointer) {
 		return nil, false
 	}
 	return *(*any)(x.pointer), true

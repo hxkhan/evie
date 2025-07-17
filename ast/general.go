@@ -33,7 +33,7 @@ type Input struct {
 }
 
 func (in Input) compile(vm *Machine) core.Instruction {
-	return func(rt *core.CoRoutine) (core.Value, error) {
+	return func(fbr *core.Fiber) (core.Value, error) {
 		return in.Value, nil
 	}
 }
@@ -46,9 +46,9 @@ func (b Block) compile(vm *Machine) core.Instruction {
 		block[i] = statement.compile(vm)
 	}
 
-	return func(rt *core.CoRoutine) (core.Value, error) {
+	return func(fbr *core.Fiber) (core.Value, error) {
 		for _, statement := range block {
-			if v, err := statement(rt); err != nil {
+			if v, err := statement(fbr); err != nil {
 				return v, err
 			}
 		}
@@ -63,8 +63,8 @@ type Echo struct {
 func (out Echo) compile(vm *Machine) core.Instruction {
 	what := out.Value.compile(vm)
 
-	return func(rt *core.CoRoutine) (core.Value, error) {
-		v, err := what(rt)
+	return func(fbr *core.Fiber) (core.Value, error) {
+		v, err := what(fbr)
 		if err != nil {
 			return v, err
 		}

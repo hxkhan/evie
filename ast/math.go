@@ -4,22 +4,34 @@ import (
 	"slices"
 
 	"github.com/hk-32/evie/core"
-	"github.com/hk-32/evie/op"
+)
+
+type Operator int
+
+const (
+	AddOp Operator = iota + 1
+	SubOp
+	MulOp
+	DivOp
+
+	EqOp
+	LtOp
+	GtOp
 )
 
 type BinOp struct {
-	OP byte // [required]
-	A  Node // [required]
-	B  Node // [required]
+	Lhs      Node // [required]
+	Operator      // [required]
+	Rhs      Node // [required]
 }
 
-func (bop BinOp) isOpOneOf(ops ...byte) bool {
-	return slices.Contains(ops, bop.OP)
+func (bop BinOp) isOpOneOf(ops ...Operator) bool {
+	return slices.Contains(ops, bop.Operator)
 }
 
 func (bop BinOp) compile(vm *Machine) core.Instruction {
 	// optimise: lhs being a local variable
-	if iGet, isIdentGet := bop.A.(IdentGet); isIdentGet && vm.optimise {
+	if iGet, isIdentGet := bop.Lhs.(IdentGet); isIdentGet && vm.optimise {
 		ref, err := vm.reach(iGet.Name)
 		if err != nil {
 			panic(err)
@@ -27,30 +39,30 @@ func (bop BinOp) compile(vm *Machine) core.Instruction {
 
 		if ref.IsLocal() {
 			// optimise: rhs being a constant
-			if in, isInput := bop.B.(Input); isInput {
+			if in, isInput := bop.Rhs.(Input); isInput {
 				if b, isFloat := in.Value.AsFloat64(); isFloat {
-					switch bop.OP {
-					case op.ADD:
-						return func(rt *core.CoRoutine) (core.Value, error) {
-							a := rt.GetLocal(ref.Index)
+					switch bop.Operator {
+					case AddOp:
+						return func(fbr *core.Fiber) (core.Value, error) {
+							a := fbr.GetLocal(ref.Index)
 							if a, ok := a.AsFloat64(); ok {
 								return core.BoxFloat64(a + b), nil
 							}
 							return core.Value{}, core.OperatorTypesError("+", a, b)
 						}
 
-					case op.SUB:
-						return func(rt *core.CoRoutine) (core.Value, error) {
-							a := rt.GetLocal(ref.Index)
+					case SubOp:
+						return func(fbr *core.Fiber) (core.Value, error) {
+							a := fbr.GetLocal(ref.Index)
 							if a, ok := a.AsFloat64(); ok {
 								return core.BoxFloat64(a - b), nil
 							}
 							return core.Value{}, core.OperatorTypesError("-", a, b)
 						}
 
-					case op.LS:
-						return func(rt *core.CoRoutine) (core.Value, error) {
-							a := rt.GetLocal(ref.Index)
+					case LtOp:
+						return func(fbr *core.Fiber) (core.Value, error) {
+							a := fbr.GetLocal(ref.Index)
 							if a, ok := a.AsFloat64(); ok {
 								return core.BoxBool(a < b), nil
 							}
@@ -61,12 +73,12 @@ func (bop BinOp) compile(vm *Machine) core.Instruction {
 			}
 
 			// generic rhs
-			rhs := bop.B.compile(vm)
-			switch bop.OP {
-			case op.ADD:
-				return func(rt *core.CoRoutine) (core.Value, error) {
-					a := rt.GetLocal(ref.Index)
-					b, err := rhs(rt)
+			rhs := bop.Rhs.compile(vm)
+			switch bop.Operator {
+			case AddOp:
+				return func(fbr *core.Fiber) (core.Value, error) {
+					a := fbr.GetLocal(ref.Index)
+					b, err := rhs(fbr)
 					if err != nil {
 						return a, err
 					}
@@ -78,10 +90,10 @@ func (bop BinOp) compile(vm *Machine) core.Instruction {
 					}
 					return core.Value{}, core.OperatorTypesError("+", a, b)
 				}
-			case op.SUB:
-				return func(rt *core.CoRoutine) (core.Value, error) {
-					a := rt.GetLocal(ref.Index)
-					b, err := rhs(rt)
+			case SubOp:
+				return func(fbr *core.Fiber) (core.Value, error) {
+					a := fbr.GetLocal(ref.Index)
+					b, err := rhs(fbr)
 					if err != nil {
 						return a, err
 					}
@@ -94,10 +106,10 @@ func (bop BinOp) compile(vm *Machine) core.Instruction {
 					return core.Value{}, core.OperatorTypesError("-", a, b)
 				}
 
-			case op.LS:
-				return func(rt *core.CoRoutine) (core.Value, error) {
-					a := rt.GetLocal(ref.Index)
-					b, err := rhs(rt)
+			case LtOp:
+				return func(fbr *core.Fiber) (core.Value, error) {
+					a := fbr.GetLocal(ref.Index)
+					b, err := rhs(fbr)
 					if err != nil {
 						return a, err
 					}
@@ -113,14 +125,14 @@ func (bop BinOp) compile(vm *Machine) core.Instruction {
 		}
 	}
 
-	lhs := bop.A.compile(vm)
+	lhs := bop.Lhs.compile(vm)
 	// optimise: rhs being a constant
-	if in, isInput := bop.B.(Input); isInput && vm.optimise {
+	if in, isInput := bop.Rhs.(Input); isInput && vm.optimise {
 		if b, isFloat := in.Value.AsFloat64(); isFloat {
-			switch bop.OP {
-			case op.ADD:
-				return func(rt *core.CoRoutine) (core.Value, error) {
-					a, err := lhs(rt)
+			switch bop.Operator {
+			case AddOp:
+				return func(fbr *core.Fiber) (core.Value, error) {
+					a, err := lhs(fbr)
 					if err != nil {
 						return a, err
 					}
@@ -131,9 +143,9 @@ func (bop BinOp) compile(vm *Machine) core.Instruction {
 					return core.Value{}, core.OperatorTypesError("+", a, b)
 				}
 
-			case op.SUB:
-				return func(rt *core.CoRoutine) (core.Value, error) {
-					a, err := lhs(rt)
+			case SubOp:
+				return func(fbr *core.Fiber) (core.Value, error) {
+					a, err := lhs(fbr)
 					if err != nil {
 						return a, err
 					}
@@ -144,9 +156,9 @@ func (bop BinOp) compile(vm *Machine) core.Instruction {
 					return core.Value{}, core.OperatorTypesError("-", a, b)
 				}
 
-			case op.LS:
-				return func(rt *core.CoRoutine) (core.Value, error) {
-					a, err := lhs(rt)
+			case LtOp:
+				return func(fbr *core.Fiber) (core.Value, error) {
+					a, err := lhs(fbr)
 					if err != nil {
 						return a, err
 					}
@@ -160,17 +172,17 @@ func (bop BinOp) compile(vm *Machine) core.Instruction {
 		}
 	}
 
-	rhs := bop.B.compile(vm)
+	rhs := bop.Rhs.compile(vm)
 
 	// generic compilation
-	switch bop.OP {
-	case op.ADD:
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			a, err := lhs(rt)
+	switch bop.Operator {
+	case AddOp:
+		return func(fbr *core.Fiber) (core.Value, error) {
+			a, err := lhs(fbr)
 			if err != nil {
 				return a, err
 			}
-			b, err := rhs(rt)
+			b, err := rhs(fbr)
 			if err != nil {
 				return a, err
 			}
@@ -184,13 +196,13 @@ func (bop BinOp) compile(vm *Machine) core.Instruction {
 			return core.Value{}, core.OperatorTypesError("+", a, b)
 		}
 
-	case op.SUB:
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			a, err := lhs(rt)
+	case SubOp:
+		return func(fbr *core.Fiber) (core.Value, error) {
+			a, err := lhs(fbr)
 			if err != nil {
 				return a, err
 			}
-			b, err := rhs(rt)
+			b, err := rhs(fbr)
 			if err != nil {
 				return a, err
 			}
@@ -204,13 +216,13 @@ func (bop BinOp) compile(vm *Machine) core.Instruction {
 			return core.Value{}, core.OperatorTypesError("-", a, b)
 		}
 
-	case op.LS:
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			a, err := lhs(rt)
+	case LtOp:
+		return func(fbr *core.Fiber) (core.Value, error) {
+			a, err := lhs(fbr)
 			if err != nil {
 				return a, err
 			}
-			b, err := rhs(rt)
+			b, err := rhs(fbr)
 			if err != nil {
 				return a, err
 			}

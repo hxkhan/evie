@@ -1,18 +1,22 @@
 package core
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/hk-32/evie/pool"
+)
 
 func NewMachine(builtins []Value) Machine {
 	return Machine{
-		Boxes:      make(pool[Value], 0, 48),    // starting with a capacity of storing 48 boxed values
-		Coroutines: make(pool[CoRoutine], 0, 3), // starting with a capacity of storing 3 co-routines
-		Builtins:   builtins,                    // built-in variables
+		Boxes:    pool.Make[Value](48), // starting with a capacity of storing 48 boxed values
+		Fibers:   pool.Make[Fiber](3),  // starting with a capacity of storing 3 co-routines
+		Builtins: builtins,             // built-in variables
 	}
 }
 
 type Machine struct {
-	Boxes      pool[Value]     // pool of boxes for values
-	Coroutines pool[CoRoutine] // pool of co-routines
+	Boxes  pool.Instance[Value] // pooled boxes for this vm
+	Fibers pool.Instance[Fiber] // pooled fibers for this vm
 
 	Globals  []*Value // globally scoped variables declared by the user
 	Builtins []Value  // built-in scope; can get from but can't set in
@@ -20,13 +24,7 @@ type Machine struct {
 	trace []string // call-stack trace
 
 	gil sync.Mutex     // global interpreter lock
-	wg  sync.WaitGroup // wait for all threads
-}
-
-type CoRoutine struct {
-	Captured []*Value // captured variables of the current function being executed
-	Stack    []*Value // stack for local variables accessible in the current call stack
-	Basis    []int    // one base per function; basis[-1] is where the current function's locals start at
+	wg  sync.WaitGroup // wait for all fibers to complete
 }
 
 func (m *Machine) WaitForNoActivity() {
@@ -41,8 +39,15 @@ func (m *Machine) AcquireGIL() {
 	m.gil.Lock()
 }
 
+type Fiber struct {
+	Active *UserFn  // currently active user function
+	Memory []*Value // stack for local variables accessible in the current call stack
+	Stack  []*Value // stack for local variables accessible in the current call stack
+	Basis  []int    // one base per function; basis[-1] is where the current function's locals start at
+}
+
 /* func (rt *CoRoutine) newRoutine(ip int, locals []*Value, captured []*Value) *CoRoutine {
-	return &CoRoutine{ip, rt.vm, rt.code, captured, locals, []int{0}}
+	return &CoRoutine{ip, fbr.vm, fbr.code, captured, locals, []int{0}}
 } */
 
 /* func (rt *Routine) terminate() {
@@ -50,57 +55,57 @@ func (m *Machine) AcquireGIL() {
 	ReleaseGIL()
 } */
 
-func (rt *CoRoutine) StoreLocal(index int, value Value) {
-	*(rt.Stack[rt.GetCurrentBase()+index]) = value
+func (fbr *Fiber) StoreLocal(index int, value Value) {
+	*(fbr.Stack[fbr.GetCurrentBase()+index]) = value
 }
 
-func (rt *CoRoutine) StoreCaptured(index int, value Value) {
-	*(rt.Captured[index]) = value
+func (fbr *Fiber) StoreCaptured(index int, value Value) {
+	*(fbr.Active.Captured[index]) = value
 }
 
-func (rt *CoRoutine) GetLocal(index int) Value {
-	return *(rt.Stack[rt.GetCurrentBase()+index])
+func (fbr *Fiber) GetLocal(index int) Value {
+	return *(fbr.Stack[fbr.GetCurrentBase()+index])
 }
 
-func (rt *CoRoutine) Capture(index int, scroll int) *Value {
-	return rt.Stack[rt.GetScrolledBase(scroll)+index]
+func (fbr *Fiber) Capture(index int, scroll int) *Value {
+	return fbr.Stack[fbr.GetScrolledBase(scroll)+index]
 }
 
-func (rt *CoRoutine) GetCaptured(index int) Value {
-	return *(rt.Captured[index])
+func (fbr *Fiber) GetCaptured(index int) Value {
+	return *(fbr.Active.Captured[index])
 }
 
-func (rt *CoRoutine) GetCurrentBase() int {
-	return rt.Basis[len(rt.Basis)-1]
+func (fbr *Fiber) GetCurrentBase() int {
+	return fbr.Basis[len(fbr.Basis)-1]
 }
 
-func (rt *CoRoutine) GetScrolledBase(scroll int) int {
-	return rt.Basis[len(rt.Basis)-scroll]
+func (fbr *Fiber) GetScrolledBase(scroll int) int {
+	return fbr.Basis[len(fbr.Basis)-scroll]
 }
 
-func (rt *CoRoutine) PushBase(base int) {
-	rt.Basis = append(rt.Basis, base)
+func (fbr *Fiber) PushBase(base int) {
+	fbr.Basis = append(fbr.Basis, base)
 }
 
-func (rt *CoRoutine) PopBase() {
-	rt.Basis = rt.Basis[:len(rt.Basis)-1]
+func (fbr *Fiber) PopBase() {
+	fbr.Basis = fbr.Basis[:len(fbr.Basis)-1]
 }
 
-func (rt *CoRoutine) PushLocal(v *Value) {
-	rt.Stack = append(rt.Stack, v)
+func (fbr *Fiber) PushLocal(v *Value) {
+	fbr.Stack = append(fbr.Stack, v)
 }
 
-func (rt *CoRoutine) PopLocals(n int) {
-	rt.Stack = rt.Stack[:len(rt.Stack)-n]
+func (fbr *Fiber) PopLocals(n int) {
+	fbr.Stack = fbr.Stack[:len(fbr.Stack)-n]
 }
 
-func (rt *CoRoutine) StackSize() int {
-	return len(rt.Stack)
+func (fbr *Fiber) StackSize() int {
+	return len(fbr.Stack)
 }
 
-func (rt *CoRoutine) SwapCaptured(new []*Value) (old []*Value) {
-	old = rt.Captured
-	rt.Captured = new
+func (fbr *Fiber) SwapActive(new *UserFn) (old *UserFn) {
+	old = fbr.Active
+	fbr.Active = new
 	return old
 }
 
@@ -117,7 +122,7 @@ func (ref Reference) IsCaptured() bool {
 	return ref.Scroll > 0
 }
 
-type Instruction func(rt *CoRoutine) (Value, error)
+type Instruction func(fbr *Fiber) (Value, error)
 
 type FuncInfoStatic struct {
 	Name        string      // name of the function
@@ -147,28 +152,28 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 	defer vm.ReleaseGIL()
 
 	// fetch a coroutine and prepare it
-	rt := vm.Coroutines.New()
-	rt.Captured = fn.Captured
-	rt.Basis = rt.Basis[:0]
-	rt.Stack = rt.Stack[:0]
+	fbr := vm.Fibers.Get()
+	fbr.Active = fn
+	fbr.Basis = fbr.Basis[:0]
+	fbr.Stack = fbr.Stack[:0]
 
 	// create space for all the locals
 	for range fn.Capacity {
-		rt.PushLocal(vm.Boxes.New())
+		fbr.PushLocal(vm.Boxes.Get())
 	}
 
 	// set arguments
 	for idx, arg := range args {
-		*rt.Stack[idx] = arg
+		*fbr.Stack[idx] = arg
 	}
 
 	// prep for execution & save currently captured values
-	rt.PushBase(0)
-	result, err = fn.Code(rt)
+	fbr.PushBase(0)
+	result, err = fn.Code(fbr)
 
 	// release non-escaping locals
 	for _, idx := range fn.NonEscaping {
-		vm.Boxes.Put(rt.Stack[idx])
+		vm.Boxes.Put(fbr.Stack[idx])
 	}
 
 	// don't implicitly return the return value of the last executed instruction

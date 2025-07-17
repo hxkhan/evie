@@ -8,7 +8,6 @@ import (
 	"github.com/hk-32/evie/ast"
 	"github.com/hk-32/evie/core"
 	"github.com/hk-32/evie/lexer"
-	"github.com/hk-32/evie/op"
 	"github.com/hk-32/evie/token"
 )
 
@@ -239,9 +238,9 @@ func (ps *parser) handleNames(main token.Token) ast.Node {
 
 	case ps.consumeSimple("+=", false) || ps.consumeSimple("-=", false):
 		return ast.IdentSet{Name: main.Literal, Value: ast.BinOp{
-			OP: maps[ps.lastConsumed.Literal],
-			A:  ast.IdentGet{Name: main.Literal},
-			B:  ps.parseExpression(0),
+			Lhs:      ast.IdentGet{Name: main.Literal},
+			Operator: maps[ps.lastConsumed.Literal],
+			Rhs:      ps.parseExpression(0),
 		}}
 
 	case ps.consumeSimple("(", false):
@@ -414,29 +413,29 @@ func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) (node
 		right := ps.parseExpression(currentPrecedence + 1)
 
 		left = ast.BinOp{
-			OP: maps[next.Literal],
-			A:  left,
-			B:  right,
+			Lhs:      left,
+			Operator: maps[next.Literal],
+			Rhs:      right,
 		}
 	}
 
 	return left
 }
 
-var maps = map[string]byte{
-	"+": op.ADD,
-	"-": op.SUB,
-	"*": op.MUL,
-	"/": op.DIV,
+var maps = map[string]ast.Operator{
+	"+": ast.AddOp,
+	"-": ast.SubOp,
+	"*": ast.MulOp,
+	"/": ast.DivOp,
 
-	"+=": op.ADD,
-	"-=": op.SUB,
-	"*=": op.MUL,
-	"/=": op.DIV,
+	"+=": ast.AddOp,
+	"-=": ast.SubOp,
+	"*=": ast.MulOp,
+	"/=": ast.DivOp,
 
-	"==": op.EQ,
-	"<":  op.LS,
-	">":  op.MR,
+	"==": ast.EqOp,
+	"<":  ast.LtOp,
+	">":  ast.GtOp,
 }
 
 var precedence = map[string]int{

@@ -1,7 +1,7 @@
 package core
 
 // compile time safety so uncallable functions don't get into the system
-type ValidFuncTypes interface {
+type GoFunc interface {
 	func() (Value, error) |
 		func(Value) (Value, error) |
 		func(Value, Value) (Value, error) |
@@ -11,25 +11,24 @@ type ValidFuncTypes interface {
 		func(Value, Value, Value, Value, Value, Value) (Value, error)
 }
 
-/* type NativeFn[T ValidFnTypes] struct {
-	Callable T
+/* type NativeFn struct {
+	Callable any
 }
 
-func (fn NativeFn[T]) String() string {
+func (fn NativeFn) String() string {
 	return "<fn>"
 }
 
-func (fn NativeFn[T]) TypeOf() string {
+func (fn NativeFn) TypeOf() string {
 	return "function"
 }
 
-func (fn NativeFn[T]) Name() string {
+func (fn NativeFn) Name() string {
 	path := runtime.FuncForPC(reflect.ValueOf(fn.Callable).Pointer()).Name()
 	parts := strings.Split(path, "/")
 	return parts[len(parts)-1]
 }
 
-func (fn NativeFn[T]) Nargs() int {
+func (fn NativeFn) Nargs() int {
 	return reflect.TypeOf(fn.Callable).NumIn()
-}
-*/
+} */

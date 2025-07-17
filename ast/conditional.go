@@ -17,8 +17,8 @@ func (cond Conditional) compile(vm *Machine) core.Instruction {
 			condition := cond.Condition.compile(vm)
 			// optimise: returning constants
 			if in, isInput := ret.Value.(Input); isInput {
-				return func(rt *core.CoRoutine) (core.Value, error) {
-					v, err := condition(rt)
+				return func(fbr *core.Fiber) (core.Value, error) {
+					v, err := condition(fbr)
 					if err != nil {
 						return v, err
 					}
@@ -38,14 +38,14 @@ func (cond Conditional) compile(vm *Machine) core.Instruction {
 				}
 
 				if ref.IsLocal() {
-					return func(rt *core.CoRoutine) (core.Value, error) {
-						v, err := condition(rt)
+					return func(fbr *core.Fiber) (core.Value, error) {
+						v, err := condition(fbr)
 						if err != nil {
 							return v, err
 						}
 
 						if v.IsTruthy() {
-							return rt.GetLocal(ref.Index), core.ErrReturnSignal
+							return fbr.GetLocal(ref.Index), core.ErrReturnSignal
 						}
 						return core.Value{}, nil
 					}
@@ -54,14 +54,14 @@ func (cond Conditional) compile(vm *Machine) core.Instruction {
 
 			// generic compilation
 			what := ret.Value.compile(vm)
-			return func(rt *core.CoRoutine) (core.Value, error) {
-				v, err := condition(rt)
+			return func(fbr *core.Fiber) (core.Value, error) {
+				v, err := condition(fbr)
 				if err != nil {
 					return v, err
 				}
 
 				if v.IsTruthy() {
-					v, err := what(rt)
+					v, err := what(fbr)
 					if err != nil {
 						return v, err
 					}
@@ -89,28 +89,28 @@ func (cond Conditional) compile(vm *Machine) core.Instruction {
 		}
 
 		vm.scope.CloseBlock()
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			v, err := condition(rt)
+		return func(fbr *core.Fiber) (core.Value, error) {
+			v, err := condition(fbr)
 			if err != nil {
 				return v, err
 			}
 
 			if v.IsTruthy() {
-				return action(rt)
+				return action(fbr)
 			}
-			return otherwise(rt)
+			return otherwise(fbr)
 		}
 	}
 
 	vm.scope.CloseBlock()
-	return func(rt *core.CoRoutine) (core.Value, error) {
-		v, err := condition(rt)
+	return func(fbr *core.Fiber) (core.Value, error) {
+		v, err := condition(fbr)
 		if err != nil {
 			return v, err
 		}
 
 		if v.IsTruthy() {
-			return action(rt)
+			return action(fbr)
 		}
 		return core.Value{}, nil
 	}
@@ -132,27 +132,27 @@ func (cond Conditional) compileAsELIF(vm *Machine) core.Instruction {
 			otherwise = cond.Otherwise.compile(vm)
 		}
 
-		return func(rt *core.CoRoutine) (core.Value, error) {
-			v, err := condition(rt)
+		return func(fbr *core.Fiber) (core.Value, error) {
+			v, err := condition(fbr)
 			if err != nil {
 				return v, err
 			}
 
 			if v.IsTruthy() {
-				return action(rt)
+				return action(fbr)
 			}
-			return otherwise(rt)
+			return otherwise(fbr)
 		}
 	}
 
-	return func(rt *core.CoRoutine) (core.Value, error) {
-		v, err := condition(rt)
+	return func(fbr *core.Fiber) (core.Value, error) {
+		v, err := condition(fbr)
 		if err != nil {
 			return v, err
 		}
 
 		if v.IsTruthy() {
-			return action(rt)
+			return action(fbr)
 		}
 		return core.Value{}, nil
 	}

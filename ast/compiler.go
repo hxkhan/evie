@@ -40,19 +40,19 @@ func (vm *Machine) Run(node Node) (core.Value, error) {
 	// ensure that the globals are large enough
 	if len(vm.Globals) < len(vm.globals) {
 		for range len(vm.globals) - len(vm.Globals) {
-			vm.Globals = append(vm.Globals, vm.Boxes.New())
+			vm.Globals = append(vm.Globals, vm.Boxes.Get())
 		}
 	}
 
 	// fetch a coroutine and prepare it
-	rt := vm.Coroutines.New()
-	rt.Stack = vm.Globals
-	rt.Basis = []int{0}
+	fbr := vm.Fibers.Get()
+	fbr.Stack = vm.Globals
+	fbr.Basis = []int{0}
 
 	// run code
-	v, err := code(rt)
-	// free coroutine
-	vm.Coroutines.Put(rt)
+	v, err := code(fbr)
+	// free fiber
+	vm.Fibers.Put(fbr)
 	// check errors
 	if err == core.ErrReturnSignal {
 		return v, nil
@@ -132,9 +132,9 @@ func (p Package) compile(vm *Machine) core.Instruction {
 		code = append(code, in)
 	}
 
-	return func(rt *core.CoRoutine) (core.Value, error) {
+	return func(fbr *core.Fiber) (core.Value, error) {
 		for _, in := range code {
-			if v, err := in(rt); err != nil {
+			if v, err := in(fbr); err != nil {
 				return v, err
 			}
 		}

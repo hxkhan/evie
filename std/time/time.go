@@ -12,7 +12,7 @@ func Export() {
 }
 
 func timer(duration core.Value) (core.Value, error) {
-	if duration, ok := duration.AsInt64(); ok {
+	if duration, ok := duration.AsFloat64(); ok {
 		return core.NewTask(func() (core.Value, error) {
 			time.Sleep(time.Millisecond * time.Duration(duration))
 			return core.Value{}, nil

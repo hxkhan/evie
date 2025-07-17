@@ -36,7 +36,7 @@ func main() {
 	}
 
 	// Call it
-	result, err := fn.Call(core.BoxInt64(35))
+	result, err := fn.Call(core.BoxFloat64(35))
 	if err != nil {
 		panic(err)
 	}

@@ -17,17 +17,16 @@ When we are storing a reference, the scalar tells us the type of the reference.
 So how do we know what it is? We follow some basic rules.
 
 RULES:
-	1.  null:    the pointer has to be equal to nil; the scalar can (optionally) be 0
+	1.  null:    the pointer has to be equal to nil; the scalar is irrelevant
 	2.  bool:    the pointer has to be equal to boolType; the scalar is 0 for false else true
-	4.  int64:   the pointer has to be equal to i64Type; the scalar then stores the value
-	4.  float64: the pointer has to be equal to f64Type; the scalar then stores the value
-	5.  string:  the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be stringType
-	6.  userFn:  the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be userFnType
-	6.  func:    the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be funcType
-	7.  array:   the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be arrayType
-	8.  task:    the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be taskType
-	9.  buffer:  the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be bufferType
-	10. custom:  the pointer has to be none of (i64Type, f64Type, boolType); the scalar has to be customType
+	3.  float64: the pointer has to be equal to f64Type; the scalar then stores the value
+	4.  string:  the pointer has to be none of (f64Type, boolType); the scalar has to be stringType
+	5.  userFn:  the pointer has to be none of (f64Type, boolType); the scalar has to be userFnType
+	6.  func:    the pointer has to be none of (f64Type, boolType); the scalar has to be funcType
+	7.  array:   the pointer has to be none of (f64Type, boolType); the scalar has to be arrayType
+	8.  task:    the pointer has to be none of (f64Type, boolType); the scalar has to be taskType
+	9.  buffer:  the pointer has to be none of (f64Type, boolType); the scalar has to be bufferType
+	10. custom:  the pointer has to be none of (f64Type, boolType); the scalar has to be customType
 
 Another alternative to these two is using this exact same Value struct with different rules.
 The scalar would use nan-tagging and would either be a valid float64 or a NaN and contain meta data that
@@ -60,14 +59,8 @@ type Value struct {
 }
 
 // scalar types
-var i64Type = unsafe.Pointer(new(byte))
 var f64Type = unsafe.Pointer(new(byte))
 var boolType = unsafe.Pointer(new(byte))
-
-// BoxInt64 boxes an int64
-func BoxInt64(i int64) Value {
-	return Value{scalar: uint64(i), pointer: i64Type}
-}
 
 // BoxFloat64 boxes a float64
 func BoxFloat64(f float64) Value {
@@ -122,10 +115,6 @@ func (x Value) IsNull() bool {
 	return x.pointer == nil
 }
 
-func (x Value) AsInt64() (i int64, ok bool) {
-	return int64(x.scalar), x.pointer == i64Type
-}
-
 func (x Value) AsFloat64() (f float64, ok bool) {
 	return math.Float64frombits(x.scalar), x.pointer == f64Type
 }
@@ -147,80 +136,50 @@ func (x Value) AsString() (s string, ok bool) {
 }
 
 func (x Value) AsUserFn() (fn *UserFn, ok bool) {
-	if isKnown(x.pointer) {
+	if x.scalar != userFnType || isKnown(x.pointer) {
 		return nil, false
 	}
-
-	if x.scalar == userFnType {
-		return (*UserFn)(x.pointer), true
-	}
-
-	return nil, false
+	return (*UserFn)(x.pointer), true
 }
 
 func (x Value) AsNativeFn() (iface any, ok bool) {
-	if isKnown(x.pointer) {
+	if x.scalar != funcType || isKnown(x.pointer) {
 		return nil, false
 	}
-
-	if x.scalar == funcType {
-		return *(*any)(x.pointer), true
-	}
-
-	return nil, false
+	return *(*any)(x.pointer), true
 }
 
 func (x Value) AsArray() (array []Value, ok bool) {
-	if isKnown(x.pointer) {
+	if x.scalar != arrayType || isKnown(x.pointer) {
 		return nil, false
 	}
-
-	if x.scalar == arrayType {
-		return *(*[]Value)(x.pointer), true
-	}
-
-	return nil, false
+	return *(*[]Value)(x.pointer), true
 }
 
 func (x Value) AsTask() (task <-chan TaskResult, ok bool) {
-	if isKnown(x.pointer) {
+	if x.scalar != taskType || isKnown(x.pointer) {
 		return nil, false
 	}
-
-	if x.scalar == taskType {
-		return *(*chan TaskResult)(x.pointer), true
-	}
-
-	return nil, false
+	return *(*chan TaskResult)(x.pointer), true
 }
 
 func (x Value) AsBuffer() (buffer []byte, ok bool) {
-	if isKnown(x.pointer) {
+	if x.scalar != bufferType || isKnown(x.pointer) {
 		return nil, false
 	}
-
-	if x.scalar == bufferType {
-		return *(*[]byte)(x.pointer), true
-	}
-
-	return nil, false
+	return *(*[]byte)(x.pointer), true
 }
 
 func (x Value) AsCustom() (cv CustomValue, ok bool) {
-	if isKnown(x.pointer) {
+	if x.scalar != customType || isKnown(x.pointer) {
 		return nil, false
 	}
-
-	if x.scalar == customType {
-		return *(*CustomValue)(x.pointer), true
-	}
-
-	return nil, false
+	return *(*CustomValue)(x.pointer), true
 }
 
 func isKnown(p unsafe.Pointer) bool {
 	switch p {
-	case nil, i64Type, f64Type, boolType:
+	case nil, f64Type, boolType:
 		return true
 	}
 	return false
@@ -232,8 +191,6 @@ func (x Value) IsTruthy() bool {
 		return false
 	case boolType:
 		return x.scalar != 0
-	case i64Type:
-		return int64(x.scalar) != 0
 	case f64Type:
 		return math.Float64frombits(x.scalar) != 0
 	}
@@ -267,8 +224,6 @@ func (x Value) Equals(y Value) bool {
 		return y.pointer == nil
 	case boolType:
 		return x.scalar == y.scalar
-	case i64Type:
-		return int64(x.scalar) == int64(y.scalar)
 	case f64Type:
 		return math.Float64frombits(x.scalar) == math.Float64frombits(y.scalar)
 	}
@@ -300,8 +255,6 @@ func (x Value) String() string {
 			return "false"
 		}
 		return "true"
-	case i64Type:
-		return strconv.FormatInt(int64(x.scalar), 10)
 	case f64Type:
 		return strconv.FormatFloat(math.Float64frombits(x.scalar), 'f', -1, 64)
 	}
@@ -367,8 +320,6 @@ func (x Value) TypeOf() string {
 		return "null"
 	case boolType:
 		return "bool"
-	case i64Type:
-		return "int"
 	case f64Type:
 		return "float"
 	}

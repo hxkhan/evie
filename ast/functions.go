@@ -29,18 +29,18 @@ func (fn Fn) compile(vm *Machine) core.Instruction {
 	}
 
 	vm.openFunction()
-	vm.scopeExtend()
+	vm.scope = vm.scope.New()
 
 	// declare the fn arguments and only then compile the code
 	for _, arg := range fn.Args {
-		vm.declare(arg)
+		vm.scope.Declare(arg)
 	}
 
 	code := fn.Action.compile(vm)
 
-	capacity := vm.scopeCapacity()
+	capacity := vm.scope.Capacity()
 	refs, escapees := vm.closeFunction()
-	vm.scopeDeExtend()
+	vm.scope = vm.scope.Previous()
 
 	// make list of non-escaping variables so they can be freed after execution
 	freeable := make([]int, 0, capacity-len(escapees))
@@ -70,22 +70,20 @@ func (fn Fn) compile(vm *Machine) core.Instruction {
 	}
 }
 
-func (fn Fn) compileInGlobal(vm *Machine) core.Instruction {
-	index := vm.get(fn.Name)
-
+func (fn Fn) compileInGlobal(vm *Machine, idx int) core.Instruction {
 	vm.openFunction()
-	vm.scopeExtend()
+	vm.scope = vm.scope.New()
 
 	// declare the fn arguments and only then compile the code
 	for _, arg := range fn.Args {
-		vm.declare(arg)
+		vm.scope.Declare(arg)
 	}
 
 	code := fn.Action.compile(vm)
 
-	capacity := vm.scopeCapacity()
+	capacity := vm.scope.Capacity()
 	refs, escapees := vm.closeFunction()
-	vm.scopeDeExtend()
+	vm.scope = vm.scope.Previous()
 
 	// make list of non-escaping variables so they can be freed after execution
 	freeable := make([]int, 0, capacity-len(escapees))
@@ -114,7 +112,7 @@ func (fn Fn) compileInGlobal(vm *Machine) core.Instruction {
 		fn := core.BoxUserFn(core.UserFn{Captured: captured, FuncInfoStatic: info})
 
 		// declare the function locally
-		rt.StoreLocal(index, fn)
+		rt.StoreLocal(idx, fn)
 		return core.Value{}, nil
 	}
 }
@@ -128,7 +126,11 @@ func (call Call) compile(vm *Machine) core.Instruction {
 
 	// optimise: calling captured functions
 	if iGet, isIdentGet := call.Fn.(IdentGet); isIdentGet && vm.optimise {
-		ref := vm.reach(iGet.Name)
+		ref, err := vm.reach(iGet.Name)
+		if err != nil {
+			panic(err)
+		}
+
 		if ref.IsCaptured() {
 			index := vm.addToCaptured(ref)
 			return func(rt *core.CoRoutine) (result core.Value, err error) {
@@ -189,7 +191,7 @@ func (call Call) compile(vm *Machine) core.Instruction {
 		}
 	}
 
-	// compile function fetcher
+	// generic compilation
 	fnFetcher := call.Fn.compile(vm)
 	return func(rt *core.CoRoutine) (result core.Value, err error) {
 		value, err := fnFetcher(rt)
@@ -282,7 +284,11 @@ func (ret Return) compile(vm *Machine) core.Instruction {
 
 	// optimise: returning local variables
 	if iGet, isIdentGet := ret.Value.(IdentGet); isIdentGet && vm.optimise {
-		ref := vm.reach(iGet.Name)
+		ref, err := vm.reach(iGet.Name)
+		if err != nil {
+			panic(err)
+		}
+
 		if ref.IsLocal() {
 			return func(rt *core.CoRoutine) (core.Value, error) {
 				return rt.GetLocal(ref.Index), core.ErrReturnSignal

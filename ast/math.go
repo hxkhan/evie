@@ -20,10 +20,14 @@ func (bop BinOp) isOpOneOf(ops ...byte) bool {
 func (bop BinOp) compile(vm *Machine) core.Instruction {
 	// optimise: lhs being a local variable
 	if iGet, isIdentGet := bop.A.(IdentGet); isIdentGet && vm.optimise {
-		ref := vm.reach(iGet.Name)
+		ref, err := vm.reach(iGet.Name)
+		if err != nil {
+			panic(err)
+		}
+
 		if ref.IsLocal() {
 			// optimise: rhs being a constant
-			if in, isInput := bop.B.(Input); isInput && vm.optimise {
+			if in, isInput := bop.B.(Input); isInput {
 				if b, isFloat := in.Value.AsFloat64(); isFloat {
 					switch bop.OP {
 					case op.ADD:

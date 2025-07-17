@@ -31,8 +31,12 @@ func (cond Conditional) compile(vm *Machine) core.Instruction {
 			}
 
 			// optimise: returning local variables
-			if iGet, isIdentGet := ret.Value.(IdentGet); isIdentGet && vm.optimise {
-				ref := vm.reach(iGet.Name)
+			if iGet, isIdentGet := ret.Value.(IdentGet); isIdentGet {
+				ref, err := vm.reach(iGet.Name)
+				if err != nil {
+					panic(err)
+				}
+
 				if ref.IsLocal() {
 					return func(rt *core.CoRoutine) (core.Value, error) {
 						v, err := condition(rt)
@@ -71,7 +75,7 @@ func (cond Conditional) compile(vm *Machine) core.Instruction {
 	// generic compilation
 	condition := cond.Condition.compile(vm)
 
-	vm.scopeOpenBlock()
+	vm.scope.OpenBlock()
 	action := cond.Action.compile(vm)
 
 	if cond.Otherwise != nil {
@@ -79,12 +83,12 @@ func (cond Conditional) compile(vm *Machine) core.Instruction {
 		if o, isELIF := cond.Otherwise.(Conditional); isELIF {
 			otherwise = o.compileAsELIF(vm)
 		} else {
-			// means it's an else
-			vm.scopeReuseBlock()
+			// it is the else block
+			vm.scope.ReuseBlock()
 			otherwise = cond.Otherwise.compile(vm)
 		}
 
-		vm.scopeCloseBlock()
+		vm.scope.CloseBlock()
 		return func(rt *core.CoRoutine) (core.Value, error) {
 			v, err := condition(rt)
 			if err != nil {
@@ -97,8 +101,8 @@ func (cond Conditional) compile(vm *Machine) core.Instruction {
 			return otherwise(rt)
 		}
 	}
-	vm.scopeCloseBlock()
 
+	vm.scope.CloseBlock()
 	return func(rt *core.CoRoutine) (core.Value, error) {
 		v, err := condition(rt)
 		if err != nil {
@@ -115,7 +119,7 @@ func (cond Conditional) compile(vm *Machine) core.Instruction {
 func (cond Conditional) compileAsELIF(vm *Machine) core.Instruction {
 	condition := cond.Condition.compile(vm)
 
-	vm.scopeReuseBlock()
+	vm.scope.ReuseBlock()
 	action := cond.Action.compile(vm)
 
 	if cond.Otherwise != nil {
@@ -123,8 +127,8 @@ func (cond Conditional) compileAsELIF(vm *Machine) core.Instruction {
 		if o, isELIF := cond.Otherwise.(Conditional); isELIF {
 			otherwise = o.compileAsELIF(vm)
 		} else {
-			// means it's an else
-			vm.scopeReuseBlock()
+			// it is the else block
+			vm.scope.ReuseBlock()
 			otherwise = cond.Otherwise.compile(vm)
 		}
 

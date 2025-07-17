@@ -2,27 +2,31 @@ package ast
 
 import (
 	"fmt"
-	"strings"
 
+	"github.com/hk-32/evie/ast/scope"
 	"github.com/hk-32/evie/core"
 )
 
 func NewVM(exports map[string]core.Value, optimise bool) *Machine {
 	vm := &Machine{
 		globals:              make(map[string]int),
-		rcRoot:               &reachability{[]map[string]int{make(map[string]int, len(exports))}, 0, 0, nil},
+		root:                 scope.NewScope(len(exports)),
 		uninitializedGlobals: make(map[string]struct{}),
 		optimise:             optimise,
 	}
-	vm.rc = vm.rcRoot
+	vm.scope = vm.root
 
 	builtins := make([]core.Value, len(exports))
 	for name, value := range exports {
-		builtins[vm.declare(name)] = value
+		index, ok := vm.scope.Declare(name)
+		if !ok {
+			panic("exports contain conflicting names")
+		}
+		builtins[index] = value
 	}
-	// extend from builtin to global scope
-	vm.scopeExtend()
 
+	// extend from builtin to global scope
+	vm.scope = vm.scope.New()
 	vm.Machine = core.NewMachine(builtins)
 	return vm
 }
@@ -92,20 +96,21 @@ func (p Package) compile(vm *Machine) core.Instruction {
 	// 1. declare all symbols
 	for _, node := range p.Code {
 		if fnDec, isFnDecl := node.(Fn); isFnDecl {
-			vm.globals[fnDec.Name] = vm.declare(fnDec.Name)
+			idx, _ := vm.scope.Declare(fnDec.Name)
+			vm.globals[fnDec.Name] = idx
 		}
 
-		if iGet, isIdentDec := node.(IdentDec); isIdentDec {
-			vm.uninitializedGlobals[iGet.Name] = struct{}{}
-			vm.globals[iGet.Name] = vm.declare(iGet.Name)
+		if iDec, isIdentDec := node.(IdentDec); isIdentDec {
+			vm.uninitializedGlobals[iDec.Name] = struct{}{}
+			idx, _ := vm.scope.Declare(iDec.Name)
+			vm.globals[iDec.Name] = idx
 		}
 	}
 
 	// 2. physically move function initialization to the top
 	for _, node := range p.Code {
 		if fnDec, isFnDecl := node.(Fn); isFnDecl {
-			in := fnDec.compileInGlobal(vm)
-			code = append(code, in)
+			code = append(code, fnDec.compileInGlobal(vm, vm.globals[fnDec.Name]))
 		}
 	}
 
@@ -117,9 +122,8 @@ func (p Package) compile(vm *Machine) core.Instruction {
 
 		// compile global variable declarations in a special way
 		if iDec, isIdentDec := node.(IdentDec); isIdentDec {
-			in := iDec.compileInGlobal(vm)
+			code = append(code, iDec.compileInGlobal(vm, vm.globals[iDec.Name]))
 			delete(vm.uninitializedGlobals, iDec.Name)
-			code = append(code, in)
 			continue
 		}
 
@@ -138,36 +142,6 @@ func (p Package) compile(vm *Machine) core.Instruction {
 	}
 }
 
-type reachability struct {
-	lookup   []map[string]int
-	index    int
-	cap      int
-	previous *reachability
-}
-
-func (rc *reachability) String() string {
-	s := strings.Builder{}
-	s.WriteByte('{')
-
-	for _, lookup := range rc.lookup {
-		n := 0
-		for name, index := range lookup {
-			n++
-			s.WriteString(fmt.Sprintf("%v: %v", name, index))
-			if n != len(lookup) {
-				s.WriteString(", ")
-			}
-		}
-	}
-	s.WriteByte('}')
-
-	if rc.previous != nil {
-		s.WriteString(" -> ")
-		s.WriteString(rc.previous.String())
-	}
-	return s.String()
-}
-
 type Machine struct {
 	core.Machine // embed runtime machine
 
@@ -175,103 +149,31 @@ type Machine struct {
 	openFunctionsRefs          [][]core.Reference // open functions and their captured variables
 	openFunctionsEscapedLocals []map[int]struct{} // open functions and their escapee locals
 
-	rc                   *reachability // current scope
-	rcRoot               *reachability // built-in scope
+	scope                *scope.Instance // current scope
+	root                 *scope.Instance // built-in scope
 	uninitializedGlobals map[string]struct{}
 	optimise             bool
 }
 
-func (vm *Machine) scopeExtend() {
-	vm.rc = &reachability{lookup: []map[string]int{{}}, previous: vm.rc}
-	//fmt.Println("AFTER scopeExtend():", s.rc)
-}
-
-func (vm *Machine) scopeDeExtend() {
-	vm.rc = vm.rc.previous
-	//fmt.Println("AFTER scopeDeExtend():", s.rc)
-}
-
-func (vm *Machine) scopeCapacity() int {
-	return max(vm.rc.index, vm.rc.cap)
-}
-
-func (vm *Machine) scopeOpenBlock() {
-	vm.rc.lookup = append(vm.rc.lookup, map[string]int{})
-}
-
-func (vm *Machine) scopeCloseBlock() {
-	vm.rc.lookup = vm.rc.lookup[:len(vm.rc.lookup)-1]
-}
-
-func (vm *Machine) scopeReuseBlock() {
-	top := vm.rc.lookup[len(vm.rc.lookup)-1]
-	// save current cap, might be bigger than the reused cap later; in that case, we want the biggest
-	if vm.rc.cap < vm.rc.index {
-		vm.rc.cap = vm.rc.index
-	}
-	vm.rc.index -= len(top)
-	for k := range top {
-		delete(top, k)
-	}
-}
-
-func (vm *Machine) declare(name string) (index int) {
-	scope := vm.rc.lookup[len(vm.rc.lookup)-1]
-	if _, exists := scope[name]; exists {
-		panic(fmt.Sprintf("declare(\"%v\") -> double declaration of symbol!", name))
-	}
-	scope[name] = vm.rc.index
-	vm.rc.index++
-	return vm.rc.index - 1
-}
-
-// like reach but it has to be already declared locally
-func (vm *Machine) get(name string) (index int) {
-	scope := vm.rc.lookup[len(vm.rc.lookup)-1]
-	if i, exists := scope[name]; exists {
-		return i
-	}
-	panic("get() -> why is it not declared already?")
-}
-
-func (vm *Machine) reach(name string) core.Reference {
-	this := vm.rc
-	for scroll := 0; this != nil; scroll++ {
-		for i := len(this.lookup) - 1; i >= 0; i-- {
-			if index, exists := this.lookup[i][name]; exists {
-				// if built-in scope then return scroll -1 to signal that
-				if this.previous == nil {
-					return core.Reference{Index: index, Scroll: -1}
-				}
-				// if accessing global from global; make sure it is initialized
-				if this.previous == vm.rcRoot && scroll == 0 {
-					if _, has := vm.uninitializedGlobals[name]; has {
-						panic(fmt.Sprintf("scope.reach(\"%v\") -> unitialized symbol!", name))
-					}
-				}
-				return core.Reference{Index: index, Scroll: scroll}
+// reach searches for a binding across all scope instances
+func (vm *Machine) reach(name string) (ref core.Reference, err error) {
+	for scope, scroll := range vm.scope.Instances() {
+		if index, success := scope.Reach(name); success {
+			// if built-in scope then return negative scroll to signal that
+			if scope.Previous() == nil {
+				return core.Reference{Index: index, Scroll: -1}, nil
 			}
-		}
-		this = this.previous
-	}
-	panic(fmt.Sprintf("scope.reach(\"%v\") -> unreachable symbol!", name))
-}
 
-func (vm *Machine) isInBuiltIn(name string) bool {
-	this := vm.rc
-	for scroll := 0; this != nil; scroll++ {
-		for i := len(this.lookup) - 1; i >= 0; i-- {
-			if _, exists := this.lookup[i][name]; exists {
-				// if built-in scope
-				if this.previous == nil {
-					return true
+			// if accessing global from global; make sure it is initialized
+			if scope.Previous() == vm.root && scroll == 0 {
+				if _, has := vm.uninitializedGlobals[name]; has {
+					return ref, fmt.Errorf("vm.reach(\"%v\") -> unitialized symbol", name)
 				}
-
 			}
+			return core.Reference{Index: index, Scroll: scroll}, nil
 		}
-		this = this.previous
 	}
-	return false
+	return ref, fmt.Errorf("vm.reach(\"%v\") -> unreachable symbol", name)
 }
 
 func (vm *Machine) addToCaptured(ref core.Reference) (index int) {

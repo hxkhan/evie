@@ -1,6 +1,8 @@
 package ast
 
 import (
+	"fmt"
+
 	"github.com/hk-32/evie/core"
 )
 
@@ -19,9 +21,12 @@ type IdentSet struct {
 }
 
 func (iDec IdentDec) compile(vm *Machine) core.Instruction {
-	index := vm.declare(iDec.Name)
-	value := iDec.Value.compile(vm)
+	index, success := vm.scope.Declare(iDec.Name)
+	if !success {
+		panic(fmt.Errorf("double declaration of %s", iDec.Name))
+	}
 
+	value := iDec.Value.compile(vm)
 	return func(rt *core.CoRoutine) (core.Value, error) {
 		v, err := value(rt)
 		if err != nil {
@@ -33,23 +38,24 @@ func (iDec IdentDec) compile(vm *Machine) core.Instruction {
 	}
 }
 
-func (iDec IdentDec) compileInGlobal(vm *Machine) core.Instruction {
-	index := vm.get(iDec.Name)
+func (iDec IdentDec) compileInGlobal(vm *Machine, idx int) core.Instruction {
 	value := iDec.Value.compile(vm)
-
 	return func(rt *core.CoRoutine) (core.Value, error) {
 		v, err := value(rt)
 		if err != nil {
 			return v, err
 		}
 
-		rt.StoreLocal(index, v)
+		rt.StoreLocal(idx, v)
 		return core.Value{}, nil
 	}
 }
 
 func (iGet IdentGet) compile(vm *Machine) core.Instruction {
-	ref := vm.reach(iGet.Name)
+	ref, err := vm.reach(iGet.Name)
+	if err != nil {
+		panic(err)
+	}
 
 	switch {
 	case ref.Scroll < 0:
@@ -70,7 +76,10 @@ func (iGet IdentGet) compile(vm *Machine) core.Instruction {
 }
 
 func (iSet IdentSet) compile(vm *Machine) core.Instruction {
-	ref := vm.reach(iSet.Name)
+	ref, err := vm.reach(iSet.Name)
+	if err != nil {
+		panic(err)
+	}
 
 	value := iSet.Value.compile(vm)
 	switch {

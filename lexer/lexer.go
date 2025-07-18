@@ -5,7 +5,7 @@ import (
 	"unicode"
 	"unsafe"
 
-	"github.com/hk-32/evie/token"
+	"github.com/hxkhan/evie/token"
 )
 
 // NextToken returns next token and advances the lexer
@@ -20,7 +20,7 @@ func (lex *Lexer) PeekToken() token.Token {
 	return lex.next
 }
 
-func (lex *Lexer) flag(lit string, line int) token.Token {
+func (lex *Lexer) flag(lit string, line token.Pos) token.Token {
 	return token.Token{Type: token.Type(0), Literal: lit, Line: line}
 }
 

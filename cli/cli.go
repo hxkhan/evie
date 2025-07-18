@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hk-32/evie"
+	"github.com/hxkhan/evie"
 )
 
 func main() {
@@ -41,8 +41,8 @@ func main() {
 		panic(err)
 	}
 
-	ip := evie.New(evie.Options{Optimise: *o, ObserveIt: *d, Exports: evie.DefaultExports()})
-	_, err = ip.Feed(input)
+	ip := evie.New(evie.Options{Optimise: *o, ObserveIt: *d, BuiltIns: evie.DefaultExports()})
+	_, err = ip.EvalScript(input)
 	if err != nil {
 		fmt.Println(err)
 		return

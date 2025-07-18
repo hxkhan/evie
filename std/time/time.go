@@ -3,20 +3,20 @@ package time
 import (
 	"time"
 
-	"github.com/hk-32/evie/core"
-	"github.com/hk-32/evie/std"
+	"github.com/hxkhan/evie/std"
+	"github.com/hxkhan/evie/vm"
 )
 
 func Export() {
 	std.ImportFn(timer)
 }
 
-func timer(duration core.Value) (core.Value, error) {
+func timer(duration vm.Value) (vm.Value, error) {
 	if duration, ok := duration.AsFloat64(); ok {
-		return core.NewTask(func() (core.Value, error) {
+		return vm.NewTask(func() (vm.Value, error) {
 			time.Sleep(time.Millisecond * time.Duration(duration))
-			return core.Value{}, nil
+			return vm.Value{}, nil
 		}), nil
 	}
-	return core.Value{}, core.ErrTypes
+	return vm.Value{}, vm.ErrTypes
 }

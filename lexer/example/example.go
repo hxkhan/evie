@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/hk-32/evie/lexer"
+	"github.com/hxkhan/evie/lexer"
 )
 
 func main() {
@@ -31,7 +31,7 @@ func main() {
 		if v.IsNewLine() {
 			fmt.Println()
 		} else {
-			fmt.Printf("%v : %-7v -> %-20v\n", padding_left(v.Line, width), v.Type, v.Literal)
+			fmt.Printf("%v : %-7v -> %-20v\n", padding_left(int(v.Line), width), v.Type, v.Literal)
 		}
 	}
 }

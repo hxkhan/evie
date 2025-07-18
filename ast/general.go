@@ -1,75 +1,33 @@
 package ast
 
-import (
-	"fmt"
-
-	"github.com/hk-32/evie/core"
-)
-
-/* IDEA: Add ensureReachabilty() to Node so this gives an error at compile time
-DECL printer main(6) // inc is uninitialized when main is called
-DECL inc 10
-
-
-FN main(x)
-    STORE inc FN()
-        STORE x ADD x 1
-    END
-
-    RET FN()
-        OUT x
-    END
-END
-
-// Will also only be used in global scope so this shouldn't be too expensive
-*/
+import "github.com/hxkhan/evie/token"
 
 type Node interface {
-	compile(vm *Machine) core.Instruction
+	Line() int
 }
 
-type Input struct {
-	Value core.Value
+type Package struct {
+	token.Pos
+	Name    string
+	Imports []string
+	Code    []Node
 }
 
-func (in Input) compile(vm *Machine) core.Instruction {
-	return func(fbr *core.Fiber) (core.Value, error) {
-		return in.Value, nil
-	}
+type Literal interface {
+	bool | float64 | string | struct{}
 }
 
-type Block []Node
+type Input[T Literal] struct {
+	token.Pos
+	Value T
+}
 
-func (b Block) compile(vm *Machine) core.Instruction {
-	block := make([]core.Instruction, len(b))
-	for i, statement := range b {
-		block[i] = statement.compile(vm)
-	}
-
-	return func(fbr *core.Fiber) (core.Value, error) {
-		for _, statement := range block {
-			if v, err := statement(fbr); err != nil {
-				return v, err
-			}
-		}
-		return core.Value{}, nil
-	}
+type Block struct {
+	token.Pos
+	Code []Node
 }
 
 type Echo struct {
+	token.Pos
 	Value Node
-}
-
-func (out Echo) compile(vm *Machine) core.Instruction {
-	what := out.Value.compile(vm)
-
-	return func(fbr *core.Fiber) (core.Value, error) {
-		v, err := what(fbr)
-		if err != nil {
-			return v, err
-		}
-
-		fmt.Println(v)
-		return core.Value{}, nil
-	}
 }

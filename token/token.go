@@ -4,6 +4,12 @@ import "fmt"
 
 type Type int
 
+type Pos int
+
+func (pos Pos) Line() int {
+	return int(pos)
+}
+
 const (
 	flag Type = iota // special: used for signaling things like eos
 
@@ -20,7 +26,7 @@ const (
 type Token struct {
 	Type    Type
 	Literal string
-	Line    int
+	Line    Pos
 }
 
 // Checks if the token is signaling end-of-source

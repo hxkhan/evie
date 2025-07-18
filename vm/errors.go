@@ -1,4 +1,4 @@
-package core
+package vm
 
 import (
 	"errors"
@@ -6,24 +6,24 @@ import (
 	"strings"
 )
 
-type ErrWithTrace struct {
-	Err   error
-	Trace []string
+type trace struct {
+	err   error
+	stack []string
 }
 
-func (t ErrWithTrace) Error() string {
+func (t trace) Error() string {
 	var bytes strings.Builder
 
-	bytes.WriteString(t.Err.Error())
+	bytes.WriteString(t.err.Error())
 	bytes.WriteByte('\n')
-	for _, name := range t.Trace {
+	for _, name := range t.stack {
 		bytes.WriteString(fmt.Sprintf("\tin '%v'\n", name))
 	}
 
 	return bytes.String()
 }
 
-var ErrReturnSignal error = errors.New("<return signal>")
+var errReturnSignal error = errors.New("<return signal>")
 var errNotFunction error = errors.New("not a native function")
 var ErrNotCallable error = errors.New("not a callable")
 
@@ -43,7 +43,7 @@ func CustomError(msg string, a ...interface{}) error {
 	return coreError{"RuntimeError", fmt.Sprintf(msg, a...)}
 }
 
-func OperatorTypesError(op string, a any, b any) error {
+func operatorError(op string, a any, b any) error {
 	return coreError{"RuntimeError", fmt.Sprintf("cannot apply '%v' operator on '%v' and '%v'", op, a, b)}
 }
 

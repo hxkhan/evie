@@ -3,8 +3,8 @@ package builtin
 import (
 	"strings"
 
-	"github.com/hk-32/evie/core"
-	"github.com/hk-32/evie/std"
+	"github.com/hxkhan/evie/std"
+	"github.com/hxkhan/evie/vm"
 )
 
 func Export() {
@@ -12,22 +12,22 @@ func Export() {
 	std.ImportFn(join)
 }
 
-func split(str, sep core.Value) (core.Value, error) {
+func split(str, sep vm.Value) (vm.Value, error) {
 	if str, ok := str.AsString(); ok {
 		if sep, ok := sep.AsString(); ok {
 
 			parts := strings.Split(str, sep)
-			result := make([]core.Value, len(parts))
+			result := make([]vm.Value, len(parts))
 			for i, part := range parts {
-				result[i] = core.BoxString(part)
+				result[i] = vm.BoxString(part)
 			}
-			return core.BoxArray(result), nil
+			return vm.BoxArray(result), nil
 		}
 	}
-	return core.Value{}, core.ErrTypes
+	return vm.Value{}, vm.ErrTypes
 }
 
-func join(parts, sep core.Value) (core.Value, error) {
+func join(parts, sep vm.Value) (vm.Value, error) {
 	if parts, ok := parts.AsArray(); ok {
 		if sep, ok := sep.AsString(); ok {
 
@@ -35,13 +35,13 @@ func join(parts, sep core.Value) (core.Value, error) {
 			for i, part := range parts {
 				str, ok := part.AsString()
 				if !ok {
-					return core.Value{}, core.ErrTypes
+					return vm.Value{}, vm.ErrTypes
 				}
 				strs[i] = str
 			}
 
-			return core.BoxString(strings.Join(strs, sep)), nil
+			return vm.BoxString(strings.Join(strs, sep)), nil
 		}
 	}
-	return core.Value{}, core.ErrTypes
+	return vm.Value{}, vm.ErrTypes
 }

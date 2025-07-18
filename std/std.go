@@ -5,18 +5,18 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/hk-32/evie/core"
+	"github.com/hxkhan/evie/vm"
 )
 
-var Exports map[string]core.Value
+var Exports map[string]vm.Value
 
-func ImportFn[T core.GoFunc](callable T) {
+func ImportFn[T vm.GoFunc](callable T) {
 	// get name of the function
 	path := runtime.FuncForPC(reflect.ValueOf(callable).Pointer()).Name()
 	parts := strings.Split(path, "/")
 	fullname := parts[len(parts)-1]
 
-	v := core.BoxGoFunc(callable)
+	v := vm.BoxGoFunc(callable)
 
 	if name, found := strings.CutPrefix(fullname, "builtin."); found {
 		Exports[name] = v
@@ -26,6 +26,6 @@ func ImportFn[T core.GoFunc](callable T) {
 	Exports[fullname] = v
 }
 
-func ImportOther(name string, v core.Value) {
+func ImportOther(name string, v vm.Value) {
 	Exports[name] = v
 }

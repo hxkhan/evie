@@ -3,13 +3,12 @@
 package evie
 
 import (
-	"github.com/hk-32/evie/ast"
-	"github.com/hk-32/evie/core"
-	"github.com/hk-32/evie/parser"
-	"github.com/hk-32/evie/std"
-	"github.com/hk-32/evie/std/builtin"
-	"github.com/hk-32/evie/std/fs"
-	"github.com/hk-32/evie/std/time"
+	"github.com/hxkhan/evie/parser"
+	"github.com/hxkhan/evie/std"
+	"github.com/hxkhan/evie/std/builtin"
+	"github.com/hxkhan/evie/std/fs"
+	"github.com/hxkhan/evie/std/time"
+	"github.com/hxkhan/evie/vm"
 )
 
 type Options struct {
@@ -17,17 +16,18 @@ type Options struct {
 	ObserveIt     bool // collect metrics (affects performance)
 	TopLevelLogic bool // whether to only allow declarations at top level
 
-	Exports map[string]core.Value // what should be made available to the user
+	BuiltIns map[string]vm.Value // what should be made available to the user in the built-in scope
+	Globals  map[string]vm.Value // what should be made available to the user in the global scope
 }
 
-var Defaults = Options{Optimise: true, Exports: DefaultExports()}
+var Defaults = Options{Optimise: true, BuiltIns: DefaultExports()}
 
 type Interpreter struct {
-	vm *ast.Machine
+	vm *vm.Instance
 }
 
-func DefaultExports() map[string]core.Value {
-	std.Exports = map[string]core.Value{}
+func DefaultExports() map[string]vm.Value {
+	std.Exports = map[string]vm.Value{}
 	fs.Export()
 	time.Export()
 	builtin.Export()
@@ -35,31 +35,31 @@ func DefaultExports() map[string]core.Value {
 }
 
 func New(opts Options) *Interpreter {
-	cs := ast.NewVM(opts.Exports, opts.Optimise)
+	m := vm.New(opts.BuiltIns, opts.Optimise)
 
 	/* if opts.ObserveIt {
-		core.WrapInstructions(func(rt *core.CoRoutine) {
+		vm.WrapInstructions(func(rt *vm.CoRoutine) {
 
-		}, func(rt *core.CoRoutine) {
+		}, func(rt *vm.CoRoutine) {
 
 		})
 	} */
 
-	return &Interpreter{cs}
+	return &Interpreter{m}
 }
 
-func (ip *Interpreter) Feed(input []byte) (core.Value, error) {
+func (ip *Interpreter) EvalScript(input []byte) (vm.Value, error) {
 	output, err := parser.Parse(input)
 	if err != nil {
-		return core.Value{}, err
+		return vm.Value{}, err
 	}
 
-	return ip.vm.Run(output)
+	return ip.vm.EvalNode(output)
 }
 
 // GetGlobal retrieves a global variable by its name and returns a pointer to it.
 // If the global variable does not exist, it returns nil.
-func (ip *Interpreter) GetGlobal(name string) *core.Value {
+func (ip *Interpreter) GetGlobal(name string) *vm.Value {
 	return ip.vm.GetGlobal(name)
 }
 

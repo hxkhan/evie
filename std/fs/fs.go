@@ -3,20 +3,20 @@ package fs
 import (
 	"os"
 
-	"github.com/hk-32/evie/core"
-	"github.com/hk-32/evie/std"
+	"github.com/hxkhan/evie/std"
+	"github.com/hxkhan/evie/vm"
 )
 
 func Export() {
 	std.ImportFn(readFile)
 }
 
-func readFile(fileName core.Value) (core.Value, error) {
+func readFile(fileName vm.Value) (vm.Value, error) {
 	if fileName, ok := fileName.AsString(); ok {
-		return core.NewTask(func() (core.Value, error) {
+		return vm.NewTask(func() (vm.Value, error) {
 			bytes, err := os.ReadFile(fileName)
-			return core.BoxBuffer(bytes), err
+			return vm.BoxBuffer(bytes), err
 		}), nil
 	}
-	return core.Value{}, core.ErrTypes
+	return vm.Value{}, vm.ErrTypes
 }

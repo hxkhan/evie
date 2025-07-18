@@ -1,3 +1,3 @@
-module github.com/hk-32/evie
+module github.com/hxkhan/evie
 
 go 1.24

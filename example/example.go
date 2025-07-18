@@ -3,14 +3,14 @@ package main
 import (
 	"fmt"
 
-	"github.com/hk-32/evie"
-	"github.com/hk-32/evie/core"
+	"github.com/hxkhan/evie"
+	"github.com/hxkhan/evie/vm"
 )
 
 func main() {
 	ip := evie.New(evie.Defaults)
 
-	_, err := ip.Feed([]byte(
+	_, err := ip.EvalScript([]byte(
 		`package main
 		
 		fn fib(n) {
@@ -36,7 +36,7 @@ func main() {
 	}
 
 	// Call it
-	result, err := fn.Call(core.BoxFloat64(35))
+	result, err := fn.Call(vm.BoxFloat64(35))
 	if err != nil {
 		panic(err)
 	}

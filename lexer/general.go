@@ -3,7 +3,7 @@ package lexer
 import (
 	"unicode/utf8"
 
-	"github.com/hk-32/evie/token"
+	"github.com/hxkhan/evie/token"
 )
 
 const iEOS rune = 0x03 // 0x03 = End of Source
@@ -18,9 +18,9 @@ var keywords = []string{
 }
 
 type Lexer struct {
-	src    []byte // the whole input
-	cursor int    // current position in source
-	line   int    // current line number
+	src    []byte    // the whole input
+	cursor int       // current position in source
+	line   token.Pos // current line number
 
 	last token.Token // last token returned
 	next token.Token // next token to be returned

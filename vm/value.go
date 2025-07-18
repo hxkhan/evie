@@ -1,4 +1,4 @@
-package core
+package vm
 
 import (
 	"math"
@@ -35,6 +35,12 @@ in the last case, we would use the pointer part of the struct and cast it to the
 Although arguably simpler in design, we lose 64 bit integers so idk.
 */
 
+// Value represents a boxed value
+type Value struct {
+	scalar  uint64
+	pointer unsafe.Pointer
+}
+
 const (
 	stringType = iota
 	userFnType
@@ -45,6 +51,79 @@ const (
 	customType
 )
 
+// scalar types
+var f64Type = unsafe.Pointer(new(byte))
+var boolType = unsafe.Pointer(new(byte))
+
+// funcInfoStatic holds static function information
+type funcInfoStatic struct {
+	Name        string      // name of the function
+	Args        []string    // argument names
+	Refs        []reference // captured references
+	NonEscaping []int       // the locals that do not escape
+	Capacity    int         // total required scope-capacity
+	Code        instruction // the actual function code
+	Machine     *Instance   // the corresponding vm
+}
+
+type UserFn struct {
+	*funcInfoStatic
+	captured []*Value
+}
+
+func (fn *UserFn) Call(args ...Value) (result Value, err error) {
+	if len(fn.Args) != len(args) {
+		if fn.Name != "λ" {
+			return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.Name, len(fn.Args), len(args))
+		}
+		return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.Args), len(args))
+	}
+
+	vm := fn.Machine
+	vm.rt.gil.Lock()
+	defer vm.rt.gil.Unlock()
+
+	// fetch a coroutine and prepare it
+	fbr := vm.rt.fibers.Get()
+	fbr.active = fn
+	fbr.basis = fbr.basis[:0]
+	fbr.stack = fbr.stack[:0]
+
+	// create space for all the locals
+	for range fn.Capacity {
+		fbr.pushLocal(vm.rt.boxes.Get())
+	}
+
+	// set arguments
+	for idx, arg := range args {
+		*fbr.stack[idx] = arg
+	}
+
+	// prep for execution & save currently captured values
+	fbr.pushBase(0)
+	result, err = fn.Code(fbr)
+
+	// release non-escaping locals
+	for _, idx := range fn.NonEscaping {
+		vm.rt.boxes.Put(fbr.stack[idx])
+	}
+
+	// don't implicitly return the return value of the last executed instruction
+	switch err {
+	case nil:
+		return Value{}, nil
+	case errReturnSignal:
+		return result, nil
+	default:
+		return result, err
+	}
+}
+
+func (fn *UserFn) String() string {
+	return "<function>"
+}
+
+// CustomValue is an interface for evie hosts to add their own custom values to the language
 type CustomValue interface {
 	String() string
 	TypeOf() string
@@ -52,15 +131,16 @@ type CustomValue interface {
 	Equals(b CustomValue) bool
 }
 
-// Value represents a boxed value
-type Value struct {
-	scalar  uint64
-	pointer unsafe.Pointer
+// compile time safety so uncallable functions don't get into the system
+type GoFunc interface {
+	func() (Value, error) |
+		func(Value) (Value, error) |
+		func(Value, Value) (Value, error) |
+		func(Value, Value, Value) (Value, error) |
+		func(Value, Value, Value, Value) (Value, error) |
+		func(Value, Value, Value, Value, Value) (Value, error) |
+		func(Value, Value, Value, Value, Value, Value) (Value, error)
 }
-
-// scalar types
-var f64Type = unsafe.Pointer(new(byte))
-var boolType = unsafe.Pointer(new(byte))
 
 // BoxFloat64 boxes a float64
 func BoxFloat64(f float64) Value {
@@ -97,7 +177,7 @@ func BoxArray(array []Value) Value {
 }
 
 // BoxTask boxes an evie task
-func BoxTask(task chan TaskResult) Value {
+func BoxTask(task chan evaluation) Value {
 	return Value{scalar: taskType, pointer: unsafe.Pointer(&task)}
 }
 
@@ -156,11 +236,11 @@ func (x Value) AsArray() (array []Value, ok bool) {
 	return *(*[]Value)(x.pointer), true
 }
 
-func (x Value) AsTask() (task <-chan TaskResult, ok bool) {
+func (x Value) AsTask() (task <-chan evaluation, ok bool) {
 	if x.scalar != taskType || isKnown(x.pointer) {
 		return nil, false
 	}
-	return *(*chan TaskResult)(x.pointer), true
+	return *(*chan evaluation)(x.pointer), true
 }
 
 func (x Value) AsBuffer() (buffer []byte, ok bool) {
@@ -205,7 +285,7 @@ func (x Value) IsTruthy() bool {
 		array := *(*[]Value)(x.pointer)
 		return len(array) != 0
 	case taskType:
-		task := *(*chan TaskResult)(x.pointer)
+		task := *(*chan evaluation)(x.pointer)
 		return len(task) != 0
 	case bufferType:
 		array := *(*[]Value)(x.pointer)

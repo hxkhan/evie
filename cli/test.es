@@ -1,14 +1,13 @@
 package main
 
+message := "Hello World"
 
 fn main() {
-    x := 10
+    //x := 10
 
     printer := test()
     printer()
 }
-
-message := "Hello World"
 
 fn test() {
     msg := message

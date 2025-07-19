@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/hxkhan/evie/ast"
 )
@@ -73,6 +74,14 @@ func (vm *Instance) compile(node ast.Node) instruction {
 				for index := range capacity {
 					if _, exists := escapees[index]; !exists {
 						freeable = append(freeable, index)
+						continue
+
+					}
+
+					if index < len(fn.Args) {
+						log.Printf("compile-time: argument %v escapes in %v\n", fn.Args[index], fn.Name)
+					} else {
+						log.Printf("compile-time: local %v escapes in %v\n", index, fn.Name)
 					}
 				}
 
@@ -86,10 +95,15 @@ func (vm *Instance) compile(node ast.Node) instruction {
 					vm:       vm,
 				}
 
+				for _, ref := range info.refs {
+					log.Printf("compile-time: ref%v gets captured in %v\n", ref, fn.Name)
+				}
+
 				code = append(code, func(fbr *fiber) (Value, error) {
 					captured := make([]*Value, len(refs))
 					for i, ref := range refs {
 						captured[i] = fbr.capture(ref)
+						log.Printf("runtime: value %v gets captured as ref%v in %v\n", captured[i], ref, fn.Name)
 					}
 
 					fn := UserFn{
@@ -369,6 +383,13 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		for index := range capacity {
 			if _, exists := escapees[index]; !exists {
 				freeable = append(freeable, index)
+				continue
+			}
+
+			if index < len(node.Args) {
+				log.Printf("compile-time: argument %v escapes in closure\n", node.Args[index])
+			} else {
+				log.Printf("compile-time: local %v escapes in closure\n", index)
 			}
 		}
 
@@ -382,10 +403,15 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			vm:       vm,
 		}
 
+		for _, ref := range info.refs {
+			log.Printf("compile-time: closure captures ref%v\n", ref)
+		}
+
 		return func(fbr *fiber) (Value, error) {
 			captured := make([]*Value, len(refs))
 			for i, ref := range refs {
 				captured[i] = fbr.capture(ref)
+				log.Printf("runtime: closure captures the value %v as ref%v\n", captured[i], ref)
 			}
 
 			// create the user fn & return it
@@ -406,7 +432,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		}
 
 		// optimise: calling captured functions
-		/* if iGet, isIdentGet := node.Fn.(ast.IdentGet); isIdentGet && vm.cp.optimise {
+		if iGet, isIdentGet := node.Fn.(ast.IdentGet); isIdentGet && vm.cp.optimise {
 			ref, err := vm.reach(iGet.Name)
 			if err != nil {
 				panic(err)
@@ -470,7 +496,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 					return Value{}, CustomError("cannot call a non-function '%v'", value)
 				}
 			}
-		} */
+		}
 
 		// generic compilation
 		fnFetcher := vm.compile(node.Fn)

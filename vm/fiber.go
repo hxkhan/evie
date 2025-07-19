@@ -29,9 +29,9 @@ fn test() {
 fn test() {
     y := 20
     return fn() {         // ← getter
-		y := y
+		_y := y
         return fn() {     // ← printer
-            echo y
+            echo _y
         }
     }
 }
@@ -62,11 +62,10 @@ func (fbr *fiber) storeCaptured(index int, value Value) {
 
 // what happens when we capture a captured??
 func (fbr *fiber) capture(ref reference) *Value {
-	outerFn := fbr.active
-	for range ref.scroll - 1 {
-		outerFn = outerFn.outer
+	if ref.scroll != 1 {
+		panic("greater scroll than 1 is unsuported")
 	}
-	return fbr.stack[outerFn.baseSnapshot+ref.index]
+	return fbr.stack[fbr.base+ref.index]
 }
 
 func (fbr *fiber) pushLocal(v *Value) {

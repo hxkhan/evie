@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/hxkhan/evie/ast"
@@ -37,6 +38,7 @@ type runtime struct {
 }
 
 func New(exports map[string]Value, optimise bool) *Instance {
+	log.SetFlags(0)
 	vm := &Instance{
 		compiler{
 			globals:              make(map[string]int),

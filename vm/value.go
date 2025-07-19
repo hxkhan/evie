@@ -104,10 +104,10 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 	*/
 
 	// For now: just give all fibers a copy of global variables. Needs a better design.
-	{
+	/* {
 		fbr.stack = vm.main.stack[:len(vm.cp.globals)]
 		fbr.base = len(fbr.stack)
-	}
+	} */
 
 	// create space for all the locals
 	for range fn.capacity {

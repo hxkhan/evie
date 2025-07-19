@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/hxkhan/evie"
-	"github.com/hxkhan/evie/vm"
 )
 
 func main() {
@@ -24,22 +23,25 @@ func main() {
 	}
 
 	// Get a reference to the global symbol 'fib'
-	fib := ip.GetGlobal("fib")
-	if fib == nil {
+	value := ip.GetGlobal("fib")
+	if value == nil {
 		panic("fib not found")
 	}
 
 	// Type assert the value to a function
-	fn, ok := fib.AsUserFn()
+	fn, ok := value.AsUserFn()
 	if !ok {
 		panic("fib is not a function")
 	}
 
+	var fib func(n int) (int, error)
+	fn.SaveInto(&fib)
+
 	// Call it
-	result, err := fn.Call(vm.BoxFloat64(35))
+	result, err := fib(35)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println("Result:", result)
+	fmt.Println(result)
 }

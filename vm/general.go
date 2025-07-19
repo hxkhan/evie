@@ -12,12 +12,11 @@ import (
 type Instance struct {
 	cp   compiler
 	rt   runtime
-	main fiber
+	main *fiber
 }
 
 type compiler struct {
-	builtins []Value        // can get from but can't set in
-	globals  map[string]int // maps to global variable addresses
+	globals map[string]int // maps to global variable addresses
 
 	openFunctionsRefs          [][]reference      // open functions and their captured variables
 	openFunctionsEscapedLocals []map[int]struct{} // open functions and their escapee locals
@@ -29,11 +28,12 @@ type compiler struct {
 }
 
 type runtime struct {
-	boxes  pool.Instance[Value] // pooled boxes for this vm
-	fibers pool.Instance[fiber] // pooled fibers for this vm
-	trace  []string             // call-stack trace
-	gil    sync.Mutex           // global interpreter lock
-	wg     sync.WaitGroup       // wait for all fibers to complete
+	builtins []Value              // can get from but can't set in
+	boxes    pool.Instance[Value] // pooled boxes for this vm
+	fibers   pool.Instance[fiber] // pooled fibers for this vm
+	trace    []string             // call-stack trace
+	gil      sync.Mutex           // global interpreter lock
+	wg       sync.WaitGroup       // wait for all fibers to complete
 }
 
 func New(exports map[string]Value, optimise bool) *Instance {
@@ -48,18 +48,18 @@ func New(exports map[string]Value, optimise bool) *Instance {
 			boxes:  pool.Make[Value](48), // the capacity to store 48 boxed values
 			fibers: pool.Make[fiber](3),  // the capacity to store 3 fibers
 		},
-		fiber{
-			basis: []int{0},
+		&fiber{
+			active: &UserFn{funcInfoStatic: &funcInfoStatic{name: "global"}},
 		},
 	}
 
-	builtins := make([]Value, len(exports))
+	vm.rt.builtins = make([]Value, len(exports))
 	for name, value := range exports {
 		index, ok := vm.cp.root.Declare(name)
 		if !ok {
 			panic("exports contain conflicting names")
 		}
-		builtins[index] = value
+		vm.rt.builtins[index] = value
 	}
 
 	// extend from builtin to global scope
@@ -81,7 +81,7 @@ func (vm *Instance) EvalNode(node ast.Node) (Value, error) {
 	}
 
 	// run code
-	v, err := code(&vm.main)
+	v, err := code(vm.main)
 
 	// check errors
 	if err == errReturnSignal {

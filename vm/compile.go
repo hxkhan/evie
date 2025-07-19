@@ -77,23 +77,30 @@ func (vm *Instance) compile(node ast.Node) instruction {
 				}
 
 				info := &funcInfoStatic{
-					Name:        fn.Name,
-					Args:        fn.Args,
-					Refs:        refs,
-					NonEscaping: freeable,
-					Capacity:    capacity,
-					Code:        action,
-					Machine:     vm,
+					name:     fn.Name,
+					args:     fn.Args,
+					refs:     refs,
+					freeable: freeable,
+					capacity: capacity,
+					code:     action,
+					vm:       vm,
 				}
 
 				code = append(code, func(fbr *fiber) (Value, error) {
 					captured := make([]*Value, len(refs))
 					for i, ref := range refs {
-						captured[i] = fbr.capture(ref.index, ref.scroll)
+						captured[i] = fbr.capture(ref)
+					}
+
+					fn := UserFn{
+						funcInfoStatic: info,
+						captured:       captured,
+						outer:          fbr.active,
+						baseSnapshot:   fbr.base,
 					}
 
 					// declare the function locally
-					fbr.storeLocal(idx, BoxUserFn(UserFn{funcInfoStatic: info, captured: captured}))
+					fbr.storeLocal(idx, BoxUserFn(fn))
 					return Value{}, nil
 				})
 			}
@@ -155,6 +162,11 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			return value, nil
 		}
 
+	case ast.Input[struct{}]:
+		return func(fbr *fiber) (Value, error) {
+			return Value{}, nil
+		}
+
 	case ast.Echo:
 		what := vm.compile(node.Value)
 
@@ -194,7 +206,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		switch {
 		case ref.scroll < 0:
 			return func(fbr *fiber) (Value, error) {
-				return vm.cp.builtins[ref.index], nil
+				return vm.rt.builtins[ref.index], nil
 			}
 		case ref.scroll == 0:
 			return func(fbr *fiber) (Value, error) {
@@ -361,23 +373,29 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		}
 
 		info := &funcInfoStatic{
-			Name:        "λ",
-			Args:        node.Args,
-			Refs:        refs,
-			NonEscaping: freeable,
-			Capacity:    capacity,
-			Code:        code,
-			Machine:     vm,
+			name:     "λ",
+			args:     node.Args,
+			refs:     refs,
+			freeable: freeable,
+			capacity: capacity,
+			code:     code,
+			vm:       vm,
 		}
 
 		return func(fbr *fiber) (Value, error) {
 			captured := make([]*Value, len(refs))
 			for i, ref := range refs {
-				captured[i] = fbr.capture(ref.index, ref.scroll)
+				captured[i] = fbr.capture(ref)
 			}
 
 			// create the user fn & return it
-			return BoxUserFn(UserFn{captured: captured, funcInfoStatic: info}), nil
+			fn := UserFn{
+				funcInfoStatic: info,
+				captured:       captured,
+				outer:          fbr.active,
+				baseSnapshot:   fbr.base,
+			}
+			return BoxUserFn(fn), nil
 		}
 
 	case ast.Call:
@@ -388,7 +406,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		}
 
 		// optimise: calling captured functions
-		if iGet, isIdentGet := node.Fn.(ast.IdentGet); isIdentGet && vm.cp.optimise {
+		/* if iGet, isIdentGet := node.Fn.(ast.IdentGet); isIdentGet && vm.cp.optimise {
 			ref, err := vm.reach(iGet.Name)
 			if err != nil {
 				panic(err)
@@ -401,16 +419,16 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 					// check if its a user function
 					if fn, isUserFn := value.AsUserFn(); isUserFn {
-						if len(fn.Args) != len(argsFetchers) {
-							if fn.Name != "λ" {
-								return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.Name, len(fn.Args), len(argsFetchers))
+						if len(fn.args) != len(argsFetchers) {
+							if fn.name != "λ" {
+								return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(argsFetchers))
 							}
-							return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.Args), len(argsFetchers))
+							return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(argsFetchers))
 						}
 
 						// create space for all the locals
 						base := fbr.stackSize()
-						for range fn.Capacity {
+						for range fn.capacity {
 							fbr.pushLocal(vm.rt.boxes.Get())
 						}
 
@@ -424,19 +442,19 @@ func (vm *Instance) compile(node ast.Node) instruction {
 						}
 
 						// prep for execution & save currently captured values
-						fbr.pushBase(base)
-						old := fbr.swapActive(fn)
-						result, err = fn.Code(fbr)
+						prevBase := fbr.swapBase(base)
+						prevFn := fbr.swapActive(fn)
+						result, err = fn.code(fbr)
 
 						// release non-escaping locals
-						for _, idx := range fn.NonEscaping {
+						for _, idx := range fn.freeable {
 							vm.rt.boxes.Put(fbr.stack[base+idx])
 						}
 
 						// restore old state
-						fbr.popLocals(fn.Capacity)
-						fbr.popBase()
-						fbr.swapActive(old)
+						fbr.popLocals(fn.capacity)
+						fbr.swapBase(prevBase)
+						fbr.swapActive(prevFn)
 
 						// don't implicitly return the return value of the last executed instruction
 						switch err {
@@ -452,7 +470,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 					return Value{}, CustomError("cannot call a non-function '%v'", value)
 				}
 			}
-		}
+		} */
 
 		// generic compilation
 		fnFetcher := vm.compile(node.Fn)
@@ -464,16 +482,16 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 			// check if its a user function
 			if fn, isUserFn := value.AsUserFn(); isUserFn {
-				if len(fn.Args) != len(argsFetchers) {
-					if fn.Name != "λ" {
-						return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.Name, len(fn.Args), len(argsFetchers))
+				if len(fn.args) != len(argsFetchers) {
+					if fn.name != "λ" {
+						return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(argsFetchers))
 					}
-					return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.Args), len(argsFetchers))
+					return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(argsFetchers))
 				}
 
 				// create space for all the locals
 				base := fbr.stackSize()
-				for range fn.Capacity {
+				for range fn.capacity {
 					fbr.pushLocal(vm.rt.boxes.Get())
 				}
 
@@ -487,19 +505,19 @@ func (vm *Instance) compile(node ast.Node) instruction {
 				}
 
 				// prep for execution & save currently captured values
-				fbr.pushBase(base)
-				old := fbr.swapActive(fn)
-				result, err = fn.Code(fbr)
+				prevBase := fbr.swapBase(base)
+				prevFn := fbr.swapActive(fn)
+				result, err = fn.code(fbr)
 
 				// release non-escaping locals
-				for _, idx := range fn.NonEscaping {
+				for _, idx := range fn.freeable {
 					vm.rt.boxes.Put(fbr.stack[base+idx])
 				}
 
 				// restore old state
-				fbr.popLocals(fn.Capacity)
-				fbr.popBase()
-				fbr.swapActive(old)
+				fbr.popLocals(fn.capacity)
+				fbr.swapBase(prevBase)
+				fbr.swapActive(prevFn)
 
 				// don't implicitly return the return value of the last executed instruction
 				switch err {

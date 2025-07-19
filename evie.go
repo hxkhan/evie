@@ -1,5 +1,3 @@
-// contains package level state which means you cannot have multiple instance of evie running at the same time,
-// this was done for performance reasons and for a lack of a better way to make concurrency work with struct level state
 package evie
 
 import (

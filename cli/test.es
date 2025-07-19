@@ -1,19 +1,48 @@
 package main
 
+
 fn main() {
-    z := 1
+    x := 10
 
-    do(500000, fn() {
-        z = z + 1
-    })
-
-    echo z
+    printer := test()
+    printer()
 }
 
-fn do(n, callback) {
-    if (n > 0) {
-        n = n - 1
-        callback()
-        do(n, callback)
+message := "Hello World"
+
+fn test() {
+    msg := message
+    return fn() {
+        echo msg
     }
 }
+
+
+/* fn main() {
+    x := 10
+
+    printer := test()
+    printer()
+}
+
+fn test() {
+    msg := message
+    return fn() {
+        echo msg
+    }
+} */
+
+/* 
+fn test() {
+    y := 20 // lives on stack temporarily, is popped after test() returns
+    return fn() { // getter
+        return fn() { // printer
+            echo y
+        }
+    }
+}
+
+getter := test() // 
+printer := go getter() // error: index 0 out of bounds, len(stack) = 0 
+printer()
+ */

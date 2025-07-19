@@ -1,8 +1,9 @@
 package vm
 
+// reference represents a lexical reference
 type reference struct {
-	index  int
 	scroll int
+	index  int
 }
 
 func (ref reference) isBuiltin() bool {

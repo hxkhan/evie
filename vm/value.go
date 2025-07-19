@@ -70,8 +70,6 @@ type funcInfoStatic struct {
 type UserFn struct {
 	*funcInfoStatic          // static function information
 	captured        []*Value // captured variables
-	baseSnapshot    int      // the base when this function was created
-	outer           *UserFn  // the parent of this function
 }
 
 func (fn UserFn) String() string {

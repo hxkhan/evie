@@ -109,8 +109,6 @@ func (vm *Instance) compile(node ast.Node) instruction {
 					fn := UserFn{
 						funcInfoStatic: info,
 						captured:       captured,
-						outer:          fbr.active,
-						baseSnapshot:   fbr.base,
 					}
 
 					// declare the function locally
@@ -418,8 +416,6 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			fn := UserFn{
 				funcInfoStatic: info,
 				captured:       captured,
-				outer:          fbr.active,
-				baseSnapshot:   fbr.base,
 			}
 			return BoxUserFn(fn), nil
 		}

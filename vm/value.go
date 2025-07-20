@@ -74,6 +74,15 @@ type GoFunc interface {
 		func(Value, Value, Value, Value, Value, Value) (Value, error)
 }
 
+type UserFn struct {
+	*funcInfoStatic
+	references []*Value // captured variables
+}
+
+func (fn UserFn) String() string {
+	return "<function>"
+}
+
 // BoxFloat64 boxes a float64
 func BoxFloat64(f float64) Value {
 	return Value{scalar: math.Float64bits(f), pointer: f64Type}

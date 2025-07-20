@@ -5,7 +5,7 @@ import (
 	"reflect"
 )
 
-// isLocal: lives on the stack; isCaptured: parent function is propagating the variable down to us
+// isLocal: capture from the stack; isCaptured: capture from the parent
 type capture struct {
 	isLocal bool
 	index   int
@@ -27,15 +27,6 @@ type funcInfoStatic struct {
 	capacity   int         // total required scope-capacity
 	code       instruction // the actual function code
 	vm         *Instance   // the corresponding vm
-}
-
-type UserFn struct {
-	*funcInfoStatic
-	references []*Value // captured variables
-}
-
-func (fn UserFn) String() string {
-	return "<function>"
 }
 
 func (fn *UserFn) Call(args ...Value) (result Value, err error) {

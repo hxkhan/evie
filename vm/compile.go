@@ -66,13 +66,13 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 				action := vm.compile(fn.Action)
 				capacity := vm.cp.scope.Capacity()
-				refs, escapees := vm.cp.closeFunction()
+				refs, freeVars := vm.cp.closeFunction()
 				vm.cp.scope = vm.cp.scope.Previous()
 
 				// make list of non-escaping variables so they can be freed after execution
-				recyclable := make([]int, 0, capacity-len(escapees))
+				recyclable := make([]int, 0, capacity-len(freeVars))
 				for index := range capacity {
-					if _, exists := escapees[index]; !exists {
+					if _, exists := freeVars[index]; !exists {
 						recyclable = append(recyclable, index)
 						continue
 					}
@@ -216,16 +216,16 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		}
 
 		switch {
-		case ref.scroll < 0:
+		case ref.isBuiltin():
 			return func(fbr *fiber) (Value, error) {
 				return vm.rt.builtins[ref.index], nil
 			}
-		case ref.scroll == 0:
+		case ref.isLocal():
 			return func(fbr *fiber) (Value, error) {
 				return fbr.getLocal(ref.index), nil
 			}
 
-		case ref.scroll > 0:
+		case ref.isCaptured():
 			index := vm.cp.addToCaptured(ref)
 			return func(fbr *fiber) (Value, error) {
 				return fbr.getCaptured(index), nil
@@ -240,10 +240,21 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 		value := vm.compile(node.Value)
 		switch {
-		case ref.scroll < 0:
+		case ref.isBuiltin():
 			panic("cannot set the value of a built-in")
 
-		case ref.scroll > 0:
+		case ref.isLocal():
+			return func(fbr *fiber) (Value, error) {
+				v, err := value(fbr)
+				if err != nil {
+					return v, err
+				}
+
+				fbr.storeLocal(ref.index, v)
+				return Value{}, nil
+			}
+
+		case ref.isCaptured():
 			index := vm.cp.addToCaptured(ref)
 			return func(fbr *fiber) (Value, error) {
 				v, err := value(fbr)
@@ -254,16 +265,6 @@ func (vm *Instance) compile(node ast.Node) instruction {
 				fbr.storeCaptured(index, v)
 				return Value{}, nil
 			}
-		}
-
-		return func(fbr *fiber) (Value, error) {
-			v, err := value(fbr)
-			if err != nil {
-				return v, err
-			}
-
-			fbr.storeLocal(ref.index, v)
-			return Value{}, nil
 		}
 
 	case ast.Block:

@@ -1,6 +1,6 @@
 package vm
 
-/* IDEA: Fix the missing-variable-in-inner-closure issue
+/* IDEA:
 
 type fiber struct {
 	active *UserFn  // currently active user function
@@ -10,31 +10,6 @@ type fiber struct {
 
 functions only allocate non-escaping locals on the stack
 the rest go on the heap as free variables somehow
-
-*/
-
-/* IDEA2: Fix the missing-variable-in-inner-closure issue by moving to propagate captured variables down
-
-fn test() {
-    y := 20
-    return fn() {         // ← getter
-        return fn() {     // ← printer
-            echo y
-        }
-    }
-}
-
---- Gets turned into
-
-fn test() {
-    y := 20
-    return fn() {         // ← getter
-		_y := y
-        return fn() {     // ← printer
-            echo _y
-        }
-    }
-}
 
 */
 
@@ -53,19 +28,19 @@ func (fbr *fiber) storeLocal(index int, value Value) {
 }
 
 func (fbr *fiber) getCaptured(index int) Value {
-	return *(fbr.active.captured[index])
+	return *(fbr.active.references[index])
 }
 
 func (fbr *fiber) storeCaptured(index int, value Value) {
-	*(fbr.active.captured[index]) = value
+	*(fbr.active.references[index]) = value
 }
 
-// what happens when we capture a captured??
-func (fbr *fiber) capture(ref reference) *Value {
-	if ref.scroll != 1 {
-		panic("greater scroll than 1 is unsuported")
-	}
-	return fbr.stack[fbr.base+ref.index]
+func (fbr *fiber) getLocalByRef(index int) *Value {
+	return fbr.stack[fbr.base+index]
+}
+
+func (fbr *fiber) getCapturedByRef(index int) *Value {
+	return fbr.active.references[index]
 }
 
 func (fbr *fiber) pushLocal(v *Value) {

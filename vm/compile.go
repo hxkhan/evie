@@ -70,45 +70,45 @@ func (vm *Instance) compile(node ast.Node) instruction {
 				vm.cp.scope = vm.cp.scope.Previous()
 
 				// make list of non-escaping variables so they can be freed after execution
-				freeable := make([]int, 0, capacity-len(escapees))
+				recyclable := make([]int, 0, capacity-len(escapees))
 				for index := range capacity {
 					if _, exists := escapees[index]; !exists {
-						freeable = append(freeable, index)
+						recyclable = append(recyclable, index)
 						continue
-
 					}
-
-					if index < len(fn.Args) {
-						log.Printf("compile-time: argument %v escapes in %v\n", fn.Args[index], fn.Name)
-					} else {
-						log.Printf("compile-time: local %v escapes in %v\n", index, fn.Name)
-					}
+					log.Printf("CT: fn %v => Local(%v) escapes\n", fn.Name, index)
 				}
 
 				info := &funcInfoStatic{
-					name:     fn.Name,
-					args:     fn.Args,
-					refs:     refs,
-					freeable: freeable,
-					capacity: capacity,
-					code:     action,
-					vm:       vm,
+					name:       fn.Name,
+					args:       fn.Args,
+					captures:   refs,
+					recyclable: recyclable,
+					capacity:   capacity,
+					code:       action,
+					vm:         vm,
 				}
 
-				for _, ref := range info.refs {
-					log.Printf("compile-time: ref%v gets captured in %v\n", ref, fn.Name)
+				for i, ref := range refs {
+					log.Printf("CT: fn %v => Capture(%v) -> %v\n", fn.Name, i, ref)
 				}
 
 				code = append(code, func(fbr *fiber) (Value, error) {
 					captured := make([]*Value, len(refs))
 					for i, ref := range refs {
-						captured[i] = fbr.capture(ref)
-						log.Printf("runtime: value %v gets captured as ref%v in %v\n", captured[i], ref, fn.Name)
+						var v *Value
+						if ref.isLocal {
+							v = fbr.getLocalByRef(ref.index)
+						} else {
+							v = fbr.getCapturedByRef(ref.index)
+						}
+						captured[i] = v
+						log.Printf("RT: fn %v => Capture(%v) -> %v -> %v\n", fn.Name, i, ref, v)
 					}
 
 					fn := UserFn{
 						funcInfoStatic: info,
-						captured:       captured,
+						references:     captured,
 					}
 
 					// declare the function locally
@@ -210,7 +210,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		}
 
 	case ast.IdentGet:
-		ref, err := vm.reach(node.Name)
+		ref, err := vm.cp.reach(node.Name)
 		if err != nil {
 			panic(err)
 		}
@@ -226,14 +226,14 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			}
 
 		case ref.scroll > 0:
-			index := vm.addToCaptured(ref)
+			index := vm.cp.addToCaptured(ref)
 			return func(fbr *fiber) (Value, error) {
 				return fbr.getCaptured(index), nil
 			}
 		}
 
 	case ast.IdentSet:
-		ref, err := vm.reach(node.Name)
+		ref, err := vm.cp.reach(node.Name)
 		if err != nil {
 			panic(err)
 		}
@@ -244,7 +244,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			panic("cannot set the value of a built-in")
 
 		case ref.scroll > 0:
-			index := vm.addToCaptured(ref)
+			index := vm.cp.addToCaptured(ref)
 			return func(fbr *fiber) (Value, error) {
 				v, err := value(fbr)
 				if err != nil {
@@ -284,7 +284,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 				// optimise: returning local variables
 				if iGet, isIdentGet := ret.Value.(ast.IdentGet); isIdentGet {
-					ref, err := vm.reach(iGet.Name)
+					ref, err := vm.cp.reach(iGet.Name)
 					if err != nil {
 						panic(err)
 					}
@@ -377,45 +377,46 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		vm.cp.scope = vm.cp.scope.Previous()
 
 		// make list of non-escaping variables so they can be freed after execution
-		freeable := make([]int, 0, capacity-len(escapees))
+		recyclable := make([]int, 0, capacity-len(escapees))
 		for index := range capacity {
 			if _, exists := escapees[index]; !exists {
-				freeable = append(freeable, index)
+				recyclable = append(recyclable, index)
 				continue
 			}
-
-			if index < len(node.Args) {
-				log.Printf("compile-time: argument %v escapes in closure\n", node.Args[index])
-			} else {
-				log.Printf("compile-time: local %v escapes in closure\n", index)
-			}
+			log.Printf("CT: closure => Local(%v) escapes\n", index)
 		}
 
 		info := &funcInfoStatic{
-			name:     "λ",
-			args:     node.Args,
-			refs:     refs,
-			freeable: freeable,
-			capacity: capacity,
-			code:     code,
-			vm:       vm,
+			name:       "λ",
+			args:       node.Args,
+			captures:   refs,
+			recyclable: recyclable,
+			capacity:   capacity,
+			code:       code,
+			vm:         vm,
 		}
 
-		for _, ref := range info.refs {
-			log.Printf("compile-time: closure captures ref%v\n", ref)
+		for i, ref := range refs {
+			log.Printf("CT: closure => Capture(%v) -> %v\n", i, ref)
 		}
 
 		return func(fbr *fiber) (Value, error) {
 			captured := make([]*Value, len(refs))
 			for i, ref := range refs {
-				captured[i] = fbr.capture(ref)
-				log.Printf("runtime: closure captures the value %v as ref%v\n", captured[i], ref)
+				var v *Value
+				if ref.isLocal {
+					v = fbr.getLocalByRef(ref.index)
+				} else {
+					v = fbr.getCapturedByRef(ref.index)
+				}
+				captured[i] = v
+				log.Printf("RT: closure => Capture(%v) -> %v -> %v\n", i, ref, v)
 			}
 
 			// create the user fn & return it
 			fn := UserFn{
 				funcInfoStatic: info,
-				captured:       captured,
+				references:     captured,
 			}
 			return BoxUserFn(fn), nil
 		}
@@ -429,13 +430,13 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 		// optimise: calling captured functions
 		if iGet, isIdentGet := node.Fn.(ast.IdentGet); isIdentGet && vm.cp.optimise {
-			ref, err := vm.reach(iGet.Name)
+			ref, err := vm.cp.reach(iGet.Name)
 			if err != nil {
 				panic(err)
 			}
 
 			if ref.isCaptured() {
-				index := vm.addToCaptured(ref)
+				index := vm.cp.addToCaptured(ref)
 				return func(fbr *fiber) (result Value, err error) {
 					value := fbr.getCaptured(index)
 
@@ -469,7 +470,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 						result, err = fn.code(fbr)
 
 						// release non-escaping locals
-						for _, idx := range fn.freeable {
+						for _, idx := range fn.recyclable {
 							vm.rt.boxes.Put(fbr.stack[base+idx])
 						}
 
@@ -532,7 +533,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 				result, err = fn.code(fbr)
 
 				// release non-escaping locals
-				for _, idx := range fn.freeable {
+				for _, idx := range fn.recyclable {
 					vm.rt.boxes.Put(fbr.stack[base+idx])
 				}
 
@@ -567,7 +568,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 			// optimise: returning local variables
 			if iGet, isIdentGet := node.Value.(ast.IdentGet); isIdentGet {
-				ref, err := vm.reach(iGet.Name)
+				ref, err := vm.cp.reach(iGet.Name)
 				if err != nil {
 					panic(err)
 				}
@@ -593,7 +594,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	case ast.BinOp:
 		// optimise: lhs being a local variable
 		if iGet, isIdentGet := node.Lhs.(ast.IdentGet); isIdentGet && vm.cp.optimise {
-			ref, err := vm.reach(iGet.Name)
+			ref, err := vm.cp.reach(iGet.Name)
 			if err != nil {
 				panic(err)
 			}

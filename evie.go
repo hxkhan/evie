@@ -1,6 +1,9 @@
 package evie
 
 import (
+	"io"
+	"log"
+
 	"github.com/hxkhan/evie/parser"
 	"github.com/hxkhan/evie/std"
 	"github.com/hxkhan/evie/std/builtin"
@@ -13,6 +16,7 @@ type Options struct {
 	Optimise      bool // use specialised instructions
 	ObserveIt     bool // collect metrics (affects performance)
 	TopLevelLogic bool // whether to only allow declarations at top level
+	DebugLogs     bool // print debug logs
 
 	BuiltIns map[string]vm.Value // what should be made available to the user in the built-in scope
 	Globals  map[string]vm.Value // what should be made available to the user in the global scope
@@ -33,6 +37,10 @@ func DefaultExports() map[string]vm.Value {
 }
 
 func New(opts Options) *Interpreter {
+	log.SetFlags(0)
+	if !opts.DebugLogs {
+		log.SetOutput(io.Discard)
+	}
 	m := vm.New(opts.BuiltIns, opts.Optimise)
 
 	/* if opts.ObserveIt {

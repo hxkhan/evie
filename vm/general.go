@@ -2,7 +2,7 @@ package vm
 
 import (
 	"fmt"
-	"log"
+	"slices"
 	"sync"
 
 	"github.com/hxkhan/evie/ast"
@@ -17,10 +17,10 @@ type Instance struct {
 }
 
 type compiler struct {
-	globals map[string]int // maps to global variable addresses
+	globals map[string]int // maps to global variables to their addresses
 
-	openFunctionsRefs          [][]reference      // open functions and their captured variables
-	openFunctionsEscapedLocals []map[int]struct{} // open functions and their escapee locals
+	openFunctionsRefs     [][]capture        // open functions and their captured variables
+	openFunctionsFreeVars []map[int]struct{} // open functions and their escapee locals
 
 	scope                *scope.Instance // current scope
 	root                 *scope.Instance // built-in scope
@@ -38,7 +38,7 @@ type runtime struct {
 }
 
 func New(exports map[string]Value, optimise bool) *Instance {
-	log.SetFlags(0)
+
 	vm := &Instance{
 		compiler{
 			globals:              make(map[string]int),
@@ -104,8 +104,8 @@ func (vm *Instance) WaitForNoActivity() {
 }
 
 // reach searches for a binding across all scope instances
-func (vm *Instance) reach(name string) (ref reference, err error) {
-	for scope, scroll := range vm.cp.scope.Instances() {
+func (cp *compiler) reach(name string) (ref reference, err error) {
+	for scope, scroll := range cp.scope.Instances() {
 		if index, success := scope.Reach(name); success {
 			// if built-in scope then return negative scroll to signal that
 			if scope.Previous() == nil {
@@ -113,49 +113,60 @@ func (vm *Instance) reach(name string) (ref reference, err error) {
 			}
 
 			// if accessing global from global; make sure it is initialized
-			if scope.Previous() == vm.cp.root && scroll == 0 {
-				if _, has := vm.cp.uninitializedGlobals[name]; has {
-					return ref, fmt.Errorf("vm.reach(\"%v\") -> unitialized symbol", name)
+			if scope.Previous() == cp.root && scroll == 0 {
+				if _, has := cp.uninitializedGlobals[name]; has {
+					return ref, fmt.Errorf("cp.reach(\"%v\") -> unitialized symbol", name)
 				}
 			}
 			return reference{index: index, scroll: scroll}, nil
 		}
 	}
-	return ref, fmt.Errorf("vm.reach(\"%v\") -> unreachable symbol", name)
+	return ref, fmt.Errorf("cp.reach(\"%v\") -> unreachable symbol", name)
 }
 
-func (vm *Instance) addToCaptured(ref reference) (index int) {
-	accessingGlobal := len(vm.cp.openFunctionsEscapedLocals) == ref.scroll
+func (cp *compiler) addToCaptured(ref reference) (index int) {
+	accessingGlobal := len(cp.openFunctionsFreeVars) == ref.scroll
 	if !accessingGlobal {
 		// owner of variable needs to know that its local has escaped
-		escapedLocals := vm.cp.openFunctionsEscapedLocals[len(vm.cp.openFunctionsEscapedLocals)-1-ref.scroll]
-		escapedLocals[ref.index] = struct{}{}
+		freeVars := cp.openFunctionsFreeVars[len(cp.openFunctionsFreeVars)-1-ref.scroll]
+		freeVars[ref.index] = struct{}{}
 	}
 
-	// capture the ref if not already captured
-	ourRefs := vm.cp.openFunctionsRefs[len(vm.cp.openFunctionsRefs)-1]
-	for i, theRef := range ourRefs {
-		if theRef == ref {
-			return i
+	// scroll >= 1 guaranteed
+	initialCapturerIndex := len(cp.openFunctionsRefs) - ref.scroll
+	refs := cp.openFunctionsRefs[initialCapturerIndex]
+	// if not referenced already; reference now, as local
+	if index = slices.Index(refs, capture{true, ref.index}); index == -1 {
+		index = len(refs)
+		refs = append(refs, capture{true, ref.index})
+		cp.openFunctionsRefs[initialCapturerIndex] = refs
+	}
+
+	for i := range ref.scroll - 1 {
+		currentCapturer := initialCapturerIndex + 1 + i
+		refs := cp.openFunctionsRefs[currentCapturer]
+		// if not referenced already; reference now, as captured
+		if index = slices.Index(refs, capture{false, index}); index == -1 {
+			index = len(refs)
+			refs = append(refs, capture{false, index})
+			cp.openFunctionsRefs[currentCapturer] = refs
 		}
 	}
-	ourRefs = append(ourRefs, ref)
-	vm.cp.openFunctionsRefs[len(vm.cp.openFunctionsRefs)-1] = ourRefs
-	return len(ourRefs) - 1
+	return index
 }
 
 func (cp *compiler) openFunction() {
 	cp.openFunctionsRefs = append(cp.openFunctionsRefs, nil)
-	cp.openFunctionsEscapedLocals = append(cp.openFunctionsEscapedLocals, map[int]struct{}{})
+	cp.openFunctionsFreeVars = append(cp.openFunctionsFreeVars, map[int]struct{}{})
 }
 
-func (cp *compiler) closeFunction() (refs []reference, escapees map[int]struct{}) {
+func (cp *compiler) closeFunction() (refs []capture, escapees map[int]struct{}) {
 	// pop top
 	refs = cp.openFunctionsRefs[len(cp.openFunctionsRefs)-1]
 	cp.openFunctionsRefs = cp.openFunctionsRefs[:len(cp.openFunctionsRefs)-1]
 
-	escapees = cp.openFunctionsEscapedLocals[len(cp.openFunctionsEscapedLocals)-1]
-	cp.openFunctionsEscapedLocals = cp.openFunctionsEscapedLocals[:len(cp.openFunctionsEscapedLocals)-1]
+	escapees = cp.openFunctionsFreeVars[len(cp.openFunctionsFreeVars)-1]
+	cp.openFunctionsFreeVars = cp.openFunctionsFreeVars[:len(cp.openFunctionsFreeVars)-1]
 
 	return refs, escapees
 }

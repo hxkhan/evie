@@ -28,6 +28,7 @@ func main() {
 	o := flag.Bool("o", true, "Optimise the program with specialised instructions")
 	d := flag.Bool("d", false, "Print debug stats")
 	t := flag.Bool("t", false, "Print execution time")
+	log := flag.Bool("log", false, "Log things for debugging")
 	flag.Parse()
 
 	fileName := os.Args[len(os.Args)-1]
@@ -41,7 +42,7 @@ func main() {
 		panic(err)
 	}
 
-	ip := evie.New(evie.Options{Optimise: *o, ObserveIt: *d, BuiltIns: evie.DefaultExports()})
+	ip := evie.New(evie.Options{Optimise: *o, ObserveIt: *d, DebugLogs: *log, BuiltIns: evie.DefaultExports()})
 	_, err = ip.EvalScript(input)
 	if err != nil {
 		fmt.Println(err)

@@ -14,6 +14,6 @@ func (ref reference) isLocal() bool {
 	return ref.scroll == 0
 }
 
-func (ref reference) isCaptured() bool {
+func (ref reference) isCapture() bool {
 	return ref.scroll > 0
 }

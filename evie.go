@@ -13,18 +13,15 @@ import (
 )
 
 type Options struct {
-	Optimise      bool // use specialised instructions
-	ObserveIt     bool // collect metrics (affects performance)
-	TopLevelLogic bool // whether to only allow declarations at top level
-	DebugLogs     bool // print debug logs
-
-	BuiltIns map[string]vm.Value // what should be made available to the user in the built-in scope
-	Globals  map[string]vm.Value // what should be made available to the user in the global scope
+	vm.Options
+	DebugLogs bool // print debug logs
 }
 
 var Defaults = Options{
-	Optimise: true,
-	BuiltIns: DefaultExports(),
+	Options: vm.Options{
+		Optimise: true,
+		Builtins: DefaultExports(),
+	},
 }
 
 type Interpreter struct {
@@ -44,7 +41,7 @@ func New(opts Options) *Interpreter {
 	if !opts.DebugLogs {
 		log.SetOutput(io.Discard)
 	}
-	m := vm.New(opts.BuiltIns, opts.Optimise)
+	m := vm.New(opts.Options)
 
 	/* if opts.ObserveIt {
 		vm.WrapInstructions(func(rt *vm.CoRoutine) {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hxkhan/evie"
+	"github.com/hxkhan/evie/vm"
 )
 
 func main() {
@@ -42,7 +43,7 @@ func main() {
 		panic(err)
 	}
 
-	ip := evie.New(evie.Options{Optimise: *o, ObserveIt: *d, DebugLogs: *log, BuiltIns: evie.DefaultExports()})
+	ip := evie.New(evie.Options{DebugLogs: *log, Options: vm.Options{Optimise: *o, ObserveIt: *d, Builtins: evie.DefaultExports()}})
 	_, err = ip.EvalScript(input)
 	if err != nil {
 		fmt.Println(err)

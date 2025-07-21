@@ -21,8 +21,8 @@ func NewScope(initialSize int) *Instance {
 }
 
 // New creates an extension of the current scope
-func (scope *Instance) New() *Instance {
-	return &Instance{blocks: []bindings{{}}, previous: scope}
+func (scope *Instance) New(initialSize int) *Instance {
+	return &Instance{blocks: []bindings{make(bindings, initialSize)}, previous: scope}
 }
 
 func (scope *Instance) Previous() *Instance {

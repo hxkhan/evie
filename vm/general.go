@@ -17,7 +17,7 @@ type Instance struct {
 }
 
 type closure struct {
-	captures []capture
+	captures ds.Slice[capture]
 	freeVars ds.Set[int]
 }
 
@@ -27,7 +27,7 @@ type compiler struct {
 	closures             ds.Slice[closure] // currently open closures
 	scope                *scope.Instance   // current scope
 	root                 *scope.Instance   // built-in scope
-	uninitializedGlobals map[string]struct{}
+	uninitializedGlobals ds.Set[int]
 	optimise             bool
 }
 
@@ -40,13 +40,21 @@ type runtime struct {
 	wg       sync.WaitGroup   // wait for all fibers to complete
 }
 
-func New(exports map[string]Value, optimise bool) *Instance {
+type Options struct {
+	Optimise      bool             // use specialised instructions
+	ObserveIt     bool             // collect metrics (affects performance)
+	TopLevelLogic bool             // whether to only allow declarations at top level
+	Builtins      map[string]Value // what should be made available to the user in the built-in scope
+	Globals       map[string]Value // what should be made available to the user in the global scope
+}
+
+func New(opts Options) *Instance {
 	vm := &Instance{
 		compiler{
 			globals:              make(map[string]int),
-			root:                 scope.NewScope(len(exports)),
-			uninitializedGlobals: make(map[string]struct{}),
-			optimise:             optimise,
+			root:                 scope.NewScope(len(opts.Builtins)),
+			uninitializedGlobals: ds.Set[int]{},
+			optimise:             opts.Optimise,
 		},
 		runtime{
 			boxes:  make(ds.Slice[*Value], 0, 48), // the capacity to store 48 boxed values
@@ -57,17 +65,23 @@ func New(exports map[string]Value, optimise bool) *Instance {
 		},
 	}
 
-	vm.rt.builtins = make([]Value, len(exports))
-	for name, value := range exports {
-		index, ok := vm.cp.root.Declare(name)
-		if !ok {
-			panic("exports contain conflicting names")
-		}
+	// 1. declare exported builtins
+	vm.rt.builtins = make([]Value, len(opts.Builtins))
+	for name, value := range opts.Builtins {
+		index, _ := vm.cp.root.Declare(name)
 		vm.rt.builtins[index] = value
 	}
 
-	// extend from builtin to global scope
-	vm.cp.scope = vm.cp.root.New()
+	// 2. extend from builtin to global scope
+	vm.cp.scope = vm.cp.root.New(len(opts.Globals))
+
+	// 3. declare exported globals
+	vm.main.stack = make([]*Value, len(opts.Globals))
+	for name, value := range opts.Globals {
+		index, _ := vm.cp.scope.Declare(name)
+		vm.main.stack[index] = &value
+	}
+
 	return vm
 }
 
@@ -116,7 +130,7 @@ func (cp *compiler) reach(name string) (ref reference, err error) {
 
 			// if accessing global from global; make sure it is initialized
 			if scope.Previous() == cp.root && scroll == 0 {
-				if _, has := cp.uninitializedGlobals[name]; has {
+				if cp.uninitializedGlobals.Has(index) {
 					return ref, fmt.Errorf("cp.reach(\"%v\") -> unitialized symbol", name)
 				}
 			}
@@ -130,37 +144,38 @@ func (cp *compiler) addToCaptured(ref reference) (index int) {
 	// are we scrolling to global scope?
 	accessingGlobal := cp.closures.Len() == ref.scroll
 
-	// initial-capturer logic
-	start := cp.closures.Len() - ref.scroll
-	closure := cp.closures.Get(start)
+	// 1. initial-capture logic
+	iCapture := cp.closures.Len() - ref.scroll
+	closure := cp.closures[iCapture]
 	// if not referenced already; reference now, as local
 	if index = slices.Index(closure.captures, capture{true, ref.index}); index == -1 {
+		index = closure.captures.Len()
+		closure.captures.Push(capture{true, ref.index})
+		cp.closures[iCapture] = closure
+
+		// owner of variable needs to know that its local has escaped so it does not recycle it
 		if !accessingGlobal {
-			// owner of variable needs to know that its local has escaped
-			owner := cp.closures.Get(cp.closures.Len() - ref.scroll - 1)
+			owner := cp.closures[iCapture-1]
 			owner.freeVars.Add(ref.index)
 		}
-
-		index = len(closure.captures)
-		closure.captures = append(closure.captures, capture{true, ref.index})
-		cp.closures.Set(start, closure)
 	}
 
+	// 2. propagate the capture down to where we need it (only if ref.scroll > 1)
 	for i := range ref.scroll - 1 {
-		currentCapturer := start + 1 + i
-		owner := cp.closures.Get(currentCapturer)
+		current := iCapture + 1 + i
+		closure := cp.closures[current]
 		// if not referenced already; reference now, as captured
-		if index = slices.Index(owner.captures, capture{false, index}); index == -1 {
-			index = len(owner.captures)
-			owner.captures = append(owner.captures, capture{false, index})
-			cp.closures.Set(currentCapturer, owner)
+		if index = slices.Index(closure.captures, capture{false, index}); index == -1 {
+			index = closure.captures.Len()
+			closure.captures.Push(capture{false, index})
+			cp.closures[current] = closure
 		}
 	}
 	return index
 }
 
 func (cp *compiler) openClosure() {
-	cp.closures.Append(closure{freeVars: ds.Set[int]{}})
+	cp.closures.Push(closure{freeVars: ds.Set[int]{}})
 }
 
 func (cp *compiler) closeClosure() closure {
@@ -176,7 +191,7 @@ func (vm *Instance) newValue() (obj *Value) {
 
 func (vm *Instance) putValue(obj *Value) {
 	if vm.rt.boxes.Len() < vm.rt.boxes.Cap() {
-		vm.rt.boxes.Append(obj)
+		vm.rt.boxes.Push(obj)
 	}
 }
 
@@ -189,6 +204,6 @@ func (vm *Instance) newFiber() (obj *fiber) {
 
 func (vm *Instance) putFiber(obj *fiber) {
 	if vm.rt.fibers.Len() < vm.rt.fibers.Cap() {
-		vm.rt.fibers.Append(obj)
+		vm.rt.fibers.Push(obj)
 	}
 }

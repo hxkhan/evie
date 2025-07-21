@@ -22,7 +22,7 @@ func (s *Slice[T]) Set(index int, value T) {
 	}
 }
 
-func (s *Slice[T]) Append(item T) {
+func (s *Slice[T]) Push(item T) {
 	(*s) = append((*s), item)
 }
 

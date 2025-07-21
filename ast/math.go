@@ -20,10 +20,11 @@ const (
 )
 
 type BinOp struct {
-	Lhs       Node // [required]
-	token.Pos      // [required]
-	Operator       // [required]
-	Rhs       Node // [required]
+	token.Pos // [required]
+	Operator  // [required]
+
+	Lhs Node // [required]
+	Rhs Node // [required]
 }
 
 func (bop BinOp) IsLike(ops ...Operator) bool {

@@ -22,10 +22,13 @@ type Options struct {
 	Globals  map[string]vm.Value // what should be made available to the user in the global scope
 }
 
-var Defaults = Options{Optimise: true, BuiltIns: DefaultExports()}
+var Defaults = Options{
+	Optimise: true,
+	BuiltIns: DefaultExports(),
+}
 
 type Interpreter struct {
-	vm *vm.Instance
+	*vm.Instance
 }
 
 func DefaultExports() map[string]vm.Value {
@@ -60,15 +63,5 @@ func (ip *Interpreter) EvalScript(input []byte) (vm.Value, error) {
 		return vm.Value{}, err
 	}
 
-	return ip.vm.EvalNode(output)
-}
-
-// GetGlobal retrieves a global variable by its name and returns a pointer to it.
-// If the global variable does not exist, it returns nil.
-func (ip *Interpreter) GetGlobal(name string) *vm.Value {
-	return ip.vm.GetGlobal(name)
-}
-
-func (ip *Interpreter) WaitForNoActivity() {
-	ip.vm.WaitForNoActivity()
+	return ip.EvalNode(output)
 }

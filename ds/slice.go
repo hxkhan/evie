@@ -2,21 +2,6 @@ package ds
 
 import "iter"
 
-type Set[T comparable] map[T]struct{}
-
-func (s Set[T]) Add(item T) {
-	s[item] = struct{}{}
-}
-
-func (s Set[T]) Has(item T) bool {
-	_, exists := s[item]
-	return exists
-}
-
-func (s Set[T]) Len() int {
-	return len(s)
-}
-
 // use make(Slice[T], len, cap) or Slice[T]{} to make instances of this
 type Slice[T any] []T
 

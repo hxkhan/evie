@@ -69,7 +69,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 				closure := vm.cp.closeClosure()
 				vm.cp.scope = vm.cp.scope.Previous()
 
-				// make list of non-escaping variables so they can be freed after execution
+				// make list of non-escaping variables so they can be recycled after execution
 				recyclable := make([]int, 0, capacity-closure.freeVars.Len())
 				for index := range capacity {
 					if closure.freeVars.Has(index) {
@@ -377,7 +377,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		closure := vm.cp.closeClosure()
 		vm.cp.scope = vm.cp.scope.Previous()
 
-		// make list of non-escaping variables so they can be freed after execution
+		// make list of non-escaping variables so they can be recycled after execution
 		recyclable := make([]int, 0, capacity-closure.freeVars.Len())
 		for index := range capacity {
 			if closure.freeVars.Has(index) {
@@ -558,39 +558,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		}
 
 	case ast.Return:
-		if vm.cp.optimise {
-			// optimise: returning constants
-			if in, isInput := node.Value.(ast.Input[float64]); isInput {
-				value := BoxFloat64(in.Value)
-				return func(fbr *fiber) (Value, error) {
-					return value, errReturnSignal
-				}
-			}
-
-			// optimise: returning local variables
-			if iGet, isIdentGet := node.Value.(ast.IdentGet); isIdentGet {
-				ref, err := vm.cp.reach(iGet.Name)
-				if err != nil {
-					panic(err)
-				}
-
-				if ref.isLocal() {
-					return func(fbr *fiber) (Value, error) {
-						return fbr.getLocal(ref.index), errReturnSignal
-					}
-				}
-			}
-		}
-
-		what := vm.compile(node.Value)
-		return func(fbr *fiber) (Value, error) {
-			v, err := what(fbr)
-			if err != nil {
-				return v, err
-			}
-
-			return v, errReturnSignal
-		}
+		return vm.emitReturn(node)
 
 	case ast.BinOp:
 		// optimise: lhs being a local variable
@@ -875,16 +843,38 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	panic(fmt.Errorf("implement %T", node))
 }
 
-/* func encode(value any) Value {
-	switch v := value.(type) {
-	case bool:
-		return BoxBool(v)
-	case float64:
-		return BoxFloat64(v)
-	case string:
-		return BoxString(v)
+func (vm *Instance) emitReturn(node ast.Return) instruction {
+	if vm.cp.optimise {
+		// optimise: returning constants
+		if in, isInput := node.Value.(ast.Input[float64]); isInput {
+			value := BoxFloat64(in.Value)
+			return func(fbr *fiber) (Value, error) {
+				return value, errReturnSignal
+			}
+		}
+
+		// optimise: returning local variables
+		if iGet, isIdentGet := node.Value.(ast.IdentGet); isIdentGet {
+			ref, err := vm.cp.reach(iGet.Name)
+			if err != nil {
+				panic(err)
+			}
+
+			if ref.isLocal() {
+				return func(fbr *fiber) (Value, error) {
+					return fbr.getLocal(ref.index), errReturnSignal
+				}
+			}
+		}
 	}
 
-	panic(fmt.Errorf("cannot encode %T", value))
+	what := vm.compile(node.Value)
+	return func(fbr *fiber) (Value, error) {
+		v, err := what(fbr)
+		if err != nil {
+			return v, err
+		}
+
+		return v, errReturnSignal
+	}
 }
-*/

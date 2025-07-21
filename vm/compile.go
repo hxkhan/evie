@@ -56,7 +56,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			if fn, isFn := node.(ast.Fn); isFn {
 				idx := vm.cp.globals[fn.Name]
 
-				vm.cp.openFunction()
+				vm.cp.openClosure()
 				vm.cp.scope = vm.cp.scope.New()
 
 				// declare the fn arguments and only then compile the code
@@ -66,36 +66,36 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 				action := vm.compile(fn.Action)
 				capacity := vm.cp.scope.Capacity()
-				refs, freeVars := vm.cp.closeFunction()
+				closure := vm.cp.closeClosure()
 				vm.cp.scope = vm.cp.scope.Previous()
 
 				// make list of non-escaping variables so they can be freed after execution
-				recyclable := make([]int, 0, capacity-len(freeVars))
+				recyclable := make([]int, 0, capacity-closure.freeVars.Len())
 				for index := range capacity {
-					if _, exists := freeVars[index]; !exists {
-						recyclable = append(recyclable, index)
+					if closure.freeVars.Has(index) {
+						log.Printf("CT: fn %v => Local(%v) escapes\n", fn.Name, index)
 						continue
 					}
-					log.Printf("CT: fn %v => Local(%v) escapes\n", fn.Name, index)
+					recyclable = append(recyclable, index)
 				}
 
 				info := &funcInfoStatic{
 					name:       fn.Name,
 					args:       fn.Args,
-					captures:   refs,
+					captures:   closure.captures,
 					recyclable: recyclable,
 					capacity:   capacity,
 					code:       action,
 					vm:         vm,
 				}
 
-				for i, ref := range refs {
+				for i, ref := range closure.captures {
 					log.Printf("CT: fn %v => Capture(%v) -> %v\n", fn.Name, i, ref)
 				}
 
 				code = append(code, func(fbr *fiber) (Value, error) {
-					captured := make([]*Value, len(refs))
-					for i, ref := range refs {
+					captured := make([]*Value, len(closure.captures))
+					for i, ref := range closure.captures {
 						var v *Value
 						if ref.isLocal {
 							v = fbr.getLocalByRef(ref.index)
@@ -363,7 +363,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			panic("named functions are only allowed as top level declarations")
 		}
 
-		vm.cp.openFunction()
+		vm.cp.openClosure()
 		vm.cp.scope = vm.cp.scope.New()
 
 		// declare the fn arguments and only then compile the code
@@ -374,36 +374,36 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		code := vm.compile(node.Action)
 
 		capacity := vm.cp.scope.Capacity()
-		refs, escapees := vm.cp.closeFunction()
+		closure := vm.cp.closeClosure()
 		vm.cp.scope = vm.cp.scope.Previous()
 
 		// make list of non-escaping variables so they can be freed after execution
-		recyclable := make([]int, 0, capacity-len(escapees))
+		recyclable := make([]int, 0, capacity-closure.freeVars.Len())
 		for index := range capacity {
-			if _, exists := escapees[index]; !exists {
-				recyclable = append(recyclable, index)
+			if closure.freeVars.Has(index) {
+				log.Printf("CT: closure => Local(%v) escapes\n", index)
 				continue
 			}
-			log.Printf("CT: closure => Local(%v) escapes\n", index)
+			recyclable = append(recyclable, index)
 		}
 
 		info := &funcInfoStatic{
 			name:       "λ",
 			args:       node.Args,
-			captures:   refs,
+			captures:   closure.captures,
 			recyclable: recyclable,
 			capacity:   capacity,
 			code:       code,
 			vm:         vm,
 		}
 
-		for i, ref := range refs {
+		for i, ref := range closure.captures {
 			log.Printf("CT: closure => Capture(%v) -> %v\n", i, ref)
 		}
 
 		return func(fbr *fiber) (Value, error) {
-			captured := make([]*Value, len(refs))
-			for i, ref := range refs {
+			captured := make([]*Value, len(closure.captures))
+			for i, ref := range closure.captures {
 				var v *Value
 				if ref.isLocal {
 					v = fbr.getLocalByRef(ref.index)
@@ -453,7 +453,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 						// create space for all the locals
 						base := fbr.stackSize()
 						for range fn.capacity {
-							fbr.pushLocal(vm.rt.boxes.Get())
+							fbr.pushLocal(vm.newValue())
 						}
 
 						// set arguments
@@ -472,7 +472,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 						// release non-escaping locals
 						for _, idx := range fn.recyclable {
-							vm.rt.boxes.Put(fbr.stack[base+idx])
+							vm.putValue(fbr.stack[base+idx])
 						}
 
 						// restore old state
@@ -516,7 +516,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 				// create space for all the locals
 				base := fbr.stackSize()
 				for range fn.capacity {
-					fbr.pushLocal(vm.rt.boxes.Get())
+					fbr.pushLocal(vm.newValue())
 				}
 
 				// set arguments
@@ -535,7 +535,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 				// release non-escaping locals
 				for _, idx := range fn.recyclable {
-					vm.rt.boxes.Put(fbr.stack[base+idx])
+					vm.putValue(fbr.stack[base+idx])
 				}
 
 				// restore old state
@@ -775,6 +775,60 @@ func (vm *Instance) compile(node ast.Node) instruction {
 				return Value{}, operatorError("-", a, b)
 			}
 
+		case ast.MulOp:
+			return func(fbr *fiber) (Value, error) {
+				a, err := lhs(fbr)
+				if err != nil {
+					return a, err
+				}
+				b, err := rhs(fbr)
+				if err != nil {
+					return a, err
+				}
+
+				if a, ok := a.AsFloat64(); ok {
+					if b, ok := b.AsFloat64(); ok {
+						return BoxFloat64(a * b), nil
+					}
+				}
+
+				return Value{}, operatorError("*", a, b)
+			}
+
+		case ast.DivOp:
+			return func(fbr *fiber) (Value, error) {
+				a, err := lhs(fbr)
+				if err != nil {
+					return a, err
+				}
+				b, err := rhs(fbr)
+				if err != nil {
+					return a, err
+				}
+
+				if a, ok := a.AsFloat64(); ok {
+					if b, ok := b.AsFloat64(); ok {
+						return BoxFloat64(a / b), nil
+					}
+				}
+
+				return Value{}, operatorError("/", a, b)
+			}
+
+		case ast.EqOp:
+			return func(fbr *fiber) (Value, error) {
+				a, err := lhs(fbr)
+				if err != nil {
+					return a, err
+				}
+				b, err := rhs(fbr)
+				if err != nil {
+					return a, err
+				}
+
+				return BoxBool(a.Equals(b)), nil
+			}
+
 		case ast.LtOp:
 			return func(fbr *fiber) (Value, error) {
 				a, err := lhs(fbr)
@@ -794,8 +848,28 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 				return Value{}, operatorError("<", a, b)
 			}
+
+		case ast.GtOp:
+			return func(fbr *fiber) (Value, error) {
+				a, err := lhs(fbr)
+				if err != nil {
+					return a, err
+				}
+				b, err := rhs(fbr)
+				if err != nil {
+					return a, err
+				}
+
+				if a, ok := a.AsFloat64(); ok {
+					if b, ok := b.AsFloat64(); ok {
+						return BoxBool(a > b), nil
+					}
+				}
+
+				return Value{}, operatorError(">", a, b)
+			}
 		}
-		panic("OP not implemented")
+		panic(fmt.Errorf("implement Operator(%v)", node.Operator))
 	}
 
 	panic(fmt.Errorf("implement %T", node))

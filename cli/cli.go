@@ -32,8 +32,8 @@ func main() {
 	flag.Parse()
 
 	fileName := os.Args[len(os.Args)-1]
-	if !strings.HasSuffix(fileName, ".es") {
-		fmt.Println("Provide a file with a .es extension as the last argument!")
+	if !strings.HasSuffix(fileName, ".ev") {
+		fmt.Println("Provide a file with a .ev extension as the last argument!")
 		return
 	}
 

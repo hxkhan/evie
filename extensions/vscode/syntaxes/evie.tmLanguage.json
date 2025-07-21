@@ -1,6 +1,6 @@
 {
 	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-	"name": "EvieScript",
+	"name": "Evie",
 	"patterns": [
 	  {
 		"include": "#keywords"
@@ -22,42 +22,42 @@
 	  },
 	  {
 		"comment": "await and variants",
-		"name": "keyword.control.await.eviescript",
+		"name": "keyword.control.await.evie",
 		"match": "\\bawait(\\.(all|any))?\\b"
 	  },	
 	  {
 		"comment": "Boolean constant",
-		"name": "constant.language.boolean.eviescript",
+		"name": "constant.language.boolean.evie",
 		"match": "\\b(true|false)\\b"
 	  },
 	  {
 		"comment": "Constant",
-		"name": "constant.language.eviescript",
+		"name": "constant.language.evie",
 		"match": "\\b(null)\\b"
 	  },
 	  {
 		"comment": "Built-in functions",
 		"match": "\\b(bool|number|str)\\b(?=\\()",
-		"name": "support.function.builtin.eviescript"
+		"name": "support.function.builtin.evie"
 	  },
 	  {
 		"comment": "Comparison operator",
-		"name": "keyword.operator.comparison.eviescript",
+		"name": "keyword.operator.comparison.evie",
 		"match": "(&&|\\|\\||==|!=)"
 	  },
 	  {
 		"comment": "Assignment operator",
-		"name": "keyword.operator.assignment.eviescript",
+		"name": "keyword.operator.assignment.evie",
 		"match": "(\\+=|-=|/=|\\*=|%=|\\^=|&=|&^=|\\|=|<<=|>>=|=|--|\\+\\+)"
 	  },
 	  {
 		"comment": "Arithmetic operator",
-		"name": "keyword.operator.arithmetic.eviescript",
+		"name": "keyword.operator.arithmetic.evie",
 		"match": "(!|\\+|-|/|\\*|%|\\^|&|\\||<<|>>|&^)"
 	  },
 	  {
 		"comment": "Comparison operator (second group because of regex precedence)",
-		"name": "keyword.operator.comparison.eviescript",
+		"name": "keyword.operator.comparison.evie",
 		"match": "(<=|>=|<|>)"
 	  },
 	  {
@@ -65,54 +65,54 @@
 		"match": "\\b([A-Za-z][A-Za-z0-9_]*|_[A-Za-z0-9_]+)\\s*\\(",
 		"captures": {
 		  "1": {
-			"name": "entity.name.function.eviescript"
+			"name": "entity.name.function.evie"
 		  }
 		}
 	  },
 	  {
 		"comment": "Miscellaneous operator",
-		"name": "keyword.operator.misc.eviescript"
+		"name": "keyword.operator.misc.evie"
 	  }
 	],
 	"repository": {
 	  "keywords": {
 		"patterns": [
 		  {
-			"name": "keyword.control.eviescript",
+			"name": "keyword.control.evie",
 			"match": "\\b(package|if|else|for|return|fn|echo|go)\\b"
 		  }
 		]
 	  },
 	  "strings": {
-		"name": "string.quoted.double.eviescript",
+		"name": "string.quoted.double.evie",
 		"begin": "\"",
 		"end": "\"",
 		"patterns": [
 		  {
-			"name": "constant.character.escape.eviescript",
+			"name": "constant.character.escape.evie",
 			"match": "\\\\."
 		  }
 		]
 	  },
 	  "chars": {
-		"name": "string.quoted.simple.eviescript",
+		"name": "string.quoted.simple.evie",
 		"begin": "'",
 		"end": "'",
 		"patterns": [
 		  {
-			"name": "constant.character.escape.eviescript",
+			"name": "constant.character.escape.evie",
 			"match": "\\\\."
 		  }
 		]
 	  },
 	  "comments": {
-		"name": "comment.line.eviescript",
+		"name": "comment.line.evie",
 		"begin": "//",
 		"end": "\n"
 	  },
 	  "block_comment": {
 		"comment": "Block comment",
-		"name": "comment.block.eviescript",
+		"name": "comment.block.evie",
 		"begin": "/\\*",
 		"end": "\\*/"
 	  },
@@ -120,22 +120,22 @@
 		"patterns": [
 		  {
 			"comment": "Integer literal",
-			"name": "constant.numeric.integer.eviescript",
+			"name": "constant.numeric.integer.evie",
 			"match": "\\b\\d+\\b"
 		  },
 		  {
 			"comment": "Floating-point literal",
-			"name": "constant.numeric.float.eviescript",
+			"name": "constant.numeric.float.evie",
 			"match": "\\b\\d+\\.\\d+([eE][-+]?\\d+)?\\b"
 		  },
 		  {
 			"comment": "Hexadecimal literal",
-			"name": "constant.numeric.hex.eviescript",
+			"name": "constant.numeric.hex.evie",
 			"match": "\\b0[xX][0-9a-fA-F]+\\b"
 		  }
 		]
 	  }
 	},
-	"scopeName": "source.es"
+	"scopeName": "source.ev"
   }
   

@@ -1,33 +1,48 @@
-# The Evie Language
+# The Evie Programming Language
 
 Evie is a dynamically typed scripting language written in Golang.
 
 Here is some example code
-```go
-package main
-
-fn main() {
-    echo fib(35)
+```php
+fn pow(x, n) {
+    if (n == 0) return 1
+    
+    return x * pow(x, n-1)
 }
 
-fn fib(n) {
-    if (n < 2) return n
-    
-    return fib(n-1) + fib(n-2)
+fn clamp(value, min, max) {
+    if (value < min) 
+        return min
+    else if (value > max)
+        return max
+
+    return value
+}
+
+fn factorial(n) {
+    if (n < 2) return 1
+
+    return n * factorial(n-1)
+}
+
+fn main() {
+    echo pow(2, 3)
+    echo clamp(50, 0, 100)
+    echo clamp(50, 75, 100)
+    echo clamp(50, 0, 25)
+    echo factorial(5)
 }
 ```
 
 Also a concurrency example below
-```go
-package main
-
+```php
 fn print(message, duration) {
     await time.timer(duration) // timer will return a 'task' that we await on
     echo message
 }
 
 fn main() {
-    // keyword 'go' starts a new coroutine
+    // keyword 'go' starts a new fiber
     go print("one", 100)
     go print("two", 200)
     go print("three", 300)
@@ -40,10 +55,9 @@ fn main() {
     go print("ten", 1000)
 }
 ```
-To test this exact program, `cd` to `example` and run `go run . -t go.es`
+To test this exact program, `cd` to `cli` and run `go run . -t go.es`
 - flag `-t` prints the execution time
-- flag `-p` prints the *byte code* of the program, before running it
-- flag `-o=true/false` enables or disables specialised instruction optimisations. It's `true` by default
+- flag `-o=true/false` enables or disables specialised instruction optimisations. It is `true` by default
 
 ## Features
 - Highly performant
@@ -56,5 +70,5 @@ To test this exact program, `cd` to `example` and run `go run . -t go.es`
 ## Benchmarks
 | Language | fib(35)  |
 | :--- |    ---: |
-| [**Evie**](https://github.com/hxkhan/evie) | `723ms` |
-| [Tengo](https://github.com/d5/tengo) | `1562ms` |
+| [**Evie**](https://github.com/hxkhan/evie) | `480ms` |
+| [Tengo](https://github.com/d5/tengo) | `1560ms` |

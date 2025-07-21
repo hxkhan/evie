@@ -1,8 +1,8 @@
 {
-  "name": "eviescript",
-  "displayName": "EvieScript",
-  "description": "Syntax highlighting for the EvieScript language",
-  "publisher": "hx-khan",
+  "name": "evie",
+  "displayName": "Evie",
+  "description": "Syntax highlighting for the Evie programming language",
+  "publisher": "hxkhan",
   "version": "1.0.0",
   "engines": {
     "vscode": "^1.94.0"
@@ -13,22 +13,23 @@
   "contributes": {
     "languages": [
       {
-        "id": "eviescript",
+        "id": "evie",
         "aliases": [
-          "EvieScript",
-          "eviescript"
+          "Evie",
+          "evie",
+          "ev"
         ],
         "extensions": [
-          ".es"
+          ".ev"
         ],
         "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
       {
-        "language": "eviescript",
-        "scopeName": "source.es",
-        "path": "./syntaxes/eviescript.tmLanguage.json"
+        "language": "evie",
+        "scopeName": "source.ev",
+        "path": "./syntaxes/evie.tmLanguage.json"
       }
     ]
   }

@@ -3,11 +3,11 @@ package main
 message := "Hello World"
 
 fn main() {
-    // test 1 layer of capture
+    // 1 layer of capture
     printer := single()
     printer()
 
-    // test 2 layers of capture
+    // 2 layers of capture
     getter := double()
     printer = getter()
     printer()

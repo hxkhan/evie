@@ -42,7 +42,7 @@ func Parse(input []byte) (node ast.Node, err error) {
 		}
 	}()
 
-	if ps.consumeKeyword("package") {
+	if ps.consumeKeyword("package", true) {
 		if ps.PeekToken().Type != token.Name {
 			return nil, fmt.Errorf("expected a name after package on line %v, got '%v'", ps.lastConsumed.Line, ps.lastConsumed.Literal)
 		}
@@ -59,22 +59,26 @@ func Parse(input []byte) (node ast.Node, err error) {
 	}
 }
 
-func (ps *parser) consumeSimple(lit string, eatPrependedNewLines bool) bool {
+func (ps *parser) consumeSimple(lit string, eatLeadingNewLines bool) bool {
 AGAIN:
 	if ps.PeekToken().IsSimple(lit) {
 		ps.lastConsumed = ps.NextToken()
 		return true
-	} else if eatPrependedNewLines && ps.PeekToken().IsNewLine() {
+	} else if eatLeadingNewLines && ps.PeekToken().IsNewLine() {
 		ps.NextToken()
 		goto AGAIN
 	}
 	return false
 }
 
-func (ps *parser) consumeKeyword(lit string) bool {
+func (ps *parser) consumeKeyword(lit string, eatLeadingNewLines bool) bool {
+AGAIN:
 	if ps.PeekToken().IsKeyword(lit) {
 		ps.lastConsumed = ps.NextToken()
 		return true
+	} else if eatLeadingNewLines && ps.PeekToken().IsNewLine() {
+		ps.NextToken()
+		goto AGAIN
 	}
 	return false
 }
@@ -207,14 +211,14 @@ func (ps *parser) handleKeywords(main token.Token) ast.Node {
 
 		// parse the else part
 		var otherwise ast.Node
-		if ps.consumeKeyword("else") {
+		if ps.consumeKeyword("else", true) {
 			otherwise = ps.parseBlockOrStatement()
 		}
 
 		return ast.Conditional{Pos: main.Line, Condition: condition, Action: action, Otherwise: otherwise}
 	}
 
-	panic("unimplemented keyword?")
+	panic(fmt.Sprintf("unimplemented keyword '%v'\n", main.Literal))
 }
 
 // assignments, calls, expressions etc.

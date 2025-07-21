@@ -1,6 +1,6 @@
-# eviescript
+# evie
 
-This extension provides syntax highlighting for the EvieScript scripting language.
+This extension provides syntax highlighting for the Evie programming language.
 
 ## Usage
 

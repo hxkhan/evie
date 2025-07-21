@@ -15,7 +15,7 @@ the rest go on the heap as free variables somehow
 
 type fiber struct {
 	active *UserFn  // currently active user function
-	stack  []*Value // a flat shared stack for local variables in the current call stack
+	stack  []*Value // flat shared stack for local variables in the current call stack
 	base   int      // where locals of the active function start at
 }
 

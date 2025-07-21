@@ -42,7 +42,7 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 	defer vm.rt.gil.Unlock()
 
 	// fetch a fiber and reset it
-	fbr := vm.rt.fibers.Get()
+	fbr := vm.newFiber()
 	fbr.active = fn
 	fbr.base = 0
 	fbr.stack = fbr.stack[:0]
@@ -55,7 +55,7 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 
 	// create space for all the locals
 	for range fn.capacity {
-		fbr.pushLocal(vm.rt.boxes.Get())
+		fbr.pushLocal(vm.newValue())
 	}
 
 	// set arguments
@@ -66,10 +66,11 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 	// prep for execution & save currently captured values
 	result, err = fn.code(fbr)
 
-	// release non-escaping locals
+	// release non-escaping locals & fiber
 	for _, idx := range fn.recyclable {
-		vm.rt.boxes.Put(fbr.stack[idx])
+		vm.putValue(fbr.stack[idx])
 	}
+	vm.putFiber(fbr)
 
 	// don't implicitly return the return value of the last executed instruction
 	switch err {
@@ -100,14 +101,14 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 		defer vm.rt.gil.Unlock()
 
 		// fetch a fiber and prepare it
-		fbr := vm.rt.fibers.Get()
+		fbr := vm.newFiber()
 		fbr.active = fn
 		fbr.base = 0
 		fbr.stack = fbr.stack[:0]
 
 		// create space for all the locals
 		for range fn.capacity {
-			fbr.pushLocal(vm.rt.boxes.Get())
+			fbr.pushLocal(vm.newValue())
 		}
 
 		// set arguments
@@ -128,10 +129,11 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 		// prep for execution & save currently captured values
 		result, err := fn.code(fbr)
 
-		// release non-escaping locals
+		// release non-escaping locals and fiber
 		for _, idx := range fn.recyclable {
-			vm.rt.boxes.Put(fbr.stack[idx])
+			vm.putValue(fbr.stack[idx])
 		}
+		vm.putFiber(fbr)
 
 		out = make([]reflect.Value, 2)
 		// don't implicitly return the return value of the last executed instruction

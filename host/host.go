@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/hxkhan/evie"
+	"github.com/hxkhan/evie/vm"
 )
 
 func main() {
@@ -35,11 +36,8 @@ func main() {
 		panic("fib is not a function")
 	}
 
-	var fib func(n int) (int, error)
-	fn.SaveInto(&fib)
-
 	// Call it
-	result, err := fib(35)
+	result, err := fn.Call(vm.BoxFloat64(35))
 	if err != nil {
 		panic(err)
 	}

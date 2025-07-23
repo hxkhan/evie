@@ -29,6 +29,15 @@ type funcInfoStatic struct {
 	vm         *Instance   // the corresponding vm
 }
 
+type UserFn struct {
+	*funcInfoStatic
+	references []*Value // captured variables
+}
+
+func (fn UserFn) String() string {
+	return "<function>"
+}
+
 func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 	if len(fn.args) != len(args) {
 		if fn.name != "λ" {
@@ -55,7 +64,7 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 
 	// create space for all the locals
 	for range fn.capacity {
-		fbr.pushLocal(vm.newValue())
+		fbr.stack = append(fbr.stack, vm.newValue())
 	}
 
 	// set arguments
@@ -108,7 +117,7 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 
 		// create space for all the locals
 		for range fn.capacity {
-			fbr.pushLocal(vm.newValue())
+			fbr.stack = append(fbr.stack, vm.newValue())
 		}
 
 		// set arguments

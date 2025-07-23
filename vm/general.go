@@ -62,6 +62,8 @@ func New(opts Options) *Instance {
 		},
 		&fiber{
 			active: &UserFn{funcInfoStatic: &funcInfoStatic{name: "global"}},
+			stack:  make([]*Value, 48),
+			base:   0,
 		},
 	}
 
@@ -92,8 +94,8 @@ func (vm *Instance) EvalNode(node ast.Node) (Value, error) {
 	defer vm.rt.gil.Unlock()
 
 	// check if more globals have been declared
-	if vm.main.stackSize() < len(vm.cp.globals) {
-		for range len(vm.cp.globals) - vm.main.stackSize() {
+	if len(vm.main.stack) < len(vm.cp.globals) {
+		for range len(vm.cp.globals) - len(vm.main.stack) {
 			vm.main.stack = append(vm.main.stack, vm.newValue())
 		}
 	}

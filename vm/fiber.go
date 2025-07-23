@@ -43,16 +43,8 @@ func (fbr *fiber) getCapturedByRef(index int) *Value {
 	return fbr.active.references[index]
 }
 
-func (fbr *fiber) pushLocal(v *Value) {
-	fbr.stack = append(fbr.stack, v)
-}
-
-func (fbr *fiber) popLocals(n int) {
+func (fbr *fiber) popStack(n int) {
 	fbr.stack = fbr.stack[:len(fbr.stack)-n]
-}
-
-func (fbr *fiber) stackSize() int {
-	return len(fbr.stack)
 }
 
 func (fbr *fiber) swapBase(base int) (old int) {

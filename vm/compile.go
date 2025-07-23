@@ -392,19 +392,17 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 						return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(argsFetchers))
 					}
 
-					// create space for all the locals
-					base := fbr.stackSize()
-					for range fn.capacity {
-						fbr.pushLocal(vm.newValue())
-					}
-
-					// set arguments
-					for idx, fetcher := range argsFetchers {
-						v, err := fetcher(fbr)
+					// evaluate arguments & push them on the stack
+					base := len(fbr.stack)
+					for _, argument := range argsFetchers {
+						v, err := argument(fbr)
 						if err != nil {
 							return v, err
 						}
-						*fbr.stack[base+idx] = v
+
+						slot := vm.newValue()
+						*slot = v
+						fbr.stack = append(fbr.stack, slot)
 					}
 
 					// prep for execution & save currently captured values
@@ -418,7 +416,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					}
 
 					// restore old state
-					fbr.popLocals(fn.capacity)
+					fbr.popStack(fn.capacity)
 					fbr.swapBase(prevBase)
 					fbr.swapActive(prevFn)
 
@@ -455,19 +453,17 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(argsFetchers))
 			}
 
-			// create space for all the locals
-			base := fbr.stackSize()
-			for range fn.capacity {
-				fbr.pushLocal(vm.newValue())
-			}
-
-			// set arguments
-			for idx, fetcher := range argsFetchers {
-				v, err := fetcher(fbr)
+			// evaluate arguments & push them on the stack
+			base := len(fbr.stack)
+			for _, argument := range argsFetchers {
+				v, err := argument(fbr)
 				if err != nil {
 					return v, err
 				}
-				*fbr.stack[base+idx] = v
+
+				slot := vm.newValue()
+				*slot = v
+				fbr.stack = append(fbr.stack, slot)
 			}
 
 			// prep for execution & save currently captured values
@@ -481,7 +477,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			}
 
 			// restore old state
-			fbr.popLocals(fn.capacity)
+			fbr.popStack(fn.capacity)
 			fbr.swapBase(prevBase)
 			fbr.swapActive(prevFn)
 

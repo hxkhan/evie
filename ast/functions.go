@@ -40,6 +40,12 @@ type AwaitAny struct {
 	Names []string
 }
 
+type FieldAccess struct {
+	token.Pos
+	Left  Node
+	Right string
+}
+
 type DotCall struct {
 	token.Pos
 	Left  Node

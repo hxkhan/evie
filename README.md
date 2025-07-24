@@ -1,6 +1,6 @@
 # The Evie Programming Language
 
-Evie is a dynamically typed scripting language written in Golang.
+Evie is a dynamically typed programming language written in Go. The goal is to provide Go developers with a blazingly fast embeddable scripting language that does *not* depend on CGO. 
 
 Here is some example code
 ```php
@@ -55,20 +55,29 @@ fn main() {
     go print("ten", 1000)
 }
 ```
-To test this exact program, `cd` to `cli` and run `go run . -t go.es`
+To test this exact program, `cd` to `cli` and run `go run . -t ../examples/go.es`
+
+## Flags
 - flag `-t` prints the execution time
 - flag `-o=true/false` enables or disables specialised instruction optimisations. It is `true` by default
 
-## Features
-- Highly performant
-- Builtin concurrency
-- Very similar to Go and other existing languages
-- Embeddable in your Go applications
-- Can also be run in standalone mode for scripts
-- No cgo, written in pure Go
+## Goals
+- Highly performant ✅
+- Builtin concurrency ⏸️
+- Very similar to Go and other existing languages ✅
+- Embeddable in your Go applications ✅
+- Can also be run in standalone mode for scripts ✅
+- Builtin package manager ❌
+- No cgo, written in pure Go ✅
+
+> Note: this project is in its early state. Many features are half baked.
 
 ## Benchmarks
-| Language | fib(35)  |
-| :--- |    ---: |
-| [**Evie**](https://github.com/hxkhan/evie) | `480ms` |
-| [Tengo](https://github.com/d5/tengo) | `1560ms` |
+| Language | fib(35)  | Host Language |
+| :-       | :-       | :-            |
+| [**Evie**](https://github.com/hxkhan/evie) | `478ms` | Go |
+| [Lua 5.4.2](https://lua.org/) | `536ms` | C | 
+| [Python 3.13](https://python.org/) | `826ms` | C |
+| [Tengo](https://github.com/d5/tengo) | `1603ms` | Go |
+
+> These benchmarks were ran on an Intel i5-13400F. Each language 10 times and the average was taken.

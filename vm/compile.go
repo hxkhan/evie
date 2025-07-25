@@ -212,9 +212,17 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 	case ast.Call:
 		return vm.emitCall(node)
+	case ast.DotCall:
+		return vm.emitDotCall(node)
+
+	case ast.Go:
+		return vm.emitGo(node)
 
 	case ast.Return:
 		return vm.emitReturn(node)
+
+	case ast.Await:
+		return vm.emitAwait(node)
 
 	case ast.BinOp:
 		return vm.emitBinOp(node)
@@ -490,10 +498,57 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			default:
 				return result, err
 			}
+		} else if res, err := fbr.tryNativeCall(value, argsFetchers); err != errNotFunction {
+			return res, err
 		}
 
 		return Value{}, CustomError("cannot call a non-function '%v'", value)
 	}
+}
+
+func (vm *Instance) emitDotCall(node ast.DotCall) instruction {
+	// namespaces e.g. json.decode(...)
+	iGetLeft, isLeftIdentGet := node.Left.(ast.IdentGet)
+	iGetRight, isRightIdentGet := node.Right.(ast.IdentGet)
+	if isLeftIdentGet && isRightIdentGet {
+		name := iGetLeft.Name + "." + iGetRight.Name
+
+		if _, exists := vm.opts.Builtins[name]; exists {
+			return vm.compile(ast.Call{Pos: node.Pos, Fn: ast.IdentGet{Pos: node.Pos, Name: name}, Args: node.Args})
+		} else {
+			panic("method not found")
+		}
+	}
+
+	panic("implement the rest")
+}
+
+func (vm *Instance) emitGo(node ast.Go) instruction {
+	if node, isCall := node.Fn.(ast.Call); isCall {
+		call := vm.emitCall(node)
+
+		return func(fbr *fiber) (Value, error) {
+			vm.rt.wg.Add(1)
+
+			go func(fbr *fiber) {
+				vm.rt.gil.Lock()
+
+				result, err := call(fbr)
+				vm.rt.wg.Done()
+				vm.rt.gil.Unlock()
+
+				if err != nil {
+					panic(err)
+				}
+
+				if result.IsTruthy() {
+					fmt.Println("result:", result)
+				}
+			}(&fiber{active: fbr.active})
+			return Value{}, nil
+		}
+	}
+	panic("go expected call, got something else")
 }
 
 func (vm *Instance) emitReturn(node ast.Return) instruction {
@@ -529,6 +584,30 @@ func (vm *Instance) emitReturn(node ast.Return) instruction {
 		}
 
 		return v, errReturnSignal
+	}
+}
+
+func (vm *Instance) emitAwait(node ast.Await) instruction {
+	task := vm.compile(node.Task)
+
+	return func(fbr *fiber) (Value, error) {
+		value, err := task(fbr)
+		if err != nil {
+			return value, err
+		}
+
+		if task, isTask := value.AsTask(); isTask {
+			vm.rt.gil.Unlock()
+			response, ok := <-task
+			vm.rt.gil.Lock()
+
+			if !ok {
+				return Value{}, CustomError("cannot await on a finished task")
+			}
+
+			return response.result, response.err
+		}
+		return Value{}, CustomError("cannot await on a value of type '%s'", value.TypeOf())
 	}
 }
 

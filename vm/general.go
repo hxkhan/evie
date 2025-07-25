@@ -11,6 +11,7 @@ import (
 )
 
 type Instance struct {
+	opts Options
 	cp   compiler
 	rt   runtime
 	main *fiber
@@ -50,6 +51,7 @@ type Options struct {
 
 func New(opts Options) *Instance {
 	vm := &Instance{
+		opts,
 		compiler{
 			globals:              make(map[string]int),
 			root:                 scope.NewScope(len(opts.Builtins)),

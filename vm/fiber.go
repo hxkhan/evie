@@ -58,3 +58,57 @@ func (fbr *fiber) swapActive(new *UserFn) (old *UserFn) {
 	fbr.active = new
 	return old
 }
+
+func (fbr *fiber) tryNativeCall(value Value, args []instruction) (result Value, err error) {
+	nfn, ok := value.AsGoFunc()
+	if !ok {
+		return Value{}, errNotFunction
+	}
+
+	switch len(args) {
+	case 0:
+		if fn, ok := nfn.(func() (Value, error)); ok {
+			return fn()
+		}
+	case 1:
+		if fn, ok := nfn.(func(Value) (Value, error)); ok {
+			arg0, err := args[0](fbr)
+			if err != nil {
+				return arg0, err
+			}
+			return fn(arg0)
+		}
+	case 2:
+		if fn, ok := nfn.(func(Value, Value) (Value, error)); ok {
+			arg0, err := args[0](fbr)
+			if err != nil {
+				return arg0, err
+			}
+			arg1, err := args[1](fbr)
+			if err != nil {
+				return arg1, err
+			}
+
+			return fn(arg0, arg1)
+		}
+	case 3:
+		if fn, ok := nfn.(func(Value, Value, Value) (Value, error)); ok {
+			arg0, err := args[0](fbr)
+			if err != nil {
+				return arg0, err
+			}
+			arg1, err := args[1](fbr)
+			if err != nil {
+				return arg1, err
+			}
+			arg2, err := args[2](fbr)
+			if err != nil {
+				return arg2, err
+			}
+
+			return fn(arg0, arg1, arg2)
+		}
+	}
+
+	panic("this cant be")
+}

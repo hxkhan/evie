@@ -171,7 +171,7 @@ func (ps *parser) handleKeywords(main token.Token) ast.Node {
 		return ps.parseFn(main)
 
 	case "go":
-		return ast.Go{Pos: main.Line, Routine: ps.parseExpression(0)}
+		return ast.Go{Pos: main.Line, Fn: ps.parseExpression(0)}
 
 	case "await":
 		// await.all(x, y, z) or await.any(x, y, z)
@@ -184,7 +184,7 @@ func (ps *parser) handleKeywords(main token.Token) ast.Node {
 				return ast.AwaitAny{Pos: main.Line, Names: ps.parseNamesList(ps.lastConsumed)}
 			}
 		}
-		return ast.Await{Fn: ps.parseExpression(0)}
+		return ast.Await{Task: ps.parseExpression(0)}
 
 	case "null":
 		return ast.Input[struct{}]{Pos: main.Line}

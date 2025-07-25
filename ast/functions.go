@@ -11,7 +11,7 @@ type Fn struct {
 
 type Go struct {
 	token.Pos
-	Routine Node
+	Fn Node
 }
 
 type Call struct {
@@ -27,7 +27,7 @@ type Return struct {
 
 type Await struct {
 	token.Pos
-	Fn Node
+	Task Node
 }
 
 type AwaitAll struct {

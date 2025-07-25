@@ -276,6 +276,8 @@ func (x Value) String() string {
 		return *(*string)(x.pointer)
 	case userFnType:
 		return "<fn>"
+	case goFuncType:
+		return "<fn>"
 	case arrayType:
 		array := *(*[]Value)(x.pointer)
 

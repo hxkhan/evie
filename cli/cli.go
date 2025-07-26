@@ -26,7 +26,7 @@ func main() {
 		panic(err)
 	} */
 
-	o := flag.Bool("o", true, "Optimise the program with specialised instructions")
+	inliner := flag.Bool("inliner", true, "Optimise the program by inlining certain instruction combinations")
 	d := flag.Bool("d", false, "Print debug stats")
 	t := flag.Bool("t", false, "Print execution time")
 	log := flag.Bool("log", false, "Log things for debugging")
@@ -43,7 +43,7 @@ func main() {
 		panic(err)
 	}
 
-	ip := evie.New(evie.Options{DebugLogs: *log, Options: vm.Options{Optimise: *o, ObserveIt: *d, Builtins: evie.DefaultExports()}})
+	ip := evie.New(evie.Options{DebugLogs: *log, Options: vm.Options{Inline: *inliner, ObserveIt: *d, Builtins: evie.DefaultExports()}})
 	_, err = ip.EvalScript(input)
 	if err != nil {
 		fmt.Println(err)

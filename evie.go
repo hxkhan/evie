@@ -19,7 +19,7 @@ type Options struct {
 
 var Defaults = Options{
 	Options: vm.Options{
-		Optimise: true,
+		Inline:   true,
 		Builtins: DefaultExports(),
 	},
 }

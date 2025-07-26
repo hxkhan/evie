@@ -5,7 +5,7 @@ import (
 	"log"
 
 	"github.com/hxkhan/evie/ast"
-	"github.com/hxkhan/evie/vm/scope"
+	"github.com/hxkhan/evie/ds"
 )
 
 type instruction func(fbr *fiber) (Value, error)
@@ -63,17 +63,17 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			if fn, isFn := node.(ast.Fn); isFn {
 				symbol := this.symbols[fn.Name]
 
-				vm.cp.openClosure()
-				vm.cp.scope = scope.NewScope(0)
+				vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}})
+				vm.cp.closures.Last(0).scope.OpenBlock()
 
 				// declare the fn arguments and only then compile the code
 				for _, arg := range fn.Args {
-					vm.cp.scope.Declare(arg)
+					vm.cp.closures.Last(0).scope.Declare(arg)
 				}
 
 				action := vm.compile(fn.Action)
-				capacity := vm.cp.scope.Capacity()
-				closure := vm.cp.closeClosure()
+				closure := vm.cp.closures.Pop()
+				capacity := closure.scope.Capacity()
 
 				// make list of non-escaping variables so they can be recycled after execution
 				recyclable := make([]int, 0, capacity-closure.freeVars.Len())
@@ -216,7 +216,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 }
 
 func (vm *Instance) emitIdentDec(node ast.IdentDec) instruction {
-	index, success := vm.cp.scope.Declare(node.Name)
+	index, success := vm.cp.closures.Last(0).scope.Declare(node.Name)
 	if !success {
 		panic(fmt.Errorf("double declaration of %s", node.Name))
 	}
@@ -308,19 +308,17 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 		panic("named functions are only allowed as top level declarations")
 	}
 
-	vm.cp.openClosure()
-	vm.cp.scope = vm.cp.scope.New(0)
+	vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}})
+	vm.cp.closures.Last(0).scope.OpenBlock()
 
 	// declare the fn arguments and only then compile the code
 	for _, arg := range node.Args {
-		vm.cp.scope.Declare(arg)
+		vm.cp.closures.Last(0).scope.Declare(arg)
 	}
 
-	code := vm.compile(node.Action)
-
-	capacity := vm.cp.scope.Capacity()
-	closure := vm.cp.closeClosure()
-	vm.cp.scope = vm.cp.scope.Previous()
+	action := vm.compile(node.Action)
+	closure := vm.cp.closures.Pop()
+	capacity := closure.scope.Capacity()
 
 	// make list of non-escaping variables so they can be recycled after execution
 	recyclable := make([]int, 0, capacity-closure.freeVars.Len())
@@ -338,7 +336,7 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 		captures:   closure.captures,
 		recyclable: recyclable,
 		capacity:   capacity,
-		code:       code,
+		code:       action,
 		vm:         vm,
 	}
 
@@ -376,7 +374,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 	}
 
 	// optimise: calling global & builtin functions
-	if iGet, isIdentGet := node.Fn.(ast.IdentGet); isIdentGet && vm.cp.optimise {
+	if iGet, isIdentGet := node.Fn.(ast.IdentGet); isIdentGet && vm.opts.Inline {
 		variable, err := vm.cp.reach(iGet.Name)
 		if err != nil {
 			panic(err)
@@ -552,7 +550,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 }
 
 func (vm *Instance) emitReturn(node ast.Return) instruction {
-	if vm.cp.optimise {
+	if vm.opts.Inline {
 		// optimise: returning constants
 		if in, isInput := node.Value.(ast.Input[float64]); isInput {
 			value := BoxFloat64(in.Value)
@@ -645,11 +643,11 @@ func (vm *Instance) emitConditional(node ast.Conditional) instruction {
 }
 
 func (vm *Instance) emitBlock(node ast.Block) instruction {
-	vm.cp.scope.OpenBlock()
-	defer vm.cp.scope.CloseBlock()
+	vm.cp.closures.Last(0).scope.OpenBlock()
+	defer vm.cp.closures.Last(0).scope.CloseBlock()
 
 	// optimise: statement extraction from block; saves an extra dispatch
-	if len(node.Code) == 1 && vm.cp.optimise {
+	if len(node.Code) == 1 && vm.opts.Inline {
 		node := node.Code[0]
 		// optimise: {return x}
 		if ret, isReturn := node.(ast.Return); isReturn {
@@ -707,7 +705,7 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 
 func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 	// optimise: lhs being a local variable
-	if iGet, isIdentGet := node.Lhs.(ast.IdentGet); isIdentGet && vm.cp.optimise {
+	if iGet, isIdentGet := node.Lhs.(ast.IdentGet); isIdentGet && vm.opts.Inline {
 		variable, err := vm.cp.reach(iGet.Name)
 		if err != nil {
 			panic(err)
@@ -802,7 +800,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 	lhs := vm.compile(node.Lhs)
 	// optimise: rhs being a constant
-	if rhs, isInput := node.Rhs.(ast.Input[float64]); isInput && vm.cp.optimise {
+	if rhs, isInput := node.Rhs.(ast.Input[float64]); isInput && vm.opts.Inline {
 		switch node.Operator {
 		case ast.AddOp:
 			return func(fbr *fiber) (Value, error) {

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/hxkhan/evie"
+	"github.com/hxkhan/evie/vm"
 )
 
 func main() {
@@ -21,23 +24,29 @@ func main() {
 		panic(err)
 	}
 
-	// Get a reference to the global symbol 'fib'
-	/* value := ip.GetGlobal("fib")
-	if value == nil {
-		panic("fib not found")
+	// Get a reference to the package
+	pkgMain := ip.GetPackage("main")
+	if pkgMain == nil {
+		panic("no main package found")
 	}
 
-	// Type assert the value to a function
-	fn, ok := value.AsUserFn()
+	// Get a reference to the 'fib' symbol
+	symFib, exists := pkgMain.GetGlobal("fib")
+	if !exists {
+		panic("symbol fib not found")
+	}
+
+	// Type check it
+	fib, ok := symFib.AsUserFn()
 	if !ok {
 		panic("fib is not a function")
 	}
 
 	// Call it
-	result, err := fn.Call(vm.BoxFloat64(35))
+	result, err := fib.Call(vm.BoxFloat64(35))
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println(result) */
+	fmt.Println(result)
 }

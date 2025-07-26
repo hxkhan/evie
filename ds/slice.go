@@ -32,8 +32,8 @@ func (s *Slice[T]) Pop() T {
 	return item
 }
 
-func (s *Slice[T]) Last() T {
-	return (*s)[len((*s))-1]
+func (s *Slice[T]) Last(i int) T {
+	return (*s)[len((*s))-1-i]
 }
 
 func (s *Slice[T]) IsEmpty() bool {

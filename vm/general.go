@@ -7,7 +7,6 @@ import (
 
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/ds"
-	"github.com/hxkhan/evie/vm/scope"
 )
 
 type Instance struct {
@@ -20,13 +19,12 @@ type Instance struct {
 type closure struct {
 	captures ds.Slice[capture]
 	freeVars ds.Set[int]
+	scope    ds.Scope
 }
 
 type compiler struct {
-	pkg      *Package          // the package being compiled right now
-	closures ds.Slice[closure] // currently open closures
-	scope    *scope.Instance   // current scope
-	optimise bool
+	pkg      *Package           // the package being compiled right now
+	closures ds.Slice[*closure] // currently open closures
 }
 
 type runtime struct {
@@ -49,7 +47,7 @@ type Symbol struct {
 }
 
 type Options struct {
-	Optimise      bool             // use specialised instructions
+	Inline        bool             // use dispatch inlining (combining instructions into one)
 	ObserveIt     bool             // collect metrics (affects performance)
 	TopLevelLogic bool             // whether to only allow declarations at top level
 	Builtins      map[string]Value // what should be made available to the user in the built-in scope
@@ -59,9 +57,7 @@ type Options struct {
 func New(opts Options) *Instance {
 	vm := &Instance{
 		opts,
-		compiler{
-			optimise: opts.Optimise,
-		},
+		compiler{},
 		runtime{
 			packages: make(map[string]*Package),
 			boxes:    make(ds.Slice[*Value], 0, 48), // the capacity to store 48 boxed values
@@ -128,9 +124,10 @@ type captured int
 
 // reach searches for a binding across all scope instances
 func (cp *compiler) reach(name string) (v any, err error) {
-	// Check stack
-	for scope, scroll := range cp.scope.Instances() {
-		if index, success := scope.Reach(name); success {
+	// 1. check stack
+	for scroll := range cp.closures.Len() {
+		closure := cp.closures.Last(scroll)
+		if index, success := closure.scope.Reach(name); success {
 			// check if it's a local
 			if scroll == 0 {
 				return local(index), nil
@@ -141,7 +138,7 @@ func (cp *compiler) reach(name string) (v any, err error) {
 		}
 	}
 
-	// Now check globals and built-ins
+	// 2. check globals and built-ins
 	if sym, exists := cp.pkg.symbols[name]; exists {
 		return sym.Value, nil
 	}
@@ -154,31 +151,25 @@ func (cp *compiler) addToCaptured(scroll int, index int) (idx int) {
 	iCaptureLocal := cp.closures.Len() - scroll
 	closure := cp.closures[iCaptureLocal]
 	// if not referenced already; reference now, as local
-	if index = slices.Index(closure.captures, capture{true, index}); index == -1 {
-		index = closure.captures.Len()
+	if idx = slices.Index(closure.captures, capture{true, index}); idx == -1 {
+		idx = closure.captures.Len()
 		closure.captures.Push(capture{true, index})
-		cp.closures[iCaptureLocal] = closure
+
+		// owner of variable needs to know that its local has escaped so it does not recycle it
+		owner := cp.closures[iCaptureLocal-1]
+		owner.freeVars.Add(index)
 	}
 
 	// 2. propagate the capture down to where we need it (only if ref.scroll > 1)
 	for i := iCaptureLocal + 1; i < cp.closures.Len(); i++ {
 		closure := cp.closures[i]
 		// if not referenced already; reference now, as captured
-		if index = slices.Index(closure.captures, capture{false, index}); index == -1 {
-			index = closure.captures.Len()
-			closure.captures.Push(capture{false, index})
-			cp.closures[i] = closure
+		if idx = slices.Index(closure.captures, capture{false, idx}); idx == -1 {
+			idx = closure.captures.Len()
+			closure.captures.Push(capture{false, idx})
 		}
 	}
-	return index
-}
-
-func (cp *compiler) openClosure() {
-	cp.closures.Push(closure{freeVars: ds.Set[int]{}})
-}
-
-func (cp *compiler) closeClosure() closure {
-	return cp.closures.Pop()
+	return idx
 }
 
 func (vm *Instance) newValue() (obj *Value) {

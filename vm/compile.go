@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/hxkhan/evie/ast"
+	"github.com/hxkhan/evie/vm/scope"
 )
 
 type instruction func(fbr *fiber) (Value, error)
@@ -12,6 +13,14 @@ type instruction func(fbr *fiber) (Value, error)
 func (vm *Instance) compile(node ast.Node) instruction {
 	switch node := node.(type) {
 	case ast.Package:
+		vm.cp.pkg = vm.rt.packages[node.Name]
+		if vm.cp.pkg == nil {
+			vm.cp.pkg = &Package{symbols: make(map[string]Symbol)}
+			vm.rt.packages[node.Name] = vm.cp.pkg
+		}
+
+		this := vm.cp.pkg
+
 		/*
 			------ Hoisting Protocol ------
 
@@ -37,27 +46,25 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		// 1. declare all symbols
 		for _, node := range node.Code {
 			if fn, isFn := node.(ast.Fn); isFn {
-				idx, success := vm.cp.scope.Declare(fn.Name)
-				if !success {
+				if _, exists := this.symbols[fn.Name]; exists {
 					panic(fmt.Errorf("double declaration of %s", fn.Name))
 				}
-				vm.cp.globals[fn.Name] = idx
-			}
-
-			if iDec, isIdentDec := node.(ast.IdentDec); isIdentDec {
-				idx, _ := vm.cp.scope.Declare(iDec.Name)
-				vm.cp.uninitializedGlobals.Add(idx)
-				vm.cp.globals[iDec.Name] = idx
+				this.symbols[fn.Name] = Symbol{Value: &Value{}}
+			} else if iDec, isIdentDec := node.(ast.IdentDec); isIdentDec {
+				if _, exists := this.symbols[iDec.Name]; exists {
+					panic(fmt.Errorf("double declaration of %s", iDec.Name))
+				}
+				this.symbols[iDec.Name] = Symbol{Value: &Value{}}
 			}
 		}
 
 		// 2. physically move function initialization to the top
 		for _, node := range node.Code {
 			if fn, isFn := node.(ast.Fn); isFn {
-				idx := vm.cp.globals[fn.Name]
+				symbol := this.symbols[fn.Name]
 
 				vm.cp.openClosure()
-				vm.cp.scope = vm.cp.scope.New(0)
+				vm.cp.scope = scope.NewScope(0)
 
 				// declare the fn arguments and only then compile the code
 				for _, arg := range fn.Args {
@@ -106,13 +113,12 @@ func (vm *Instance) compile(node ast.Node) instruction {
 						log.Printf("RT: fn %v => Capture(%v) -> %v -> %v\n", fn.Name, i, ref, v)
 					}
 
-					fn := UserFn{
+					// store the function
+					*symbol.Value = BoxUserFn(UserFn{
 						funcInfoStatic: info,
 						references:     captured,
-					}
+					})
 
-					// declare the function locally
-					fbr.storeLocal(idx, BoxUserFn(fn))
 					return Value{}, nil
 				})
 			}
@@ -127,7 +133,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 			// compile global variable initialization in a special way because indices are pre declared
 			if iDec, isIdentDec := node.(ast.IdentDec); isIdentDec {
-				idx := vm.cp.globals[iDec.Name]
+				symbol := this.symbols[iDec.Name]
 				value := vm.compile(iDec.Value)
 				code = append(code, func(fbr *fiber) (Value, error) {
 					v, err := value(fbr)
@@ -135,10 +141,11 @@ func (vm *Instance) compile(node ast.Node) instruction {
 						return v, err
 					}
 
-					fbr.storeLocal(idx, v)
+					// store the variable
+					*symbol.Value = v
+
 					return Value{}, nil
 				})
-				delete(vm.cp.uninitializedGlobals, idx)
 				continue
 			}
 
@@ -244,67 +251,79 @@ func (vm *Instance) emitIdentDec(node ast.IdentDec) instruction {
 			return v, err
 		}
 
-		fbr.storeLocal(index, v)
+		fbr.storeLocal(local(index), v)
 		return Value{}, nil
 	}
 }
 
 func (vm *Instance) emitIdentGet(node ast.IdentGet) instruction {
-	ref, err := vm.cp.reach(node.Name)
+	variable, err := vm.cp.reach(node.Name)
 	if err != nil {
 		panic(err)
 	}
 
-	switch {
-	case ref.isBuiltin():
+	switch v := variable.(type) {
+	case local:
 		return func(fbr *fiber) (Value, error) {
-			return vm.rt.builtins[ref.index], nil
+			return fbr.getLocal(v), nil
 		}
-	case ref.isLocal():
+	case captured:
 		return func(fbr *fiber) (Value, error) {
-			return fbr.getLocal(ref.index), nil
+			return fbr.getCaptured(v), nil
+		}
+	case *Value:
+		return func(fbr *fiber) (Value, error) {
+			return *v, nil
 		}
 	}
 
-	index := vm.cp.addToCaptured(ref)
-	return func(fbr *fiber) (Value, error) {
-		return fbr.getCaptured(index), nil
-	}
+	panic("ayo what")
 }
 
 func (vm *Instance) emitIdentSet(node ast.IdentSet) instruction {
-	ref, err := vm.cp.reach(node.Name)
+	variable, err := vm.cp.reach(node.Name)
 	if err != nil {
 		panic(err)
 	}
 
 	value := vm.compile(node.Value)
-	switch {
-	case ref.isBuiltin():
-		panic("cannot set the value of a built-in")
 
-	case ref.isLocal():
+	switch v := variable.(type) {
+	case local:
 		return func(fbr *fiber) (Value, error) {
-			v, err := value(fbr)
+			value, err := value(fbr)
 			if err != nil {
-				return v, err
+				return value, err
 			}
 
-			fbr.storeLocal(ref.index, v)
+			fbr.storeLocal(v, value)
+			return Value{}, nil
+		}
+
+	case captured:
+		return func(fbr *fiber) (Value, error) {
+			value, err := value(fbr)
+			if err != nil {
+				return value, err
+			}
+
+			fbr.storeCaptured(v, value)
+			return Value{}, nil
+		}
+
+	case *Value:
+		return func(fbr *fiber) (Value, error) {
+			value, err := value(fbr)
+			if err != nil {
+				return value, err
+			}
+
+			*v = value
 			return Value{}, nil
 		}
 	}
 
-	index := vm.cp.addToCaptured(ref)
-	return func(fbr *fiber) (Value, error) {
-		v, err := value(fbr)
-		if err != nil {
-			return v, err
-		}
-
-		fbr.storeCaptured(index, v)
-		return Value{}, nil
-	}
+	panic("ayo what")
 }
 
 func (vm *Instance) emitFn(node ast.Fn) instruction {
@@ -374,43 +393,44 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 
 func (vm *Instance) emitCall(node ast.Call) instruction {
 	// compile arguments
-	argsFetchers := make([]instruction, len(node.Args))
+	arguments := make([]instruction, len(node.Args))
 	for i, arg := range node.Args {
-		argsFetchers[i] = vm.compile(arg)
+		arguments[i] = vm.compile(arg)
 	}
 
-	// optimise: calling captured functions
+	// optimise: calling global & builtin functions
 	if iGet, isIdentGet := node.Fn.(ast.IdentGet); isIdentGet && vm.cp.optimise {
-		ref, err := vm.cp.reach(iGet.Name)
+		variable, err := vm.cp.reach(iGet.Name)
 		if err != nil {
 			panic(err)
 		}
 
-		if ref.isCapture() {
-			index := vm.cp.addToCaptured(ref)
+		switch value := variable.(type) {
+		case *Value:
 			return func(fbr *fiber) (result Value, err error) {
-				value := fbr.getCaptured(index)
-
-				// check if its a user function
+				// check if it is a user function
 				if fn, isUserFn := value.AsUserFn(); isUserFn {
-					if len(fn.args) != len(argsFetchers) {
+					if len(fn.args) != len(arguments) {
 						if fn.name != "λ" {
-							return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(argsFetchers))
+							return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments))
 						}
-						return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(argsFetchers))
+						return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments))
+					}
+
+					// create space for all the locals
+					base := len(fbr.stack)
+					for range fn.capacity {
+						fbr.stack = append(fbr.stack, vm.newValue())
 					}
 
 					// evaluate arguments & push them on the stack
-					base := len(fbr.stack)
-					for _, argument := range argsFetchers {
+					for idx, argument := range arguments {
 						v, err := argument(fbr)
 						if err != nil {
 							return v, err
 						}
 
-						slot := vm.newValue()
-						*slot = v
-						fbr.stack = append(fbr.stack, slot)
+						*(fbr.stack[base+idx]) = v
 					}
 
 					// prep for execution & save currently captured values
@@ -439,39 +459,42 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					}
 				}
 
-				return Value{}, CustomError("cannot call a non-function '%v'", value)
+				return Value{}, CustomError("cannot call a non-function '%v'", *value)
 			}
 		}
 	}
 
 	// generic compilation
-	fnFetcher := vm.compile(node.Fn)
+	value := vm.compile(node.Fn)
 	return func(fbr *fiber) (result Value, err error) {
-		value, err := fnFetcher(fbr)
+		value, err := value(fbr)
 		if err != nil {
 			return value, err
 		}
 
-		// check if its a user function
+		// check if it is a user function
 		if fn, isUserFn := value.AsUserFn(); isUserFn {
-			if len(fn.args) != len(argsFetchers) {
+			if len(fn.args) != len(arguments) {
 				if fn.name != "λ" {
-					return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(argsFetchers))
+					return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments))
 				}
-				return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(argsFetchers))
+				return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments))
+			}
+
+			// create space for all the locals
+			base := len(fbr.stack)
+			for range fn.capacity {
+				fbr.stack = append(fbr.stack, vm.newValue())
 			}
 
 			// evaluate arguments & push them on the stack
-			base := len(fbr.stack)
-			for _, argument := range argsFetchers {
+			for idx, argument := range arguments {
 				v, err := argument(fbr)
 				if err != nil {
 					return v, err
 				}
 
-				slot := vm.newValue()
-				*slot = v
-				fbr.stack = append(fbr.stack, slot)
+				*(fbr.stack[base+idx]) = v
 			}
 
 			// prep for execution & save currently captured values
@@ -498,7 +521,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			default:
 				return result, err
 			}
-		} else if res, err := fbr.tryNativeCall(value, argsFetchers); err != errNotFunction {
+		} else if res, err := fbr.tryNativeCall(value, arguments); err != errNotFunction {
 			return res, err
 		}
 
@@ -563,14 +586,14 @@ func (vm *Instance) emitReturn(node ast.Return) instruction {
 
 		// optimise: returning local variables
 		if iGet, isIdentGet := node.Value.(ast.IdentGet); isIdentGet {
-			ref, err := vm.cp.reach(iGet.Name)
+			variable, err := vm.cp.reach(iGet.Name)
 			if err != nil {
 				panic(err)
 			}
 
-			if ref.isLocal() {
+			if idx, isLocal := variable.(local); isLocal {
 				return func(fbr *fiber) (Value, error) {
-					return fbr.getLocal(ref.index), errReturnSignal
+					return fbr.getLocal(idx), errReturnSignal
 				}
 			}
 		}
@@ -663,14 +686,14 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 
 			// optimise: returning local variables
 			if iGet, isIdentGet := ret.Value.(ast.IdentGet); isIdentGet {
-				ref, err := vm.cp.reach(iGet.Name)
+				variable, err := vm.cp.reach(iGet.Name)
 				if err != nil {
 					panic(err)
 				}
 
-				if ref.isLocal() {
+				if idx, isLocal := variable.(local); isLocal {
 					return func(fbr *fiber) (Value, error) {
-						return fbr.getLocal(ref.index), errReturnSignal
+						return fbr.getLocal(idx), errReturnSignal
 					}
 				}
 			}
@@ -708,18 +731,19 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 	// optimise: lhs being a local variable
 	if iGet, isIdentGet := node.Lhs.(ast.IdentGet); isIdentGet && vm.cp.optimise {
-		ref, err := vm.cp.reach(iGet.Name)
+		variable, err := vm.cp.reach(iGet.Name)
 		if err != nil {
 			panic(err)
 		}
 
-		if ref.isLocal() {
+		switch v := variable.(type) {
+		case local:
 			// optimise: rhs being a constant
 			if rhs, isInput := node.Rhs.(ast.Input[float64]); isInput {
 				switch node.Operator {
 				case ast.AddOp:
 					return func(fbr *fiber) (Value, error) {
-						a := fbr.getLocal(ref.index)
+						a := fbr.getLocal(v)
 						if a, ok := a.AsFloat64(); ok {
 							return BoxFloat64(a + rhs.Value), nil
 						}
@@ -728,7 +752,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 				case ast.SubOp:
 					return func(fbr *fiber) (Value, error) {
-						a := fbr.getLocal(ref.index)
+						a := fbr.getLocal(v)
 						if a, ok := a.AsFloat64(); ok {
 							return BoxFloat64(a - rhs.Value), nil
 						}
@@ -737,7 +761,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 				case ast.LtOp:
 					return func(fbr *fiber) (Value, error) {
-						a := fbr.getLocal(ref.index)
+						a := fbr.getLocal(v)
 						if a, ok := a.AsFloat64(); ok {
 							return BoxBool(a < rhs.Value), nil
 						}
@@ -751,7 +775,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			switch node.Operator {
 			case ast.AddOp:
 				return func(fbr *fiber) (Value, error) {
-					a := fbr.getLocal(ref.index)
+					a := fbr.getLocal(v)
 					b, err := rhs(fbr)
 					if err != nil {
 						return a, err
@@ -766,7 +790,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 				}
 			case ast.SubOp:
 				return func(fbr *fiber) (Value, error) {
-					a := fbr.getLocal(ref.index)
+					a := fbr.getLocal(v)
 					b, err := rhs(fbr)
 					if err != nil {
 						return a, err
@@ -782,7 +806,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 			case ast.LtOp:
 				return func(fbr *fiber) (Value, error) {
-					a := fbr.getLocal(ref.index)
+					a := fbr.getLocal(v)
 					b, err := rhs(fbr)
 					if err != nil {
 						return a, err

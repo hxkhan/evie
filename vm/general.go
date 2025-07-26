@@ -23,22 +23,29 @@ type closure struct {
 }
 
 type compiler struct {
-	globals map[string]int // maps global variables to their indices
-
-	closures             ds.Slice[closure] // currently open closures
-	scope                *scope.Instance   // current scope
-	root                 *scope.Instance   // built-in scope
-	uninitializedGlobals ds.Set[int]
-	optimise             bool
+	pkg      *Package          // the package being compiled right now
+	closures ds.Slice[closure] // currently open closures
+	scope    *scope.Instance   // current scope
+	optimise bool
 }
 
 type runtime struct {
-	builtins []Value          // can get from but can't set in
-	boxes    ds.Slice[*Value] // pooled boxes for this vm
-	fibers   ds.Slice[*fiber] // pooled fibers for this vm
-	trace    []string         // call-stack trace
-	gil      sync.Mutex       // global interpreter lock
-	wg       sync.WaitGroup   // wait for all fibers to complete
+	packages map[string]*Package
+
+	boxes  ds.Slice[*Value] // pooled boxes for this vm
+	fibers ds.Slice[*fiber] // pooled fibers for this vm
+	trace  []string         // call-stack trace
+	gil    sync.Mutex       // global interpreter lock
+	wg     sync.WaitGroup   // wait for all fibers to complete
+}
+
+type Package struct {
+	symbols map[string]Symbol
+}
+
+type Symbol struct {
+	*Value
+	IsPublic bool
 }
 
 type Options struct {
@@ -53,14 +60,12 @@ func New(opts Options) *Instance {
 	vm := &Instance{
 		opts,
 		compiler{
-			globals:              make(map[string]int),
-			root:                 scope.NewScope(len(opts.Builtins)),
-			uninitializedGlobals: ds.Set[int]{},
-			optimise:             opts.Optimise,
+			optimise: opts.Optimise,
 		},
 		runtime{
-			boxes:  make(ds.Slice[*Value], 0, 48), // the capacity to store 48 boxed values
-			fibers: make(ds.Slice[*fiber], 0, 3),  // the capacity to store 3 fibers
+			packages: make(map[string]*Package),
+			boxes:    make(ds.Slice[*Value], 0, 48), // the capacity to store 48 boxed values
+			fibers:   make(ds.Slice[*fiber], 0, 3),  // the capacity to store 3 fibers
 		},
 		&fiber{
 			active: &UserFn{funcInfoStatic: &funcInfoStatic{name: "global"}},
@@ -70,7 +75,7 @@ func New(opts Options) *Instance {
 	}
 
 	// 1. declare exported builtins
-	vm.rt.builtins = make([]Value, len(opts.Builtins))
+	/* vm.rt.builtins = make([]Value, len(opts.Builtins))
 	for name, value := range opts.Builtins {
 		index, _ := vm.cp.root.Declare(name)
 		vm.rt.builtins[index] = value
@@ -84,7 +89,7 @@ func New(opts Options) *Instance {
 	for name, value := range opts.Globals {
 		index, _ := vm.cp.scope.Declare(name)
 		vm.main.stack[index] = &value
-	}
+	} */
 
 	return vm
 }
@@ -94,13 +99,6 @@ func (vm *Instance) EvalNode(node ast.Node) (Value, error) {
 
 	vm.rt.gil.Lock()
 	defer vm.rt.gil.Unlock()
-
-	// check if more globals have been declared
-	if len(vm.main.stack) < len(vm.cp.globals) {
-		for range len(vm.cp.globals) - len(vm.main.stack) {
-			vm.main.stack = append(vm.main.stack, vm.newValue())
-		}
-	}
 
 	// run code
 	v, err := code(vm.main)
@@ -112,60 +110,67 @@ func (vm *Instance) EvalNode(node ast.Node) (Value, error) {
 	return Value{}, nil
 }
 
-func (vm *Instance) GetGlobal(name string) *Value {
-	if index, exists := vm.cp.globals[name]; exists {
-		return vm.main.stack[index]
-	}
-	return nil
+func (vm *Instance) GetPackage(name string) *Package {
+	return vm.rt.packages[name]
+}
+
+func (pkg *Package) GetGlobal(name string) (sym Symbol, exists bool) {
+	sym, exists = pkg.symbols[name]
+	return sym, exists
 }
 
 func (vm *Instance) WaitForNoActivity() {
 	vm.rt.wg.Wait()
 }
 
+type local int
+type captured int
+
 // reach searches for a binding across all scope instances
-func (cp *compiler) reach(name string) (ref reference, err error) {
+func (cp *compiler) reach(name string) (v any, err error) {
+	// Check stack
 	for scope, scroll := range cp.scope.Instances() {
 		if index, success := scope.Reach(name); success {
-			// if built-in scope then return negative scroll to signal that
-			if scope.Previous() == nil {
-				return reference{index: index, scroll: -1}, nil
+			// check if it's a local
+			if scroll == 0 {
+				return local(index), nil
 			}
 
-			// if accessing global from global; make sure it is initialized
-			if scope.Previous() == cp.root && scroll == 0 {
-				if cp.uninitializedGlobals.Has(index) {
-					return ref, fmt.Errorf("cp.reach(\"%v\") -> unitialized symbol", name)
-				}
-			}
-			return reference{index: index, scroll: scroll}, nil
+			// otherwise capture it & return the index
+			return captured(cp.addToCaptured(scroll, index)), nil
 		}
 	}
-	return ref, fmt.Errorf("cp.reach(\"%v\") -> unreachable symbol", name)
+
+	// Now check globals and built-ins
+	if sym, exists := cp.pkg.symbols[name]; exists {
+		return sym.Value, nil
+	}
+
+	return nil, fmt.Errorf("cp.reach(\"%v\") -> unreachable symbol", name)
 }
 
-func (cp *compiler) addToCaptured(ref reference) (index int) {
+func (cp *compiler) addToCaptured(scroll int, index int) (idx int) {
 	// are we scrolling to global scope?
-	accessingGlobal := cp.closures.Len() == ref.scroll
+	accessingGlobal := cp.closures.Len() == scroll
 
 	// 1. initial-capture logic
-	iCapture := cp.closures.Len() - ref.scroll
+	iCapture := cp.closures.Len() - scroll
 	closure := cp.closures[iCapture]
 	// if not referenced already; reference now, as local
-	if index = slices.Index(closure.captures, capture{true, ref.index}); index == -1 {
+	if index = slices.Index(closure.captures, capture{true, index}); index == -1 {
 		index = closure.captures.Len()
-		closure.captures.Push(capture{true, ref.index})
+		closure.captures.Push(capture{true, index})
 		cp.closures[iCapture] = closure
 
 		// owner of variable needs to know that its local has escaped so it does not recycle it
 		if !accessingGlobal {
 			owner := cp.closures[iCapture-1]
-			owner.freeVars.Add(ref.index)
+			owner.freeVars.Add(index)
 		}
 	}
 
 	// 2. propagate the capture down to where we need it (only if ref.scroll > 1)
-	for i := range ref.scroll - 1 {
+	for i := range scroll - 1 {
 		current := iCapture + 1 + i
 		closure := cp.closures[current]
 		// if not referenced already; reference now, as captured

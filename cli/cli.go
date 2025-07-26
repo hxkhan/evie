@@ -50,15 +50,21 @@ func main() {
 		return
 	}
 
-	main := ip.GetGlobal("main")
-	if main == nil {
-		fmt.Println("Error: program requires a main entry point")
+	pkgMain := ip.GetPackage("main")
+	if pkgMain == nil {
+		fmt.Println("Error: no main package found")
 		return
 	}
 
-	fn, ok := main.AsUserFn()
+	symMain, exists := pkgMain.GetGlobal("main")
+	if !exists {
+		fmt.Println("Error: no main entry point found")
+		return
+	}
+
+	fn, ok := symMain.AsUserFn()
 	if !ok {
-		fmt.Println("Error: program requires main to be a function")
+		fmt.Println("Error: main.main found but it is not a function")
 		return
 	}
 

@@ -1,7 +1,5 @@
 package main
 
-message := "Hello World"
-
 fn main() {
     // 1 layer of capture
     printer := single()
@@ -14,6 +12,8 @@ fn main() {
 }
 
 fn single() {
+    message := "Hello World"
+
     // printer
     return fn() {
         echo message
@@ -21,6 +21,8 @@ fn single() {
 }
 
 fn double() {
+    message := "Bye World"
+
     // getter
     return fn() {
         // printer

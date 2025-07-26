@@ -5,9 +5,8 @@ import (
 	"reflect"
 )
 
-// isLocal: capture from the stack; isCaptured: capture from the parent
 type capture struct {
-	isLocal bool
+	isLocal bool // isLocal: capture from the parent's stack; !isLocal: capture from the parent's captures
 	index   int
 }
 
@@ -55,12 +54,6 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 	fbr.active = fn
 	fbr.base = 0
 	fbr.stack = fbr.stack[:0]
-
-	// For now: just give all fibers a copy of global variables. Needs a better design.
-	/* {
-		fbr.stack = vm.main.stack[:len(vm.cp.globals)]
-		fbr.base = len(fbr.stack)
-	} */
 
 	// create space for all the locals
 	for range fn.capacity {

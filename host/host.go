@@ -1,10 +1,7 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/hxkhan/evie"
-	"github.com/hxkhan/evie/vm"
 )
 
 func main() {
@@ -25,7 +22,7 @@ func main() {
 	}
 
 	// Get a reference to the global symbol 'fib'
-	value := ip.GetGlobal("fib")
+	/* value := ip.GetGlobal("fib")
 	if value == nil {
 		panic("fib not found")
 	}
@@ -42,5 +39,5 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Println(result)
+	fmt.Println(result) */
 }

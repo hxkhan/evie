@@ -74,7 +74,6 @@ func (vm *Instance) compile(node ast.Node) instruction {
 				action := vm.compile(fn.Action)
 				capacity := vm.cp.scope.Capacity()
 				closure := vm.cp.closeClosure()
-				vm.cp.scope = vm.cp.scope.Previous()
 
 				// make list of non-escaping variables so they can be recycled after execution
 				recyclable := make([]int, 0, capacity-closure.freeVars.Len())
@@ -89,36 +88,15 @@ func (vm *Instance) compile(node ast.Node) instruction {
 				info := &funcInfoStatic{
 					name:       fn.Name,
 					args:       fn.Args,
-					captures:   closure.captures,
 					recyclable: recyclable,
 					capacity:   capacity,
 					code:       action,
 					vm:         vm,
 				}
 
-				for i, ref := range closure.captures {
-					log.Printf("CT: fn %v => Capture(%v) -> %v\n", fn.Name, i, ref)
-				}
-
 				code = append(code, func(fbr *fiber) (Value, error) {
-					captured := make([]*Value, len(closure.captures))
-					for i, ref := range closure.captures {
-						var v *Value
-						if ref.isLocal {
-							v = fbr.getLocalByRef(ref.index)
-						} else {
-							v = fbr.getCapturedByRef(ref.index)
-						}
-						captured[i] = v
-						log.Printf("RT: fn %v => Capture(%v) -> %v -> %v\n", fn.Name, i, ref, v)
-					}
-
 					// store the function
-					*symbol.Value = BoxUserFn(UserFn{
-						funcInfoStatic: info,
-						references:     captured,
-					})
-
+					*symbol.Value = BoxUserFn(UserFn{funcInfoStatic: info})
 					return Value{}, nil
 				})
 			}
@@ -141,9 +119,8 @@ func (vm *Instance) compile(node ast.Node) instruction {
 						return v, err
 					}
 
-					// store the variable
+					// store the value
 					*symbol.Value = v
-
 					return Value{}, nil
 				})
 				continue

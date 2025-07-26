@@ -150,34 +150,24 @@ func (cp *compiler) reach(name string) (v any, err error) {
 }
 
 func (cp *compiler) addToCaptured(scroll int, index int) (idx int) {
-	// are we scrolling to global scope?
-	accessingGlobal := cp.closures.Len() == scroll
-
 	// 1. initial-capture logic
-	iCapture := cp.closures.Len() - scroll
-	closure := cp.closures[iCapture]
+	iCaptureLocal := cp.closures.Len() - scroll
+	closure := cp.closures[iCaptureLocal]
 	// if not referenced already; reference now, as local
 	if index = slices.Index(closure.captures, capture{true, index}); index == -1 {
 		index = closure.captures.Len()
 		closure.captures.Push(capture{true, index})
-		cp.closures[iCapture] = closure
-
-		// owner of variable needs to know that its local has escaped so it does not recycle it
-		if !accessingGlobal {
-			owner := cp.closures[iCapture-1]
-			owner.freeVars.Add(index)
-		}
+		cp.closures[iCaptureLocal] = closure
 	}
 
 	// 2. propagate the capture down to where we need it (only if ref.scroll > 1)
-	for i := range scroll - 1 {
-		current := iCapture + 1 + i
-		closure := cp.closures[current]
+	for i := iCaptureLocal + 1; i < cp.closures.Len(); i++ {
+		closure := cp.closures[i]
 		// if not referenced already; reference now, as captured
 		if index = slices.Index(closure.captures, capture{false, index}); index == -1 {
 			index = closure.captures.Len()
 			closure.captures.Push(capture{false, index})
-			cp.closures[current] = closure
+			cp.closures[i] = closure
 		}
 	}
 	return index

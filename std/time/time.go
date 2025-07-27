@@ -3,12 +3,15 @@ package time
 import (
 	"time"
 
-	"github.com/hxkhan/evie/std"
 	"github.com/hxkhan/evie/vm"
 )
 
-func Export() {
-	std.ImportFn(timer)
+func Instantiate() map[string]*vm.Value {
+	timer := vm.BoxGoFunc(timer)
+
+	return map[string]*vm.Value{
+		"timer": &timer,
+	}
 }
 
 func timer(duration vm.Value) (vm.Value, error) {

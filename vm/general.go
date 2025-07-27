@@ -23,6 +23,7 @@ type closure struct {
 }
 
 type compiler struct {
+	statics  map[string]Value   // implicitly available to all user packages
 	pkg      *Package           // the package being compiled right now
 	closures ds.Slice[*closure] // currently open closures
 }
@@ -38,7 +39,9 @@ type runtime struct {
 }
 
 type Package struct {
-	symbols map[string]Symbol
+	name    string
+	globals map[string]*Value
+	private ds.Set[string]
 }
 
 type Symbol struct {
@@ -50,14 +53,15 @@ type Options struct {
 	Inline        bool             // use dispatch inlining (combining instructions into one)
 	ObserveIt     bool             // collect metrics (affects performance)
 	TopLevelLogic bool             // whether to only allow declarations at top level
-	Builtins      map[string]Value // what should be made available to the user in the built-in scope
-	Globals       map[string]Value // what should be made available to the user in the global scope
+	Statics       map[string]Value // implicitly available to all user packages
 }
 
 func New(opts Options) *Instance {
-	vm := &Instance{
+	return &Instance{
 		opts,
-		compiler{},
+		compiler{
+			statics: opts.Statics,
+		},
 		runtime{
 			packages: make(map[string]*Package),
 			boxes:    make(ds.Slice[*Value], 0, 48), // the capacity to store 48 boxed values
@@ -69,25 +73,6 @@ func New(opts Options) *Instance {
 			base:   0,
 		},
 	}
-
-	// 1. declare exported builtins
-	/* vm.rt.builtins = make([]Value, len(opts.Builtins))
-	for name, value := range opts.Builtins {
-		index, _ := vm.cp.root.Declare(name)
-		vm.rt.builtins[index] = value
-	}
-
-	// 2. extend from builtin to global scope
-	vm.cp.scope = vm.cp.root.New(len(opts.Globals))
-
-	// 3. declare exported globals
-	vm.main.stack = make([]*Value, len(opts.Globals))
-	for name, value := range opts.Globals {
-		index, _ := vm.cp.scope.Declare(name)
-		vm.main.stack[index] = &value
-	} */
-
-	return vm
 }
 
 func (vm *Instance) EvalNode(node ast.Node) (Value, error) {
@@ -106,13 +91,32 @@ func (vm *Instance) EvalNode(node ast.Node) (Value, error) {
 	return Value{}, nil
 }
 
+/* func (vm *Instance) PackageHandle(name string) *Package {
+	if pkg, exists := vm.rt.packages[name]; exists {
+		return pkg
+	}
+
+	pkg := &Package{symbols: make(map[string]Symbol)}
+
+	//return vm.rt.packages[name]
+} */
+
+func NewHostPackage(name string, exports map[string]*Value) *Package {
+	return &Package{name: name, globals: exports, private: ds.Set[string]{}}
+}
+
 func (vm *Instance) GetPackage(name string) *Package {
 	return vm.rt.packages[name]
 }
 
 func (pkg *Package) GetGlobal(name string) (sym Symbol, exists bool) {
-	sym, exists = pkg.symbols[name]
-	return sym, exists
+	ref, exists := pkg.globals[name]
+	if !exists {
+		return sym, false
+	}
+
+	_, private := pkg.private[name]
+	return Symbol{Value: ref, IsPublic: !private}, exists
 }
 
 func (vm *Instance) WaitForNoActivity() {
@@ -138,9 +142,14 @@ func (cp *compiler) reach(name string) (v any, err error) {
 		}
 	}
 
-	// 2. check globals and built-ins
-	if sym, exists := cp.pkg.symbols[name]; exists {
-		return sym.Value, nil
+	// 2. check package globals
+	if ref, exists := cp.pkg.globals[name]; exists {
+		return ref, nil
+	}
+
+	// 3. check static builtins
+	if value, exists := cp.statics[name]; exists {
+		return value, nil
 	}
 
 	return nil, fmt.Errorf("cp.reach(\"%v\") -> unreachable symbol", name)

@@ -3,13 +3,17 @@ package builtin
 import (
 	"strings"
 
-	"github.com/hxkhan/evie/std"
 	"github.com/hxkhan/evie/vm"
 )
 
-func Export() {
-	std.ImportFn(split)
-	std.ImportFn(join)
+func Instantiate() map[string]*vm.Value {
+	split := vm.BoxGoFunc(split)
+	join := vm.BoxGoFunc(join)
+
+	return map[string]*vm.Value{
+		"split": &split,
+		"join":  &join,
+	}
 }
 
 func split(str, sep vm.Value) (vm.Value, error) {

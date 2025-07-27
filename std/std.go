@@ -1,14 +1,8 @@
 package std
 
-import (
-	"reflect"
-	"runtime"
-	"strings"
+/* var Exports map[string]vm.Value
 
-	"github.com/hxkhan/evie/vm"
-)
-
-var Exports map[string]vm.Value
+var Packages map[string]vm.Package
 
 func ImportFn[T vm.GoFunc](callable T) {
 	// get name of the function
@@ -29,3 +23,4 @@ func ImportFn[T vm.GoFunc](callable T) {
 func ImportOther(name string, v vm.Value) {
 	Exports[name] = v
 }
+*/

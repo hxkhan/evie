@@ -3,12 +3,15 @@ package fs
 import (
 	"os"
 
-	"github.com/hxkhan/evie/std"
 	"github.com/hxkhan/evie/vm"
 )
 
-func Export() {
-	std.ImportFn(readFile)
+func Instantiate() map[string]*vm.Value {
+	readFile := vm.BoxGoFunc(readFile)
+
+	return map[string]*vm.Value{
+		"readFile": &readFile,
+	}
 }
 
 func readFile(fileName vm.Value) (vm.Value, error) {

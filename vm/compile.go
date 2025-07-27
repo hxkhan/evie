@@ -15,7 +15,11 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	case ast.Package:
 		vm.cp.pkg = vm.rt.packages[node.Name]
 		if vm.cp.pkg == nil {
-			vm.cp.pkg = &Package{symbols: make(map[string]Symbol)}
+			vm.cp.pkg = &Package{
+				name:    node.Name,
+				globals: make(map[string]*Value),
+				private: ds.Set[string]{},
+			}
 			vm.rt.packages[node.Name] = vm.cp.pkg
 		}
 
@@ -46,22 +50,22 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		// 1. declare all symbols
 		for _, node := range node.Code {
 			if fn, isFn := node.(ast.Fn); isFn {
-				if _, exists := this.symbols[fn.Name]; exists {
+				if _, exists := this.globals[fn.Name]; exists {
 					panic(fmt.Errorf("double declaration of %s", fn.Name))
 				}
-				this.symbols[fn.Name] = Symbol{Value: &Value{}}
+				this.globals[fn.Name] = &Value{}
 			} else if iDec, isIdentDec := node.(ast.IdentDec); isIdentDec {
-				if _, exists := this.symbols[iDec.Name]; exists {
+				if _, exists := this.globals[iDec.Name]; exists {
 					panic(fmt.Errorf("double declaration of %s", iDec.Name))
 				}
-				this.symbols[iDec.Name] = Symbol{Value: &Value{}}
+				this.globals[iDec.Name] = &Value{}
 			}
 		}
 
 		// 2. physically move function initialization to the top
 		for _, node := range node.Code {
 			if fn, isFn := node.(ast.Fn); isFn {
-				symbol := this.symbols[fn.Name]
+				global := this.globals[fn.Name]
 
 				vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}})
 				vm.cp.closures.Last(0).scope.OpenBlock()
@@ -96,7 +100,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 				code = append(code, func(fbr *fiber) (Value, error) {
 					// store the function
-					*symbol.Value = BoxUserFn(UserFn{funcInfoStatic: info})
+					*global = BoxUserFn(UserFn{funcInfoStatic: info})
 					return Value{}, nil
 				})
 			}
@@ -111,7 +115,8 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 			// compile global variable initialization in a special way because indices are pre declared
 			if iDec, isIdentDec := node.(ast.IdentDec); isIdentDec {
-				symbol := this.symbols[iDec.Name]
+				global := this.globals[iDec.Name]
+
 				value := vm.compile(iDec.Value)
 				code = append(code, func(fbr *fiber) (Value, error) {
 					v, err := value(fbr)
@@ -120,7 +125,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 					}
 
 					// store the value
-					*symbol.Value = v
+					*global = v
 					return Value{}, nil
 				})
 				continue
@@ -198,6 +203,8 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		return vm.emitCall(node)
 	case ast.DotCall:
 		return vm.emitDotCall(node)
+	case ast.FieldAccess:
+		return vm.emitFieldAccess(node)
 
 	case ast.Go:
 		return vm.emitGo(node)
@@ -252,6 +259,10 @@ func (vm *Instance) emitIdentGet(node ast.IdentGet) instruction {
 		return func(fbr *fiber) (Value, error) {
 			return *v, nil
 		}
+	case Value:
+		return func(fbr *fiber) (Value, error) {
+			return v, nil
+		}
 	}
 
 	panic("ayo what")
@@ -298,6 +309,9 @@ func (vm *Instance) emitIdentSet(node ast.IdentSet) instruction {
 			*v = value
 			return Value{}, nil
 		}
+
+	case Value:
+		panic(fmt.Errorf("cannot set static values"))
 	}
 
 	panic("ayo what")
@@ -509,9 +523,39 @@ func (vm *Instance) emitDotCall(node ast.DotCall) instruction {
 	iGetLeft, isLeftIdentGet := node.Left.(ast.IdentGet)
 	iGetRight, isRightIdentGet := node.Right.(ast.IdentGet)
 	if isLeftIdentGet && isRightIdentGet {
+		variable, err := vm.cp.reach(iGetLeft.Name)
+		if err != nil {
+			panic(err)
+		}
+
+		switch v := variable.(type) {
+		case Value:
+			if pkg, ok := v.AsPackage(); ok {
+				value, exists := pkg.globals[iGetRight.Name]
+				if !exists {
+					panic(fmt.Errorf("symbol '%s' not found in package '%s'", iGetRight.Name, iGetLeft.Name))
+				}
+
+				if _, ok := value.AsGoFunc(); ok {
+					v := *value
+
+					// compile arguments
+					arguments := make([]instruction, len(node.Args))
+					for i, arg := range node.Args {
+						arguments[i] = vm.compile(arg)
+					}
+
+					return func(fbr *fiber) (Value, error) {
+						return fbr.tryNativeCall(v, arguments)
+					}
+				}
+
+			}
+		}
+
 		name := iGetLeft.Name + "." + iGetRight.Name
 
-		if _, exists := vm.opts.Builtins[name]; exists {
+		if _, exists := vm.opts.Statics[name]; exists {
 			return vm.compile(ast.Call{Pos: node.Pos, Fn: ast.IdentGet{Pos: node.Pos, Name: name}, Args: node.Args})
 		} else {
 			panic("method not found")
@@ -701,6 +745,31 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 		}
 		return Value{}, nil
 	}
+}
+
+func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
+	if iGet, isIdentGet := node.Lhs.(ast.IdentGet); isIdentGet {
+		variable, err := vm.cp.reach(iGet.Name)
+		if err != nil {
+			panic(err)
+		}
+
+		switch v := variable.(type) {
+		case Value:
+			if pkg, ok := v.AsPackage(); ok {
+				value, exists := pkg.globals[node.Rhs]
+				if !exists {
+					panic(fmt.Errorf("symbol '%s' not found in package '%s'", iGet.Name, node.Rhs))
+				}
+
+				return func(fbr *fiber) (Value, error) {
+					return *value, nil
+				}
+			}
+		}
+	}
+
+	panic("fix")
 }
 
 func (vm *Instance) emitBinOp(node ast.BinOp) instruction {

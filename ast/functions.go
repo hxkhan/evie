@@ -42,8 +42,8 @@ type AwaitAny struct {
 
 type FieldAccess struct {
 	token.Pos
-	Left  Node
-	Right string
+	Lhs Node
+	Rhs string
 }
 
 type DotCall struct {

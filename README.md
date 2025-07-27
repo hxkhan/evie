@@ -77,6 +77,7 @@ To test this exact program, `cd` to `cli` and run `go run . -t ../examples/go.es
 | :-       | :-       | :-            |
 | [**Evie**](https://github.com/hxkhan/evie) | `478ms` | Go |
 | [Lua 5.4.2](https://lua.org/) | `536ms` | C | 
+| [QuickJS](https://bellard.org/quickjs/) | `703ms` | C | 
 | [Python 3.13](https://python.org/) | `826ms` | C |
 | [Wren](https://wren.io/) | `893ms` | C |
 | [Tengo](https://github.com/d5/tengo) | `1603ms` | Go |
@@ -93,4 +94,4 @@ time ./cli ./examples/fib.ev
 
 To benchmark the other languages, you can grab your own versions from their respective websites. For example; if you have python installed then just do `time python ./examples/fib.py`, you might have to change `python` for `python3`.
 
-> NOTE: `time` exists only on linux.
+> Keep in mind, `time` exists only on linux, use `Measure-Command` on Windows powershell like `Measure-Command { python ./examples/fib.py }`

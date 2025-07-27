@@ -5,8 +5,6 @@ import (
 	"log"
 
 	"github.com/hxkhan/evie/parser"
-	"github.com/hxkhan/evie/std"
-	"github.com/hxkhan/evie/std/builtin"
 	"github.com/hxkhan/evie/std/fs"
 	"github.com/hxkhan/evie/std/time"
 	"github.com/hxkhan/evie/vm"
@@ -19,8 +17,8 @@ type Options struct {
 
 var Defaults = Options{
 	Options: vm.Options{
-		Inline:   true,
-		Builtins: DefaultExports(),
+		Inline:  true,
+		Statics: ImplicitBuilitins(),
 	},
 }
 
@@ -28,12 +26,11 @@ type Interpreter struct {
 	*vm.Instance
 }
 
-func DefaultExports() map[string]vm.Value {
-	std.Exports = map[string]vm.Value{}
-	fs.Export()
-	time.Export()
-	builtin.Export()
-	return std.Exports
+func ImplicitBuilitins() map[string]vm.Value {
+	return map[string]vm.Value{
+		"time": vm.BoxPackage(vm.NewHostPackage("time", time.Instantiate())),
+		"fs":   vm.BoxPackage(vm.NewHostPackage("time", fs.Instantiate())),
+	}
 }
 
 func New(opts Options) *Interpreter {

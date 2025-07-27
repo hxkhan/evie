@@ -47,6 +47,7 @@ const (
 	goFuncType
 	arrayType
 	taskType
+	packageType
 	bufferType
 	customType
 )
@@ -113,6 +114,11 @@ func BoxTask(task chan evaluation) Value {
 	return Value{scalar: taskType, pointer: unsafe.Pointer(&task)}
 }
 
+// BoxPackage boxes an evie package
+func BoxPackage(pkg *Package) Value {
+	return Value{scalar: packageType, pointer: unsafe.Pointer(pkg)}
+}
+
 // BoxBuffer boxes a Golang byte slice
 func BoxBuffer(bytes []byte) Value {
 	return Value{scalar: bufferType, pointer: unsafe.Pointer(&bytes)}
@@ -173,6 +179,13 @@ func (x Value) AsTask() (task <-chan evaluation, ok bool) {
 		return nil, false
 	}
 	return *(*chan evaluation)(x.pointer), true
+}
+
+func (x Value) AsPackage() (pkg *Package, ok bool) {
+	if x.scalar != packageType || isKnown(x.pointer) {
+		return nil, false
+	}
+	return (*Package)(x.pointer), true
 }
 
 func (x Value) AsBuffer() (buffer []byte, ok bool) {
@@ -275,9 +288,9 @@ func (x Value) String() string {
 	case stringType:
 		return *(*string)(x.pointer)
 	case userFnType:
-		return "<fn>"
+		return (*UserFn)(x.pointer).String()
 	case goFuncType:
-		return "<fn>"
+		return "<function>"
 	case arrayType:
 		array := *(*[]Value)(x.pointer)
 
@@ -303,6 +316,8 @@ func (x Value) String() string {
 
 	case taskType:
 		return "<task>"
+	case packageType:
+		return "<package>"
 	case bufferType:
 		array := *(*[]byte)(x.pointer)
 		builder := strings.Builder{}

@@ -332,7 +332,7 @@ func (ps *parser) parseDotOperator(left ast.Node) ast.Node {
 		panic(ps.unexpectedPeek(main, "a name"))
 	}
 
-	name := ps.NextToken().Literal
+	rhs := ps.NextToken()
 
 	switch {
 	case ps.consumeSimple("(", false):
@@ -349,15 +349,23 @@ func (ps *parser) parseDotOperator(left ast.Node) ast.Node {
 		}
 
 		// wrap the left-hand side as the object part of the method call
-		return ast.DotCall{
-			Pos:   main.Line,
-			Left:  left,
-			Right: ast.IdentGet{Pos: main.Line, Name: name},
-			Args:  args,
+		return ast.Call{
+			Pos: main.Line,
+			Fn: ast.FieldAccess{
+				Pos: main.Line,
+				Lhs: left,
+				Rhs: rhs.Literal,
+			},
+			Args: args,
 		}
 	}
 
-	panic(ps.unexpectedPeek(main, "a '('"))
+	return ast.FieldAccess{
+		Pos: main.Line,
+		Lhs: left,
+		Rhs: rhs.Literal,
+	}
+	//panic(ps.unexpectedPeek(main, "a '('"))
 }
 
 func (ps *parser) parseExpression(precedenceLevel int) ast.Node {

@@ -43,11 +43,43 @@ func Parse(input []byte) (node ast.Node, err error) {
 	}()
 
 	if ps.consumeKeyword("package", true) {
+		packageLine := ps.lastConsumed.Line
+
 		if ps.PeekToken().Type != token.Name {
-			return nil, fmt.Errorf("expected a name after package on line %v, got '%v'", ps.lastConsumed.Line, ps.lastConsumed.Literal)
+			return nil, fmt.Errorf("expected a name after package on line %v, got '%v'", packageLine, ps.PeekToken().Literal)
 		}
 
-		pack = ast.Package{Pos: ps.lastConsumed.Line, Name: ps.NextToken().Literal}
+		// create package & parse imports
+		pack = ast.Package{Pos: packageLine, Name: ps.NextToken().Literal}
+		if ps.consumeName("imports", false) {
+			if !ps.consumeSimple("(", false) {
+				return nil, fmt.Errorf("expected a tuple of imports after package name on line %v, got '%v'", packageLine, ps.PeekToken().Literal)
+			}
+
+			if !ps.consumeSimple(")", true) {
+				for {
+					next := ps.NextToken()
+					if next.IsNewLine() {
+						continue
+					}
+
+					if next.Type != token.String {
+						return nil, fmt.Errorf("expected strings inside of package imports on line %v, got '%v'", next.Line, next.Literal)
+					}
+
+					// success: add import
+					pack.Imports = append(pack.Imports, next.Literal)
+
+					if ps.consumeSimple(",", true) {
+						continue
+					} else if ps.consumeSimple(")", true) {
+						break
+					}
+					return nil, fmt.Errorf("expected a ',' or ')' on line %v, got '%v'", next.Line, ps.PeekToken().Literal)
+				}
+			}
+		}
+
 		for {
 			pack.Code = append(pack.Code, ps.next())
 		}
@@ -56,6 +88,13 @@ func Parse(input []byte) (node ast.Node, err error) {
 	// no package, just code
 	for {
 		cb.Code = append(cb.Code, ps.next())
+	}
+}
+
+// helper method to skip newlines
+func (ps *parser) skipNewLines() {
+	for ps.PeekToken().IsNewLine() {
+		ps.NextToken()
 	}
 }
 
@@ -83,10 +122,14 @@ AGAIN:
 	return false
 }
 
-func (ps *parser) consumeName(lit string) bool {
+func (ps *parser) consumeName(lit string, eatLeadingNewLines bool) bool {
+AGAIN:
 	if ps.PeekToken().IsName(lit) {
 		ps.lastConsumed = ps.NextToken()
 		return true
+	} else if eatLeadingNewLines && ps.PeekToken().IsNewLine() {
+		ps.NextToken()
+		goto AGAIN
 	}
 	return false
 }
@@ -177,10 +220,10 @@ func (ps *parser) handleKeywords(main token.Token) ast.Node {
 		// await.all(x, y, z) or await.any(x, y, z)
 		if ps.consumeSimple(".", false) {
 			switch {
-			case ps.consumeName("all"):
+			case ps.consumeName("all", false):
 				return ast.AwaitAll{Pos: main.Line, Names: ps.parseNamesList(ps.lastConsumed)}
 
-			case ps.consumeName("any"):
+			case ps.consumeName("any", false):
 				return ast.AwaitAny{Pos: main.Line, Names: ps.parseNamesList(ps.lastConsumed)}
 			}
 		}

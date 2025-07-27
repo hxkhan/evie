@@ -10,7 +10,6 @@ import (
 )
 
 type Instance struct {
-	opts Options
 	cp   compiler
 	rt   runtime
 	main *fiber
@@ -23,7 +22,9 @@ type closure struct {
 }
 
 type compiler struct {
-	statics  map[string]Value   // implicitly available to all user packages
+	inline  bool             // use dispatch inlining (combining instructions into one)
+	statics map[string]Value // implicitly available to all user packages
+
 	pkg      *Package           // the package being compiled right now
 	closures ds.Slice[*closure] // currently open closures
 }
@@ -39,9 +40,10 @@ type runtime struct {
 }
 
 type Package struct {
-	name    string
-	globals map[string]*Value
-	private ds.Set[string]
+	name    string            // name of the package
+	globals map[string]*Value // all global symbols
+	private ds.Set[string]    // set of private symbols
+	statics map[string]Value  // per package statics
 }
 
 type Symbol struct {
@@ -53,14 +55,14 @@ type Options struct {
 	Inline        bool             // use dispatch inlining (combining instructions into one)
 	ObserveIt     bool             // collect metrics (affects performance)
 	TopLevelLogic bool             // whether to only allow declarations at top level
-	Statics       map[string]Value // implicitly available to all user packages
+	UStatics      map[string]Value // universal-statics that are implicitly available to all user packages
 }
 
 func New(opts Options) *Instance {
 	return &Instance{
-		opts,
 		compiler{
-			statics: opts.Statics,
+			statics: opts.UStatics,
+			inline:  opts.Inline,
 		},
 		runtime{
 			packages: make(map[string]*Package),
@@ -147,7 +149,12 @@ func (cp *compiler) reach(name string) (v any, err error) {
 		return ref, nil
 	}
 
-	// 3. check static builtins
+	// 3. check package statics
+	if value, exists := cp.pkg.statics[name]; exists {
+		return value, nil
+	}
+
+	// 4. check universal statics
 	if value, exists := cp.statics[name]; exists {
 		return value, nil
 	}

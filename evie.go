@@ -17,8 +17,8 @@ type Options struct {
 
 var Defaults = Options{
 	Options: vm.Options{
-		Inline:  true,
-		Statics: ImplicitBuilitins(),
+		Inline:   true,
+		UStatics: ImplicitBuilitins(),
 	},
 }
 

@@ -43,7 +43,7 @@ func main() {
 		panic(err)
 	}
 
-	ip := evie.New(evie.Options{DebugLogs: *log, Options: vm.Options{Inline: *inliner, ObserveIt: *d, Statics: evie.ImplicitBuilitins()}})
+	ip := evie.New(evie.Options{DebugLogs: *log, Options: vm.Options{Inline: *inliner, ObserveIt: *d, UStatics: evie.ImplicitBuilitins()}})
 	_, err = ip.EvalScript(input)
 	if err != nil {
 		fmt.Println(err)

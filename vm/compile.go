@@ -201,8 +201,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 	case ast.Call:
 		return vm.emitCall(node)
-	/* case ast.DotCall:
-	return vm.emitDotCall(node) */
+
 	case ast.FieldAccess:
 		return vm.emitFieldAccess(node)
 
@@ -269,54 +268,106 @@ func (vm *Instance) emitIdentGet(node ast.IdentGet) instruction {
 }
 
 func (vm *Instance) emitIdentSet(node ast.Assign) instruction {
-	iGet, isIdentGet := node.Lhs.(ast.IdentGet)
-	if !isIdentGet {
-		panic("fix")
+	// handle variables
+	if iGet, isIdentGet := node.Lhs.(ast.IdentGet); isIdentGet {
+		variable, err := vm.cp.reach(iGet.Name)
+		if err != nil {
+			panic(err)
+		}
+
+		// compile new value
+		value := vm.compile(node.Value)
+
+		switch v := variable.(type) {
+		case local:
+			return func(fbr *fiber) (Value, error) {
+				value, err := value(fbr)
+				if err != nil {
+					return value, err
+				}
+
+				fbr.storeLocal(v, value)
+				return Value{}, nil
+			}
+
+		case captured:
+			return func(fbr *fiber) (Value, error) {
+				value, err := value(fbr)
+				if err != nil {
+					return value, err
+				}
+
+				fbr.storeCaptured(v, value)
+				return Value{}, nil
+			}
+
+		case *Value:
+			return func(fbr *fiber) (Value, error) {
+				value, err := value(fbr)
+				if err != nil {
+					return value, err
+				}
+
+				*v = value
+				return Value{}, nil
+			}
+
+		case Value:
+			panic(fmt.Errorf("cannot set static values"))
+		}
 	}
 
-	variable, err := vm.cp.reach(iGet.Name)
-	if err != nil {
-		panic(err)
-	}
-
-	value := vm.compile(node.Value)
-
-	switch v := variable.(type) {
-	case local:
-		return func(fbr *fiber) (Value, error) {
-			value, err := value(fbr)
+	// handle field access assignments
+	if fa, isFieldAccess := node.Lhs.(ast.FieldAccess); isFieldAccess {
+		if iGet, isIdentGet := fa.Lhs.(ast.IdentGet); isIdentGet {
+			variable, err := vm.cp.reach(iGet.Name)
 			if err != nil {
-				return value, err
+				panic(err)
 			}
 
-			fbr.storeLocal(v, value)
-			return Value{}, nil
-		}
+			switch lhs := variable.(type) {
+			case Value:
+				if pkg, ok := lhs.AsPackage(); ok {
+					ref, exists := pkg.globals[fa.Rhs]
+					if !exists {
+						panic(fmt.Errorf("symbol '%s' not found in package '%s'", iGet.Name, fa.Rhs))
+					}
 
-	case captured:
-		return func(fbr *fiber) (Value, error) {
-			value, err := value(fbr)
-			if err != nil {
-				return value, err
+					// compile new value & return setter
+					value := vm.compile(node.Value)
+					return func(fbr *fiber) (Value, error) {
+						value, err := value(fbr)
+						if err != nil {
+							return value, err
+						}
+
+						*ref = value
+						return Value{}, nil
+					}
+				}
+
+			case *Value:
+				// compile new value & return setter
+				value := vm.compile(node.Value)
+				return func(fbr *fiber) (Value, error) {
+					if pkg, ok := lhs.AsPackage(); ok {
+						ref, exists := pkg.globals[fa.Rhs]
+						if !exists {
+							panic(fmt.Errorf("symbol '%s' not found in package '%s'", iGet.Name, fa.Rhs))
+						}
+
+						value, err := value(fbr)
+						if err != nil {
+							return value, err
+						}
+
+						*ref = value
+						return Value{}, nil
+					}
+					panic("FieldAccess LHS is not a package")
+				}
 			}
-
-			fbr.storeCaptured(v, value)
-			return Value{}, nil
 		}
-
-	case *Value:
-		return func(fbr *fiber) (Value, error) {
-			value, err := value(fbr)
-			if err != nil {
-				return value, err
-			}
-
-			*v = value
-			return Value{}, nil
-		}
-
-	case Value:
-		panic(fmt.Errorf("cannot set static values"))
 	}
 
 	panic("ayo what")
@@ -392,8 +443,8 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 		arguments[i] = vm.compile(arg)
 	}
 
-	// optimise: calling global & builtin functions
-	if iGet, isIdentGet := node.Fn.(ast.IdentGet); isIdentGet && vm.opts.Inline {
+	// optimise: calling global functions
+	if iGet, isIdentGet := node.Fn.(ast.IdentGet); isIdentGet && vm.cp.inline {
 		variable, err := vm.cp.reach(iGet.Name)
 		if err != nil {
 			panic(err)
@@ -523,53 +574,6 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 	}
 }
 
-/* func (vm *Instance) emitDotCall(node ast.DotCall) instruction {
-	// namespaces e.g. json.decode(...)
-	iGetLeft, isLeftIdentGet := node.Left.(ast.IdentGet)
-	iGetRight, isRightIdentGet := node.Right.(ast.IdentGet)
-	if isLeftIdentGet && isRightIdentGet {
-		variable, err := vm.cp.reach(iGetLeft.Name)
-		if err != nil {
-			panic(err)
-		}
-
-		switch v := variable.(type) {
-		case Value:
-			if pkg, ok := v.AsPackage(); ok {
-				value, exists := pkg.globals[iGetRight.Name]
-				if !exists {
-					panic(fmt.Errorf("symbol '%s' not found in package '%s'", iGetRight.Name, iGetLeft.Name))
-				}
-
-				if _, ok := value.AsGoFunc(); ok {
-					v := *value
-
-					// compile arguments
-					arguments := make([]instruction, len(node.Args))
-					for i, arg := range node.Args {
-						arguments[i] = vm.compile(arg)
-					}
-
-					return func(fbr *fiber) (Value, error) {
-						return fbr.tryNativeCall(v, arguments)
-					}
-				}
-
-			}
-		}
-
-		name := iGetLeft.Name + "." + iGetRight.Name
-
-		if _, exists := vm.opts.Statics[name]; exists {
-			return vm.compile(ast.Call{Pos: node.Pos, Fn: ast.IdentGet{Pos: node.Pos, Name: name}, Args: node.Args})
-		} else {
-			panic("method not found")
-		}
-	}
-
-	panic("implement the rest")
-} */
-
 func (vm *Instance) emitGo(node ast.Go) instruction {
 	if node, isCall := node.Fn.(ast.Call); isCall {
 		call := vm.emitCall(node)
@@ -599,7 +603,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 }
 
 func (vm *Instance) emitReturn(node ast.Return) instruction {
-	if vm.opts.Inline {
+	if vm.cp.inline {
 		// optimise: returning constants
 		if in, isInput := node.Value.(ast.Input[float64]); isInput {
 			value := BoxFloat64(in.Value)
@@ -696,7 +700,7 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 	defer vm.cp.closures.Last(0).scope.CloseBlock()
 
 	// optimise: statement extraction from block; saves an extra dispatch
-	if len(node.Code) == 1 && vm.opts.Inline {
+	if len(node.Code) == 1 && vm.cp.inline {
 		node := node.Code[0]
 		// optimise: {return x}
 		if ret, isReturn := node.(ast.Return); isReturn {
@@ -771,6 +775,19 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 					return *value, nil
 				}
 			}
+
+		case *Value:
+			return func(fbr *fiber) (Value, error) {
+				if pkg, ok := v.AsPackage(); ok {
+					value, exists := pkg.globals[node.Rhs]
+					if !exists {
+						panic(fmt.Errorf("symbol '%s' not found in package '%s'", iGet.Name, node.Rhs))
+					}
+
+					return *value, nil
+				}
+				panic("value is not a package")
+			}
 		}
 	}
 
@@ -779,7 +796,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 
 func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 	// optimise: lhs being a local variable
-	if iGet, isIdentGet := node.Lhs.(ast.IdentGet); isIdentGet && vm.opts.Inline {
+	if iGet, isIdentGet := node.Lhs.(ast.IdentGet); isIdentGet && vm.cp.inline {
 		variable, err := vm.cp.reach(iGet.Name)
 		if err != nil {
 			panic(err)
@@ -874,7 +891,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 	lhs := vm.compile(node.Lhs)
 	// optimise: rhs being a constant
-	if rhs, isInput := node.Rhs.(ast.Input[float64]); isInput && vm.opts.Inline {
+	if rhs, isInput := node.Rhs.(ast.Input[float64]); isInput && vm.cp.inline {
 		switch node.Operator {
 		case ast.AddOp:
 			return func(fbr *fiber) (Value, error) {

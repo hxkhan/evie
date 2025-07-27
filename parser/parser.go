@@ -223,15 +223,20 @@ func (ps *parser) handleKeywords(main token.Token) ast.Node {
 
 // assignments, calls, expressions etc.
 func (ps *parser) handleNames(main token.Token) ast.Node {
-	switch {
-	case ps.consumeSimple(":=", false):
+	// handle declarations explicitly
+	if ps.consumeSimple(":=", false) {
 		return ast.IdentDec{Pos: main.Line, Name: main.Literal, Value: ps.parseExpression(0)}
+	}
 
+	// try infix stuff
+	left := ps.parseInfixExpression(ast.IdentGet{Pos: main.Line, Name: main.Literal}, 0)
+
+	switch {
 	case ps.consumeSimple("=", false):
-		return ast.IdentSet{Pos: main.Line, Name: main.Literal, Value: ps.parseExpression(0)}
+		return ast.Assign{Pos: main.Line, Lhs: left, Value: ps.parseExpression(0)}
 
 	case ps.consumeSimple("+=", false) || ps.consumeSimple("-=", false):
-		return ast.IdentSet{Pos: main.Line, Name: main.Literal, Value: ast.BinOp{
+		return ast.Assign{Pos: main.Line, Lhs: left, Value: ast.BinOp{
 			Pos:      main.Line,
 			Lhs:      ast.IdentGet{Name: main.Literal},
 			Operator: maps[ps.lastConsumed.Literal],
@@ -251,11 +256,10 @@ func (ps *parser) handleNames(main token.Token) ast.Node {
 				panic(fmt.Errorf("function call on line %v expected a ',' or ')', got '%v'", main.Line, ps.PeekToken().Literal))
 			}
 		}
-
-		return ast.Call{Pos: main.Line, Fn: ast.IdentGet{Pos: main.Line, Name: main.Literal}, Args: args}
+		return ast.Call{Pos: main.Line, Fn: left, Args: args}
 	}
 
-	return ps.parseInfixExpression(ast.IdentGet{Pos: main.Line, Name: main.Literal}, 0)
+	return left
 }
 
 // helper to parse a block or single statement
@@ -333,39 +337,11 @@ func (ps *parser) parseDotOperator(left ast.Node) ast.Node {
 	}
 
 	rhs := ps.NextToken()
-
-	switch {
-	case ps.consumeSimple("(", false):
-		var args []ast.Node
-		for !ps.PeekToken().IsSimple(")") {
-			args = append(args, ps.parseExpression(0))
-
-			if ps.consumeSimple(")", false) {
-				break
-			} else if ps.consumeSimple(",", false) {
-				continue
-			}
-			panic(fmt.Errorf("method call on line %v expected a ',' or ')', got '%v'", main.Line, ps.PeekToken().Literal))
-		}
-
-		// wrap the left-hand side as the object part of the method call
-		return ast.Call{
-			Pos: main.Line,
-			Fn: ast.FieldAccess{
-				Pos: main.Line,
-				Lhs: left,
-				Rhs: rhs.Literal,
-			},
-			Args: args,
-		}
-	}
-
 	return ast.FieldAccess{
 		Pos: main.Line,
 		Lhs: left,
 		Rhs: rhs.Literal,
 	}
-	//panic(ps.unexpectedPeek(main, "a '('"))
 }
 
 func (ps *parser) parseExpression(precedenceLevel int) ast.Node {
@@ -393,7 +369,7 @@ func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) (node
 	for {
 		next := ps.PeekToken()
 
-		// syntactic sugar of method calls
+		// field access
 		if next.IsSimple(".") {
 			left = ps.parseDotOperator(left)
 			continue

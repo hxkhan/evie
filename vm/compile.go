@@ -187,7 +187,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	case ast.IdentGet:
 		return vm.emitIdentGet(node)
 
-	case ast.IdentSet:
+	case ast.Assign:
 		return vm.emitIdentSet(node)
 
 	case ast.Block:
@@ -201,8 +201,8 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 	case ast.Call:
 		return vm.emitCall(node)
-	case ast.DotCall:
-		return vm.emitDotCall(node)
+	/* case ast.DotCall:
+	return vm.emitDotCall(node) */
 	case ast.FieldAccess:
 		return vm.emitFieldAccess(node)
 
@@ -268,8 +268,13 @@ func (vm *Instance) emitIdentGet(node ast.IdentGet) instruction {
 	panic("ayo what")
 }
 
-func (vm *Instance) emitIdentSet(node ast.IdentSet) instruction {
-	variable, err := vm.cp.reach(node.Name)
+func (vm *Instance) emitIdentSet(node ast.Assign) instruction {
+	iGet, isIdentGet := node.Lhs.(ast.IdentGet)
+	if !isIdentGet {
+		panic("fix")
+	}
+
+	variable, err := vm.cp.reach(iGet.Name)
 	if err != nil {
 		panic(err)
 	}
@@ -518,7 +523,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 	}
 }
 
-func (vm *Instance) emitDotCall(node ast.DotCall) instruction {
+/* func (vm *Instance) emitDotCall(node ast.DotCall) instruction {
 	// namespaces e.g. json.decode(...)
 	iGetLeft, isLeftIdentGet := node.Left.(ast.IdentGet)
 	iGetRight, isRightIdentGet := node.Right.(ast.IdentGet)
@@ -563,7 +568,7 @@ func (vm *Instance) emitDotCall(node ast.DotCall) instruction {
 	}
 
 	panic("implement the rest")
-}
+} */
 
 func (vm *Instance) emitGo(node ast.Go) instruction {
 	if node, isCall := node.Fn.(ast.Call); isCall {
@@ -769,7 +774,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 		}
 	}
 
-	panic("fix")
+	panic("implement the rest")
 }
 
 func (vm *Instance) emitBinOp(node ast.BinOp) instruction {

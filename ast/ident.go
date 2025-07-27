@@ -13,8 +13,8 @@ type IdentGet struct {
 	Name string
 }
 
-type IdentSet struct {
+type Assign struct {
 	token.Pos
-	Name  string
+	Lhs   Node
 	Value Node
 }

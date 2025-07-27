@@ -45,10 +45,3 @@ type FieldAccess struct {
 	Lhs Node
 	Rhs string
 }
-
-type DotCall struct {
-	token.Pos
-	Left  Node
-	Right Node
-	Args  []Node
-}

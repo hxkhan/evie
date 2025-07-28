@@ -6,7 +6,7 @@ import (
 	"github.com/hxkhan/evie/vm"
 )
 
-func Instantiate() map[string]*vm.Value {
+func Constructor() map[string]*vm.Value {
 	timer := vm.BoxGoFunc(timer)
 
 	return map[string]*vm.Value{

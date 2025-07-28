@@ -6,7 +6,7 @@ import (
 	"github.com/hxkhan/evie/vm"
 )
 
-func Instantiate() map[string]*vm.Value {
+func Constructor() map[string]*vm.Value {
 	readFile := vm.BoxGoFunc(readFile)
 
 	return map[string]*vm.Value{

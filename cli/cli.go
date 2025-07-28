@@ -26,7 +26,7 @@ func main() {
 		panic(err)
 	} */
 
-	inliner := flag.Bool("inliner", true, "Optimise the program by inlining certain instruction combinations")
+	inline := flag.Bool("inline", true, "Optimise the program by inlining certain instruction combinations")
 	d := flag.Bool("d", false, "Print debug stats")
 	t := flag.Bool("t", false, "Print execution time")
 	log := flag.Bool("log", false, "Log things for debugging")
@@ -43,20 +43,26 @@ func main() {
 		panic(err)
 	}
 
-	ip := evie.New(evie.Options{DebugLogs: *log, Options: vm.Options{Inline: *inliner, ObserveIt: *d, UStatics: evie.ImplicitBuilitins()}})
-	_, err = ip.EvalScript(input)
+	evm := vm.New(vm.Options{
+		PrintLogs:       *log,
+		DisableInlining: !(*inline),
+		ObserveIt:       *d,
+		//UniversalStatics: evie.ImplicitBuilitins(),
+		PackageContructors: evie.StandardLibrary(),
+	})
+	_, err = evm.EvalScript(input)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	pkgMain := ip.GetPackage("main")
+	pkgMain := evm.GetPackage("main")
 	if pkgMain == nil {
 		fmt.Println("Error: no main package found")
 		return
 	}
 
-	symMain, exists := pkgMain.GetGlobal("main")
+	symMain, exists := pkgMain.GetSymbol("main")
 	if !exists {
 		fmt.Println("Error: no main entry point found")
 		return
@@ -75,7 +81,7 @@ func main() {
 		return
 	}
 
-	ip.WaitForNoActivity()
+	evm.WaitForNoActivity()
 	difference := time.Since(before)
 
 	if !res.IsNull() {

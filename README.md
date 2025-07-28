@@ -37,12 +37,11 @@ fn main() {
 Also a concurrency example below
 ```php
 fn print(message, duration) {
-    await time.timer(duration) // timer will return a 'task' that we await on
+    await time.timer(duration)
     echo message
 }
 
 fn main() {
-    // keyword 'go' starts a new fiber
     go print("one", 100)
     go print("two", 200)
     go print("three", 300)
@@ -55,11 +54,11 @@ fn main() {
     go print("ten", 1000)
 }
 ```
-To test this exact program, `cd` to `cli` and run `go run . -t ../examples/go.es`
+To test this exact program, run `go run ./cli -t ./examples/go.ev`. Then remove all of the `go` keywords infront of the `print` calls and re-run to see the difference.
 
 ## Flags
 - flag `-t` prints the execution time
-- flag `-o=true/false` enables or disables specialised instruction optimisations. It is `true` by default
+- flag `-inline=true/false` enables or disables inlining certain instruction combinations for performance. It is `true` by default
 
 ## Goals
 - Highly performant ✅
@@ -70,7 +69,7 @@ To test this exact program, `cd` to `cli` and run `go run . -t ../examples/go.es
 - Builtin package manager ❌
 - No cgo, written in pure Go ✅
 
-> Note: this project is in its early state. Many features are half baked.
+> This project is in its early state. Many features are half baked.
 
 ## Benchmarks
 | Language | fib(35)  | Host Language |

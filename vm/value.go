@@ -115,7 +115,12 @@ func BoxTask(task chan evaluation) Value {
 }
 
 // BoxPackage boxes an evie package
-func BoxPackage(pkg *Package) Value {
+/* func BoxPackage(pkg Package) Value {
+	return Value{scalar: packageType, pointer: unsafe.Pointer(pkg.(*packageInstance))}
+} */
+
+// Box boxes an evie package
+func (pkg *packageInstance) Box() Value {
 	return Value{scalar: packageType, pointer: unsafe.Pointer(pkg)}
 }
 
@@ -181,11 +186,18 @@ func (x Value) AsTask() (task <-chan evaluation, ok bool) {
 	return *(*chan evaluation)(x.pointer), true
 }
 
-func (x Value) AsPackage() (pkg *Package, ok bool) {
+func (x Value) asPackage() (pkg *packageInstance, ok bool) {
 	if x.scalar != packageType || isKnown(x.pointer) {
 		return nil, false
 	}
-	return (*Package)(x.pointer), true
+	return (*packageInstance)(x.pointer), true
+}
+
+func (x Value) AsPackage() (pkg Package, ok bool) {
+	if x.scalar != packageType || isKnown(x.pointer) {
+		return nil, false
+	}
+	return (*packageInstance)(x.pointer), true
 }
 
 func (x Value) AsBuffer() (buffer []byte, ok bool) {

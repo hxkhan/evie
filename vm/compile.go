@@ -15,15 +15,39 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	case ast.Package:
 		vm.cp.pkg = vm.rt.packages[node.Name]
 		if vm.cp.pkg == nil {
-			vm.cp.pkg = &Package{
+			vm.cp.pkg = &packageInstance{
 				name:    node.Name,
-				globals: make(map[string]*Value),
+				globals: map[string]*Value{},
 				private: ds.Set[string]{},
+				statics: map[string]Value{},
 			}
 			vm.rt.packages[node.Name] = vm.cp.pkg
 		}
 
 		this := vm.cp.pkg
+		// first make sure all static imports are resolved
+		for _, name := range node.Imports {
+			importedPkg := vm.rt.packages[name]
+			if importedPkg == nil {
+				constructor, exists := vm.cp.constructors[name]
+				if !exists {
+					panic(fmt.Errorf("no constructor found for package %s", name))
+				}
+
+				// instantiate
+				importedPkg = &packageInstance{
+					name:    name,
+					globals: constructor(),
+					private: ds.Set[string]{},
+					statics: map[string]Value{},
+				}
+
+				// save as loaded package
+				vm.rt.packages[name] = importedPkg
+			}
+
+			this.statics[name] = importedPkg.Box()
+		}
 
 		/*
 			------ Hoisting Protocol ------
@@ -327,7 +351,7 @@ func (vm *Instance) emitIdentSet(node ast.Assign) instruction {
 
 			switch lhs := variable.(type) {
 			case Value:
-				if pkg, ok := lhs.AsPackage(); ok {
+				if pkg, ok := lhs.asPackage(); ok {
 					ref, exists := pkg.globals[fa.Rhs]
 					if !exists {
 						panic(fmt.Errorf("symbol '%s' not found in package '%s'", iGet.Name, fa.Rhs))
@@ -350,7 +374,7 @@ func (vm *Instance) emitIdentSet(node ast.Assign) instruction {
 				// compile new value & return setter
 				value := vm.compile(node.Value)
 				return func(fbr *fiber) (Value, error) {
-					if pkg, ok := lhs.AsPackage(); ok {
+					if pkg, ok := lhs.asPackage(); ok {
 						ref, exists := pkg.globals[fa.Rhs]
 						if !exists {
 							panic(fmt.Errorf("symbol '%s' not found in package '%s'", iGet.Name, fa.Rhs))
@@ -765,7 +789,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 
 		switch v := variable.(type) {
 		case Value:
-			if pkg, ok := v.AsPackage(); ok {
+			if pkg, ok := v.asPackage(); ok {
 				value, exists := pkg.globals[node.Rhs]
 				if !exists {
 					panic(fmt.Errorf("symbol '%s' not found in package '%s'", iGet.Name, node.Rhs))
@@ -778,7 +802,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 
 		case *Value:
 			return func(fbr *fiber) (Value, error) {
-				if pkg, ok := v.AsPackage(); ok {
+				if pkg, ok := v.asPackage(); ok {
 					value, exists := pkg.globals[node.Rhs]
 					if !exists {
 						panic(fmt.Errorf("symbol '%s' not found in package '%s'", iGet.Name, node.Rhs))

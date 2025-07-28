@@ -2,11 +2,15 @@ package vm
 
 import (
 	"fmt"
+	"io"
+	"iter"
+	"log"
 	"slices"
 	"sync"
 
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/ds"
+	"github.com/hxkhan/evie/parser"
 )
 
 type Instance struct {
@@ -25,21 +29,22 @@ type compiler struct {
 	inline  bool             // use dispatch inlining (combining instructions into one)
 	statics map[string]Value // implicitly available to all user packages
 
-	pkg      *Package           // the package being compiled right now
+	pkg      *packageInstance   // the package being compiled right now
 	closures ds.Slice[*closure] // currently open closures
+
+	constructors map[string]PackageContructor // maps package names to their contructors for easy access
 }
 
 type runtime struct {
-	packages map[string]*Package
-
-	boxes  ds.Slice[*Value] // pooled boxes for this vm
-	fibers ds.Slice[*fiber] // pooled fibers for this vm
-	trace  []string         // call-stack trace
-	gil    sync.Mutex       // global interpreter lock
-	wg     sync.WaitGroup   // wait for all fibers to complete
+	packages map[string]*packageInstance // loaded packages
+	boxes    ds.Slice[*Value]            // pooled boxes for this vm
+	fibers   ds.Slice[*fiber]            // pooled fibers for this vm
+	trace    []string                    // call-stack trace
+	gil      sync.Mutex                  // global interpreter lock
+	wg       sync.WaitGroup              // wait for all fibers to complete
 }
 
-type Package struct {
+type packageInstance struct {
 	name    string            // name of the package
 	globals map[string]*Value // all global symbols
 	private ds.Set[string]    // set of private symbols
@@ -51,21 +56,47 @@ type Symbol struct {
 	IsPublic bool
 }
 
+// PackageContructor returns a new instance of a host package
+type PackageContructor func() map[string]*Value
+
+// ConstructPackage creates a package instance from the constructor
+func ConstructPackage(pc PackageContructor) Package {
+	return &packageInstance{
+		name:    packageName(pc),
+		globals: pc(),
+		private: ds.Set[string]{},
+		statics: map[string]Value{},
+	}
+}
+
 type Options struct {
-	Inline        bool             // use dispatch inlining (combining instructions into one)
-	ObserveIt     bool             // collect metrics (affects performance)
-	TopLevelLogic bool             // whether to only allow declarations at top level
-	UStatics      map[string]Value // universal-statics that are implicitly available to all user packages
+	PrintLogs          bool                // print debug logs
+	DisableInlining    bool                // use dispatch inlining (combining instructions into one)
+	ObserveIt          bool                // collect metrics (affects performance)
+	TopLevelLogic      bool                // whether to only allow declarations at top level
+	PackageContructors []PackageContructor // to instantiate host packages when user packages import them
+	UniversalStatics   map[string]Value    // implicitly visible to all user packages
 }
 
 func New(opts Options) *Instance {
+	log.SetFlags(0)
+	if !opts.PrintLogs {
+		log.SetOutput(io.Discard)
+	}
+
+	constructors := make(map[string]PackageContructor, len(opts.PackageContructors))
+	for _, constructor := range opts.PackageContructors {
+		constructors[packageName(constructor)] = constructor
+	}
+
 	return &Instance{
 		compiler{
-			statics: opts.UStatics,
-			inline:  opts.Inline,
+			constructors: constructors,
+			statics:      opts.UniversalStatics,
+			inline:       !opts.DisableInlining,
 		},
 		runtime{
-			packages: make(map[string]*Package),
+			packages: make(map[string]*packageInstance),
 			boxes:    make(ds.Slice[*Value], 0, 48), // the capacity to store 48 boxed values
 			fibers:   make(ds.Slice[*fiber], 0, 3),  // the capacity to store 3 fibers
 		},
@@ -93,25 +124,48 @@ func (vm *Instance) EvalNode(node ast.Node) (Value, error) {
 	return Value{}, nil
 }
 
-/* func (vm *Instance) PackageHandle(name string) *Package {
-	if pkg, exists := vm.rt.packages[name]; exists {
-		return pkg
+func (vm *Instance) EvalScript(input []byte) (Value, error) {
+	output, err := parser.Parse(input)
+	if err != nil {
+		return Value{}, err
 	}
 
-	pkg := &Package{symbols: make(map[string]Symbol)}
-
-	//return vm.rt.packages[name]
-} */
-
-func NewHostPackage(name string, exports map[string]*Value) *Package {
-	return &Package{name: name, globals: exports, private: ds.Set[string]{}}
+	return vm.EvalNode(output)
 }
 
-func (vm *Instance) GetPackage(name string) *Package {
+// Packages iterates through loaded packages
+func (vm *Instance) Packages() iter.Seq[Package] {
+	return func(yield func(Package) bool) {
+		for _, pkg := range vm.rt.packages {
+			if !yield(pkg) {
+				return
+			}
+		}
+	}
+}
+
+func (vm *Instance) GetPackage(name string) (pkg Package) {
 	return vm.rt.packages[name]
 }
 
-func (pkg *Package) GetGlobal(name string) (sym Symbol, exists bool) {
+func (vm *Instance) GetElseCreatePackage(name string) (pkg Package) {
+	pkg, exists := vm.rt.packages[name]
+	if exists {
+		return pkg
+	}
+
+	new := &packageInstance{
+		name:    name,
+		globals: map[string]*Value{},
+		private: ds.Set[string]{},
+		statics: map[string]Value{},
+	}
+
+	vm.rt.packages[name] = new
+	return new
+}
+
+func (pkg *packageInstance) GetSymbol(name string) (sym Symbol, exists bool) {
 	ref, exists := pkg.globals[name]
 	if !exists {
 		return sym, false
@@ -121,6 +175,11 @@ func (pkg *Package) GetGlobal(name string) (sym Symbol, exists bool) {
 	return Symbol{Value: ref, IsPublic: !private}, exists
 }
 
+func (pkg *packageInstance) HasSymbol(name string) (exists bool) {
+	_, exists = pkg.globals[name]
+	return exists
+}
+
 func (vm *Instance) WaitForNoActivity() {
 	vm.rt.wg.Wait()
 }
@@ -128,7 +187,7 @@ func (vm *Instance) WaitForNoActivity() {
 type local int
 type captured int
 
-// reach searches for a binding across all scope instances
+// reach searches for a symbol across all scopes
 func (cp *compiler) reach(name string) (v any, err error) {
 	// 1. check stack
 	for scroll := range cp.closures.Len() {

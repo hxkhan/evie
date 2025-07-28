@@ -1,27 +1,9 @@
-package main
-
+package main imports("time")
+		
 fn main() {
-    timer := time.timer(500, true)
+    pi := 3.14159
 
-    await timer
-    echo "tick"
-
-    /* await timer
-    echo "tick"
-
-    await timer
-    echo "tick"
-
-    await timer
-    echo "tick"
-
-    await timer
-    echo "tick" */
-
-    await time.timer(1000, false)
-    await timer
-    echo "tick"
-
-
-    //discontinue timer
+    echo "before"
+    await time.timer(pi * 1000)
+    echo "after"
 }

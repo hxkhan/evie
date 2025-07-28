@@ -1,22 +1,37 @@
 package json
 
-/* func Export() {
-	std.ImportFn(decode)
+import (
+	"encoding/json"
+
+	"github.com/hxkhan/evie/vm"
+)
+
+func Constructor() map[string]*vm.Value {
+	readFile := vm.BoxGoFunc(decode)
+
+	return map[string]*vm.Value{
+		"readFile": &readFile,
+	}
 }
 
-func decode(v core.Value) (core.Value, error) {
+func decode(v vm.Value) (vm.Value, error) {
 	str, ok := v.AsString()
 	if ok {
 		var v any
 		err := json.Unmarshal([]byte(str), &v)
+		if err != nil {
+			return vm.Value{}, err
+		}
 
 		switch v.(type) {
 		case []any:
 
 		}
 
-		return v, err
-	}
-	return core.Value{}, core.ErrTypes
+		panic("implement")
 
-} */
+		//return v, err
+	}
+
+	return vm.Value{}, vm.ErrTypes
+}

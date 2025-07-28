@@ -1,4 +1,4 @@
-package main
+package main imports("time")
 
 fn print(message, duration) {
     await time.timer(duration)
@@ -17,17 +17,3 @@ fn main() {
     go print("nine", 900)
     go print("ten", 1000)
 }
-
-
-/* fn main() {
-    go print("one", 100)
-
-    echo "before"
-    await time.timer(2000)
-    echo "after"
-}
-
-fn print(message, duration) {
-    await time.timer(duration)
-    echo message
-} */

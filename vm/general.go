@@ -145,7 +145,11 @@ func (vm *Instance) Packages() iter.Seq[Package] {
 }
 
 func (vm *Instance) GetPackage(name string) (pkg Package) {
-	return vm.rt.packages[name]
+	pkg, exists := vm.rt.packages[name]
+	if !exists {
+		return nil
+	}
+	return pkg
 }
 
 func (vm *Instance) GetElseCreatePackage(name string) (pkg Package) {

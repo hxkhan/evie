@@ -59,19 +59,19 @@ func (fbr *fiber) swapActive(new *UserFn) (old *UserFn) {
 	return old
 }
 
-func (fbr *fiber) tryNativeCall(value Value, args []instruction) (result Value, err error) {
+func (fbr *fiber) tryNativeCall(value Value, args []instruction) (result Value, exc *Exception) {
 	nfn, ok := value.AsGoFunc()
 	if !ok {
-		return Value{}, errNotFunction
+		return Value{}, notFunction
 	}
 
 	switch len(args) {
 	case 0:
-		if fn, ok := nfn.(func() (Value, error)); ok {
+		if fn, ok := nfn.(func() (Value, *Exception)); ok {
 			return fn()
 		}
 	case 1:
-		if fn, ok := nfn.(func(Value) (Value, error)); ok {
+		if fn, ok := nfn.(func(Value) (Value, *Exception)); ok {
 			arg0, err := args[0](fbr)
 			if err != nil {
 				return arg0, err
@@ -79,7 +79,7 @@ func (fbr *fiber) tryNativeCall(value Value, args []instruction) (result Value, 
 			return fn(arg0)
 		}
 	case 2:
-		if fn, ok := nfn.(func(Value, Value) (Value, error)); ok {
+		if fn, ok := nfn.(func(Value, Value) (Value, *Exception)); ok {
 			arg0, err := args[0](fbr)
 			if err != nil {
 				return arg0, err
@@ -92,7 +92,7 @@ func (fbr *fiber) tryNativeCall(value Value, args []instruction) (result Value, 
 			return fn(arg0, arg1)
 		}
 	case 3:
-		if fn, ok := nfn.(func(Value, Value, Value) (Value, error)); ok {
+		if fn, ok := nfn.(func(Value, Value, Value) (Value, *Exception)); ok {
 			arg0, err := args[0](fbr)
 			if err != nil {
 				return arg0, err

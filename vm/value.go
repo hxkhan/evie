@@ -66,13 +66,13 @@ type CustomValue interface {
 
 // GoFunc is a compile time safety interface so uncallable functions don't get into the system
 type GoFunc interface {
-	func() (Value, error) |
-		func(Value) (Value, error) |
-		func(Value, Value) (Value, error) |
-		func(Value, Value, Value) (Value, error) |
-		func(Value, Value, Value, Value) (Value, error) |
-		func(Value, Value, Value, Value, Value) (Value, error) |
-		func(Value, Value, Value, Value, Value, Value) (Value, error)
+	func() (Value, *Exception) |
+		func(Value) (Value, *Exception) |
+		func(Value, Value) (Value, *Exception) |
+		func(Value, Value, Value) (Value, *Exception) |
+		func(Value, Value, Value, Value) (Value, *Exception) |
+		func(Value, Value, Value, Value, Value) (Value, *Exception) |
+		func(Value, Value, Value, Value, Value, Value) (Value, *Exception)
 }
 
 // BoxFloat64 boxes a float64

@@ -16,7 +16,7 @@ func Instantiate() map[string]*vm.Value {
 	}
 }
 
-func split(str, sep vm.Value) (vm.Value, error) {
+func split(str, sep vm.Value) (vm.Value, *vm.Exception) {
 	if str, ok := str.AsString(); ok {
 		if sep, ok := sep.AsString(); ok {
 
@@ -31,7 +31,7 @@ func split(str, sep vm.Value) (vm.Value, error) {
 	return vm.Value{}, vm.ErrTypes
 }
 
-func join(parts, sep vm.Value) (vm.Value, error) {
+func join(parts, sep vm.Value) (vm.Value, *vm.Exception) {
 	if parts, ok := parts.AsArray(); ok {
 		if sep, ok := sep.AsString(); ok {
 

@@ -14,13 +14,13 @@ func Constructor() map[string]*vm.Value {
 	}
 }
 
-func decode(v vm.Value) (vm.Value, error) {
+func decode(v vm.Value) (vm.Value, *vm.Exception) {
 	str, ok := v.AsString()
 	if ok {
 		var v any
 		err := json.Unmarshal([]byte(str), &v)
 		if err != nil {
-			return vm.Value{}, err
+			return vm.Value{}, vm.CustomError(err.Error())
 		}
 
 		switch v.(type) {

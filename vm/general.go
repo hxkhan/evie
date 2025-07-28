@@ -23,6 +23,7 @@ type closure struct {
 	captures ds.Slice[capture]
 	freeVars ds.Set[int]
 	scope    ds.Scope
+	this     *Value
 }
 
 type compiler struct {
@@ -115,13 +116,17 @@ func (vm *Instance) EvalNode(node ast.Node) (Value, error) {
 	defer vm.rt.gil.Unlock()
 
 	// run code
-	v, err := code(vm.main)
+	v, exc := code(vm.main)
 
-	// check errors
-	if err == errReturnSignal {
+	// don't implicitly return the return value of the last executed instruction
+	switch exc {
+	case nil:
 		return v, nil
+	case returnSignal:
+		return v, nil
+	default:
+		return v, exc
 	}
-	return Value{}, nil
 }
 
 func (vm *Instance) EvalScript(input []byte) (Value, error) {

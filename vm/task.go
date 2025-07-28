@@ -1,6 +1,6 @@
 package vm
 
-func NewTask(fn func() (Value, error)) Value {
+func NewTask(fn func() (Value, *Exception)) Value {
 	task := make(chan evaluation, 1)
 	go func() {
 		res, err := fn()
@@ -12,5 +12,5 @@ func NewTask(fn func() (Value, error)) Value {
 
 type evaluation struct {
 	result Value
-	err    error
+	err    *Exception
 }

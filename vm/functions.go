@@ -66,7 +66,7 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 	}
 
 	// prep for execution & save currently captured values
-	result, err = fn.code(fbr)
+	result, exc := fn.code(fbr)
 
 	// release non-escaping locals & fiber
 	for _, idx := range fn.recyclable {
@@ -75,10 +75,10 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 	vm.putFiber(fbr)
 
 	// don't implicitly return the return value of the last executed instruction
-	switch err {
+	switch exc {
 	case nil:
 		return Value{}, nil
-	case errReturnSignal:
+	case returnSignal:
 		return result, nil
 	default:
 		return result, err
@@ -139,7 +139,7 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 
 		out = make([]reflect.Value, 2)
 		// don't implicitly return the return value of the last executed instruction
-		if err == errReturnSignal {
+		if err == returnSignal {
 			out[1] = reflect.Zero(reflect.TypeOf((*error)(nil)).Elem())
 		}
 

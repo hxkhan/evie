@@ -14,9 +14,9 @@ func Constructor() map[string]*vm.Value {
 	}
 }
 
-func timer(duration vm.Value) (vm.Value, error) {
+func timer(duration vm.Value) (vm.Value, *vm.Exception) {
 	if duration, ok := duration.AsFloat64(); ok {
-		return vm.NewTask(func() (vm.Value, error) {
+		return vm.NewTask(func() (vm.Value, *vm.Exception) {
 			time.Sleep(time.Millisecond * time.Duration(duration))
 			return vm.Value{}, nil
 		}), nil

@@ -14,11 +14,15 @@ func Constructor() map[string]*vm.Value {
 	}
 }
 
-func readFile(fileName vm.Value) (vm.Value, error) {
+func readFile(fileName vm.Value) (vm.Value, *vm.Exception) {
 	if fileName, ok := fileName.AsString(); ok {
-		return vm.NewTask(func() (vm.Value, error) {
+		return vm.NewTask(func() (vm.Value, *vm.Exception) {
 			bytes, err := os.ReadFile(fileName)
-			return vm.BoxBuffer(bytes), err
+			if err != nil {
+				return vm.Value{}, vm.CustomError(err.Error())
+			}
+
+			return vm.BoxBuffer(bytes), nil
 		}), nil
 	}
 	return vm.Value{}, vm.ErrTypes

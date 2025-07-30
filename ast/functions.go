@@ -1,6 +1,10 @@
 package ast
 
-import "github.com/hxkhan/evie/token"
+import (
+	"fmt"
+
+	"github.com/hxkhan/evie/token"
+)
 
 type Fn struct {
 	token.Pos
@@ -44,4 +48,8 @@ type FieldAccess struct {
 	token.Pos
 	Lhs Node
 	Rhs string
+}
+
+func (node FieldAccess) String() string {
+	return fmt.Sprintf("%v.%v", node.Lhs, node.Rhs)
 }

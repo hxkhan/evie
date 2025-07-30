@@ -66,3 +66,7 @@ func TypeError(args []Value, expected ...string) *Exception {
 
 	return &Exception{"TypeError", msg + ")"}
 }
+
+func RuntimeExceptionF(format string, a ...any) *Exception {
+	return &Exception{name: "RuntimeException", message: fmt.Sprintf(format, a...)}
+}

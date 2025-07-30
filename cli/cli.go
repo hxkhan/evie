@@ -27,9 +27,10 @@ func main() {
 	} */
 
 	inline := flag.Bool("inline", true, "Optimise the program by inlining certain instruction combinations")
-	d := flag.Bool("d", false, "Print debug stats")
+	m := flag.Bool("m", false, "Print metrics")
 	t := flag.Bool("t", false, "Print execution time")
-	log := flag.Bool("log", false, "Log things for debugging")
+	logCaptures := flag.Bool("log-captures", false, "Log when and what is captured")
+	logCache := flag.Bool("log-cache", false, "Log cache hits/misses")
 	flag.Parse()
 
 	fileName := os.Args[len(os.Args)-1]
@@ -44,9 +45,10 @@ func main() {
 	}
 
 	evm := vm.New(vm.Options{
-		PrintLogs:       *log,
+		LogCache:        *logCache,
+		LogCaptures:     *logCaptures,
 		DisableInlining: !(*inline),
-		ObserveIt:       *d,
+		Metrics:         *m,
 		//UniversalStatics: evie.ImplicitBuilitins(),
 		PackageContructors: evie.StandardLibrary(),
 	})
@@ -88,11 +90,16 @@ func main() {
 		fmt.Println(res)
 	}
 
-	if *d || *t {
+	if *m || *t {
 		fmt.Println("------------------------------")
 	}
 
 	if *t {
 		fmt.Printf("Execution time: %v\n", difference)
+	}
+
+	if *m {
+		fmt.Println("Metrics")
+		evm.Metrics()
 	}
 }

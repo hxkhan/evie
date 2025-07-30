@@ -2,7 +2,6 @@ package vm
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/ds"
@@ -13,161 +12,7 @@ type instruction func(fbr *fiber) (Value, *Exception)
 func (vm *Instance) compile(node ast.Node) instruction {
 	switch node := node.(type) {
 	case ast.Package:
-		vm.cp.pkg = vm.rt.packages[node.Name]
-		if vm.cp.pkg == nil {
-			vm.cp.pkg = &packageInstance{
-				name:    node.Name,
-				globals: map[string]*Value{},
-				private: ds.Set[string]{},
-				statics: map[string]Value{},
-			}
-			vm.rt.packages[node.Name] = vm.cp.pkg
-		}
-
-		this := vm.cp.pkg
-		// first make sure all static imports are resolved
-		for _, name := range node.Imports {
-			importedPkg := vm.rt.packages[name]
-			if importedPkg == nil {
-				constructor, exists := vm.cp.constructors[name]
-				if !exists {
-					panic(fmt.Errorf("no constructor found for package %s", name))
-				}
-
-				// instantiate
-				importedPkg = &packageInstance{
-					name:    name,
-					globals: constructor(),
-					private: ds.Set[string]{},
-					statics: map[string]Value{},
-				}
-
-				// save as loaded package
-				vm.rt.packages[name] = importedPkg
-			}
-
-			this.statics[name] = importedPkg.Box()
-		}
-
-		/*
-			------ Hoisting Protocol ------
-
-			All symbols are first symbolically pre-declared without initialization.
-			This is so when we later initialize them; they can reference each other.
-			Function initializations are physically moved to the top of the code.
-			The rest of the code follows right after.
-
-			So this is not possible because the order is maintained:
-				x := y + 2
-				y := 10
-
-			But this is, because functions declarations are hoisted to the top:
-				n := add(3, 7) // n <- 10
-
-				fn square(a, b) {
-					return a + b
-				}
-		*/
-
-		var code []instruction
-
-		// 1. declare all symbols
-		for _, node := range node.Code {
-			if fn, isFn := node.(ast.Fn); isFn {
-				if _, exists := this.globals[fn.Name]; exists {
-					panic(fmt.Errorf("double declaration of %s", fn.Name))
-				}
-				this.globals[fn.Name] = &Value{}
-			} else if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
-				if _, exists := this.globals[iDec.Name]; exists {
-					panic(fmt.Errorf("double declaration of %s", iDec.Name))
-				}
-				this.globals[iDec.Name] = &Value{}
-			}
-		}
-
-		// 2. physically move function initialization to the top
-		for _, node := range node.Code {
-			if fn, isFn := node.(ast.Fn); isFn {
-				global := this.globals[fn.Name]
-
-				vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, this: global})
-				vm.cp.closures.Last(0).scope.OpenBlock()
-
-				// declare the fn arguments and only then compile the code
-				for _, arg := range fn.Args {
-					vm.cp.closures.Last(0).scope.Declare(arg)
-				}
-
-				action := vm.compile(fn.Action)
-				closure := vm.cp.closures.Pop()
-				capacity := closure.scope.Capacity()
-
-				// make list of non-escaping variables so they can be recycled after execution
-				recyclable := make([]int, 0, capacity-closure.freeVars.Len())
-				for index := range capacity {
-					if closure.freeVars.Has(index) {
-						log.Printf("CT: fn %v => Local(%v) escapes\n", fn.Name, index)
-						continue
-					}
-					recyclable = append(recyclable, index)
-				}
-
-				info := &funcInfoStatic{
-					name:       fn.Name,
-					args:       fn.Args,
-					recyclable: recyclable,
-					capacity:   capacity,
-					code:       action,
-					vm:         vm,
-				}
-
-				code = append(code, func(fbr *fiber) (Value, *Exception) {
-					// store the function
-					*global = BoxUserFn(UserFn{funcInfoStatic: info})
-					return Value{}, nil
-				})
-			}
-		}
-
-		// 3. compile the rest of the code
-		for _, node := range node.Code {
-			// skip functions now
-			if _, isFn := node.(ast.Fn); isFn {
-				continue
-			}
-
-			// compile global variable initialization in a special way because indices are pre declared
-			if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
-				global := this.globals[iDec.Name]
-
-				value := vm.compile(iDec.Value)
-				code = append(code, func(fbr *fiber) (Value, *Exception) {
-					v, err := value(fbr)
-					if err != nil {
-						return v, err
-					}
-
-					// store the value
-					*global = v
-					return Value{}, nil
-				})
-				continue
-			}
-
-			// other code
-			in := vm.compile(node)
-			code = append(code, in)
-		}
-
-		return func(fbr *fiber) (Value, *Exception) {
-			for _, in := range code {
-				if v, err := in(fbr); err != nil {
-					return v, err
-				}
-			}
-			return Value{}, nil
-		}
+		return vm.emitPackage(node)
 
 	case ast.Input[bool]:
 		value := BoxBool(node.Value)
@@ -245,6 +90,164 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	panic(fmt.Errorf("implement %T", node))
 }
 
+func (vm *Instance) emitPackage(node ast.Package) instruction {
+	vm.cp.pkg = vm.rt.packages[node.Name]
+	if vm.cp.pkg == nil {
+		vm.cp.pkg = &packageInstance{
+			name:    node.Name,
+			globals: map[string]*Value{},
+			private: ds.Set[string]{},
+			statics: map[string]Value{},
+		}
+		vm.rt.packages[node.Name] = vm.cp.pkg
+	}
+
+	this := vm.cp.pkg
+	// first make sure all static imports are resolved
+	for _, name := range node.Imports {
+		importedPkg := vm.rt.packages[name]
+		if importedPkg == nil {
+			constructor, exists := vm.cp.constructors[name]
+			if !exists {
+				panic(fmt.Errorf("no constructor found for package %s", name))
+			}
+
+			// instantiate
+			importedPkg = &packageInstance{
+				name:    name,
+				globals: constructor(),
+				private: ds.Set[string]{},
+				statics: map[string]Value{},
+			}
+
+			// save as loaded package
+			vm.rt.packages[name] = importedPkg
+		}
+
+		this.statics[name] = importedPkg.Box()
+	}
+
+	/*
+		------ Hoisting Protocol ------
+
+		All symbols are first symbolically pre-declared without initialization.
+		This is so when we later initialize them; they can reference each other.
+		Function initializations are physically moved to the top of the code.
+		The rest of the code follows right after.
+
+		So this is not possible because the order is maintained:
+			x := y + 2
+			y := 10
+
+		But this is, because functions declarations are hoisted to the top:
+			n := add(3, 7) // n <- 10
+
+			fn square(a, b) {
+				return a + b
+			}
+	*/
+
+	var code []instruction
+
+	// 1. declare all symbols
+	for _, node := range node.Code {
+		if fn, isFn := node.(ast.Fn); isFn {
+			if _, exists := this.globals[fn.Name]; exists {
+				panic(fmt.Errorf("double declaration of %s", fn.Name))
+			}
+			this.globals[fn.Name] = &Value{}
+		} else if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
+			if _, exists := this.globals[iDec.Name]; exists {
+				panic(fmt.Errorf("double declaration of %s", iDec.Name))
+			}
+			this.globals[iDec.Name] = &Value{}
+		}
+	}
+
+	// 2. physically move function initialization to the top
+	for _, node := range node.Code {
+		if fn, isFn := node.(ast.Fn); isFn {
+			global := this.globals[fn.Name]
+
+			vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, this: global})
+			vm.cp.closures.Last(0).scope.OpenBlock()
+
+			// declare the fn arguments and only then compile the code
+			for _, arg := range fn.Args {
+				vm.cp.closures.Last(0).scope.Declare(arg)
+			}
+
+			action := vm.compile(fn.Action)
+			closure := vm.cp.closures.Pop()
+			capacity := closure.scope.Capacity()
+
+			// make list of non-escaping variables so they can be recycled after execution
+			recyclable := make([]int, 0, capacity-closure.freeVars.Len())
+			for index := range capacity {
+				if closure.freeVars.Has(index) {
+					vm.log.escapesf("CT: fn %v => Local(%v) escapes\n", fn.Name, index)
+					continue
+				}
+				recyclable = append(recyclable, index)
+			}
+
+			info := &funcInfoStatic{
+				name:       fn.Name,
+				args:       fn.Args,
+				recyclable: recyclable,
+				capacity:   capacity,
+				code:       action,
+				vm:         vm,
+			}
+
+			code = append(code, func(fbr *fiber) (Value, *Exception) {
+				// store the function
+				*global = BoxUserFn(UserFn{funcInfoStatic: info})
+				return Value{}, nil
+			})
+		}
+	}
+
+	// 3. compile the rest of the code
+	for _, node := range node.Code {
+		// skip functions now
+		if _, isFn := node.(ast.Fn); isFn {
+			continue
+		}
+
+		// compile global variable initialization in a special way because indices are pre declared
+		if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
+			global := this.globals[iDec.Name]
+
+			value := vm.compile(iDec.Value)
+			code = append(code, func(fbr *fiber) (Value, *Exception) {
+				v, err := value(fbr)
+				if err != nil {
+					return v, err
+				}
+
+				// store the value
+				*global = v
+				return Value{}, nil
+			})
+			continue
+		}
+
+		// other code
+		in := vm.compile(node)
+		code = append(code, in)
+	}
+
+	return func(fbr *fiber) (Value, *Exception) {
+		for _, in := range code {
+			if v, err := in(fbr); err != nil {
+				return v, err
+			}
+		}
+		return Value{}, nil
+	}
+}
+
 func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
 	index, success := vm.cp.closures.Last(0).scope.Declare(node.Name)
 	if !success {
@@ -278,13 +281,13 @@ func (vm *Instance) emitIdentGet(node ast.Ident) instruction {
 		return func(fbr *fiber) (Value, *Exception) {
 			return fbr.getCaptured(v), nil
 		}
-	case *Value:
-		return func(fbr *fiber) (Value, *Exception) {
-			return *v, nil
-		}
 	case Value:
 		return func(fbr *fiber) (Value, *Exception) {
 			return v, nil
+		}
+	case *Value:
+		return func(fbr *fiber) (Value, *Exception) {
+			return *v, nil
 		}
 	}
 
@@ -337,7 +340,7 @@ func (vm *Instance) emitIdentSet(node ast.Assign) instruction {
 			}
 
 		case Value:
-			panic(fmt.Errorf("cannot set static values"))
+			panic(fmt.Errorf("cannot set value of symbol '%s' because it is declared in a static scope", iGet.Name))
 		}
 	}
 
@@ -418,7 +421,7 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 	recyclable := make([]int, 0, capacity-closure.freeVars.Len())
 	for index := range capacity {
 		if closure.freeVars.Has(index) {
-			log.Printf("CT: closure => Local(%v) escapes\n", index)
+			vm.log.escapesf("CT: closure => Local(%v) escapes\n", index)
 			continue
 		}
 		recyclable = append(recyclable, index)
@@ -435,7 +438,7 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 	}
 
 	for i, ref := range closure.captures {
-		log.Printf("CT: closure => Capture(%v) -> %v\n", i, ref)
+		vm.log.capturef("CT: closure => Capture(%v) -> %v\n", i, ref)
 	}
 
 	return func(fbr *fiber) (Value, *Exception) {
@@ -448,7 +451,7 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 				v = fbr.getCapturedByRef(ref.index)
 			}
 			captured[i] = v
-			log.Printf("RT: closure => Capture(%v) -> %v -> %v\n", i, ref, v)
+			vm.log.capturef("RT: closure => Capture(%v) -> %v -> %v\n", i, ref, v)
 		}
 
 		// create the user fn & return it
@@ -478,6 +481,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 		case *Value:
 			// optimise: recursion
 			if value == vm.cp.closures.Last(0).this {
+				//vm.log.printf("optimised recursive call to %s\n", iGet.Name)
 				return func(fbr *fiber) (result Value, exc *Exception) {
 					// check if it is a user function
 					if fn, isUserFn := value.AsUserFn(); isUserFn {
@@ -839,41 +843,115 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 }
 
 func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
+	// don't clutter the global namespace
+	type cachedPkgField struct {
+		pkg   *packageInstance
+		field *Value
+	}
+
 	if iGet, isIdentGet := node.Lhs.(ast.Ident); isIdentGet {
 		variable, err := vm.cp.reach(iGet.Name)
 		if err != nil {
 			panic(err)
 		}
 
-		switch v := variable.(type) {
+		switch lhs := variable.(type) {
+		case local:
+			// optimise: call site caching
+			var cached cachedPkgField
+			return func(fbr *fiber) (Value, *Exception) {
+				v := fbr.getLocal(lhs)
+
+				if pkg, ok := v.asPackage(); ok {
+					// 1. check cache (fast path)
+					if pkg == cached.pkg {
+						vm.log.cacheHit(node)
+						return *cached.field, nil
+					}
+
+					vm.log.cacheMiss(node)
+					// 1. do map lookup (slow path)
+					value, exists := pkg.globals[node.Rhs]
+					if !exists {
+						return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v' - package '%s' has no such symbol", node.Rhs, node, pkg.name)
+					}
+
+					// 3. cache the pkg/field
+					cached = cachedPkgField{pkg, value}
+					return *value, nil
+				}
+				panic("value is not a package")
+			}
+
+		case captured:
+			// optimise: call site caching
+			var cached cachedPkgField
+			return func(fbr *fiber) (Value, *Exception) {
+				v := fbr.getCaptured(lhs)
+
+				if pkg, ok := v.asPackage(); ok {
+					// 1. check cache (fast path)
+					if pkg == cached.pkg {
+						vm.log.cacheHit(node)
+						return *cached.field, nil
+					}
+
+					vm.log.cacheMiss(node)
+					// 1. do map lookup (slow path)
+					value, exists := pkg.globals[node.Rhs]
+					if !exists {
+						return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v' - package '%s' has no such symbol", node.Rhs, node, pkg.name)
+					}
+
+					// 3. cache the pkg/field
+					cached = cachedPkgField{pkg, value}
+					return *value, nil
+				}
+				panic("value is not a package")
+			}
+
+		case *Value:
+			// optimise: call site caching
+			var cached cachedPkgField
+			return func(fbr *fiber) (Value, *Exception) {
+				if pkg, ok := lhs.asPackage(); ok {
+					// 1. check cache (fast path)
+					if pkg == cached.pkg {
+						vm.log.cacheHit(node)
+						return *cached.field, nil
+					}
+
+					vm.log.cacheMiss(node)
+					// 1. do map lookup (slow path)
+					value, exists := pkg.globals[node.Rhs]
+					if !exists {
+						panic(RuntimeExceptionF("undefined symbol '%v' in '%v' - package '%s' has no such symbol", node.Rhs, node, pkg.name))
+					}
+
+					// 3. cache the pkg/field
+					cached = cachedPkgField{pkg, value}
+					return *value, nil
+				}
+				panic("value is not a package")
+			}
+
 		case Value:
-			if pkg, ok := v.asPackage(); ok {
+			if pkg, ok := lhs.asPackage(); ok {
 				value, exists := pkg.globals[node.Rhs]
 				if !exists {
-					panic(fmt.Errorf("symbol '%s' not found in package '%s'", iGet.Name, node.Rhs))
+					panic(fmt.Errorf("undefined symbol '%v' in '%v' - package '%s' has no such symbol", node.Rhs, node, pkg.name))
 				}
 
 				return func(fbr *fiber) (Value, *Exception) {
 					return *value, nil
 				}
 			}
-
-		case *Value:
-			return func(fbr *fiber) (Value, *Exception) {
-				if pkg, ok := v.asPackage(); ok {
-					value, exists := pkg.globals[node.Rhs]
-					if !exists {
-						panic(fmt.Errorf("symbol '%s' not found in package '%s'", iGet.Name, node.Rhs))
-					}
-
-					return *value, nil
-				}
-				panic("value is not a package")
-			}
+		default:
+			panic(fmt.Errorf("implement %T", lhs))
 		}
 	}
 
-	panic("implement the rest")
+	panic(fmt.Errorf("implement %T", node.Lhs))
 }
 
 func (vm *Instance) emitBinOp(node ast.BinOp) instruction {

@@ -8,9 +8,10 @@ import (
 )
 
 var Defaults = vm.Options{
-	PrintLogs:          false,
+	LogCache:           false,
+	LogCaptures:        false,
 	DisableInlining:    false,
-	ObserveIt:          false,
+	Metrics:            false,
 	TopLevelLogic:      true,
 	PackageContructors: StandardLibrary(),
 }

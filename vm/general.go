@@ -2,9 +2,9 @@ package vm
 
 import (
 	"fmt"
-	"io"
 	"iter"
 	"log"
+	"os"
 	"slices"
 	"sync"
 
@@ -17,6 +17,7 @@ type Instance struct {
 	cp   compiler
 	rt   runtime
 	main *fiber
+	log  logger
 }
 
 type closure struct {
@@ -71,20 +72,16 @@ func ConstructPackage(pc PackageContructor) Package {
 }
 
 type Options struct {
-	PrintLogs          bool                // print debug logs
+	LogCache           bool                // log cache hits/misses
+	LogCaptures        bool                // log when and what is captured
 	DisableInlining    bool                // use dispatch inlining (combining instructions into one)
-	ObserveIt          bool                // collect metrics (affects performance)
+	Metrics            bool                // collect metrics (affects performance)
 	TopLevelLogic      bool                // whether to only allow declarations at top level
 	PackageContructors []PackageContructor // to instantiate host packages when user packages import them
 	UniversalStatics   map[string]Value    // implicitly visible to all user packages
 }
 
 func New(opts Options) *Instance {
-	log.SetFlags(0)
-	if !opts.PrintLogs {
-		log.SetOutput(io.Discard)
-	}
-
 	constructors := make(map[string]PackageContructor, len(opts.PackageContructors))
 	for _, constructor := range opts.PackageContructors {
 		constructors[packageName(constructor)] = constructor
@@ -106,7 +103,17 @@ func New(opts Options) *Instance {
 			stack:  make([]*Value, 48),
 			base:   0,
 		},
+		logger{
+			Logger:      *log.New(os.Stdout, "", 0),
+			logCache:    opts.LogCache,
+			logCaptures: opts.LogCaptures,
+		},
 	}
+}
+
+func (vm *Instance) Metrics() {
+	fmt.Println("Cache hits:", vm.log.cacheHits)
+	fmt.Println("Cache miss:", vm.log.cacheMisses)
 }
 
 func (vm *Instance) EvalNode(node ast.Node) (Value, error) {

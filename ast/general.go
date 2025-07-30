@@ -1,6 +1,10 @@
 package ast
 
-import "github.com/hxkhan/evie/token"
+import (
+	"fmt"
+
+	"github.com/hxkhan/evie/token"
+)
 
 type Node interface {
 	Line() int
@@ -20,6 +24,10 @@ type Literal interface {
 type Input[T Literal] struct {
 	token.Pos
 	Value T
+}
+
+func (node Input[T]) String() string {
+	return fmt.Sprint(node.Value)
 }
 
 type Block struct {

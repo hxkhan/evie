@@ -6,7 +6,7 @@ import (
 	"github.com/hxkhan/evie/vm"
 )
 
-func Instantiate() map[string]*vm.Value {
+func Constructor() map[string]*vm.Value {
 	split := vm.BoxGoFunc(split)
 	join := vm.BoxGoFunc(join)
 

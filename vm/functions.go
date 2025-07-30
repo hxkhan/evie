@@ -67,6 +67,7 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 
 	// prep for execution & save currently captured values
 	result, exc := fn.code(fbr)
+	//fmt.Println(exc)
 
 	// release non-escaping locals & fiber
 	for _, idx := range fn.recyclable {
@@ -81,7 +82,7 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 	case returnSignal:
 		return result, nil
 	default:
-		return result, err
+		return result, exc
 	}
 }
 

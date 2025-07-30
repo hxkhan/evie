@@ -1,8 +1,8 @@
-package main imports("time")
+package main imports("io", "time")
 
 fn print(message, duration) {
     await time.timer(duration)
-    echo message
+    io.println(message)
 }
 
 fn main() {

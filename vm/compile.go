@@ -78,7 +78,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 					panic(fmt.Errorf("double declaration of %s", fn.Name))
 				}
 				this.globals[fn.Name] = &Value{}
-			} else if iDec, isIdentDec := node.(ast.IdentDec); isIdentDec {
+			} else if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
 				if _, exists := this.globals[iDec.Name]; exists {
 					panic(fmt.Errorf("double declaration of %s", iDec.Name))
 				}
@@ -138,7 +138,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			}
 
 			// compile global variable initialization in a special way because indices are pre declared
-			if iDec, isIdentDec := node.(ast.IdentDec); isIdentDec {
+			if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
 				global := this.globals[iDec.Name]
 
 				value := vm.compile(iDec.Value)
@@ -205,10 +205,10 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			return Value{}, nil
 		}
 
-	case ast.IdentDec:
+	case ast.Decl:
 		return vm.emitIdentDec(node)
 
-	case ast.IdentGet:
+	case ast.Ident:
 		return vm.emitIdentGet(node)
 
 	case ast.Assign:
@@ -245,7 +245,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	panic(fmt.Errorf("implement %T", node))
 }
 
-func (vm *Instance) emitIdentDec(node ast.IdentDec) instruction {
+func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
 	index, success := vm.cp.closures.Last(0).scope.Declare(node.Name)
 	if !success {
 		panic(fmt.Errorf("double declaration of %s", node.Name))
@@ -263,7 +263,7 @@ func (vm *Instance) emitIdentDec(node ast.IdentDec) instruction {
 	}
 }
 
-func (vm *Instance) emitIdentGet(node ast.IdentGet) instruction {
+func (vm *Instance) emitIdentGet(node ast.Ident) instruction {
 	variable, err := vm.cp.reach(node.Name)
 	if err != nil {
 		panic(err)
@@ -293,7 +293,7 @@ func (vm *Instance) emitIdentGet(node ast.IdentGet) instruction {
 
 func (vm *Instance) emitIdentSet(node ast.Assign) instruction {
 	// handle variables
-	if iGet, isIdentGet := node.Lhs.(ast.IdentGet); isIdentGet {
+	if iGet, isIdentGet := node.Lhs.(ast.Ident); isIdentGet {
 		variable, err := vm.cp.reach(iGet.Name)
 		if err != nil {
 			panic(err)
@@ -343,7 +343,7 @@ func (vm *Instance) emitIdentSet(node ast.Assign) instruction {
 
 	// handle field access assignments
 	if fa, isFieldAccess := node.Lhs.(ast.FieldAccess); isFieldAccess {
-		if iGet, isIdentGet := fa.Lhs.(ast.IdentGet); isIdentGet {
+		if iGet, isIdentGet := fa.Lhs.(ast.Ident); isIdentGet {
 			variable, err := vm.cp.reach(iGet.Name)
 			if err != nil {
 				panic(err)
@@ -468,7 +468,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 	}
 
 	// optimise: calling global functions
-	if iGet, isIdentGet := node.Fn.(ast.IdentGet); isIdentGet && vm.cp.inline {
+	if iGet, isIdentGet := node.Fn.(ast.Ident); isIdentGet && vm.cp.inline {
 		variable, err := vm.cp.reach(iGet.Name)
 		if err != nil {
 			panic(err)
@@ -695,7 +695,7 @@ func (vm *Instance) emitReturn(node ast.Return) instruction {
 		}
 
 		// optimise: returning local variables
-		if iGet, isIdentGet := node.Value.(ast.IdentGet); isIdentGet {
+		if iGet, isIdentGet := node.Value.(ast.Ident); isIdentGet {
 			variable, err := vm.cp.reach(iGet.Name)
 			if err != nil {
 				panic(err)
@@ -795,7 +795,7 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 			}
 
 			// optimise: returning local variables
-			if iGet, isIdentGet := ret.Value.(ast.IdentGet); isIdentGet {
+			if iGet, isIdentGet := ret.Value.(ast.Ident); isIdentGet {
 				variable, err := vm.cp.reach(iGet.Name)
 				if err != nil {
 					panic(err)
@@ -839,7 +839,7 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 }
 
 func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
-	if iGet, isIdentGet := node.Lhs.(ast.IdentGet); isIdentGet {
+	if iGet, isIdentGet := node.Lhs.(ast.Ident); isIdentGet {
 		variable, err := vm.cp.reach(iGet.Name)
 		if err != nil {
 			panic(err)
@@ -878,7 +878,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 
 func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 	// optimise: lhs being a local variable
-	if iGet, isIdentGet := node.Lhs.(ast.IdentGet); isIdentGet && vm.cp.inline {
+	if iGet, isIdentGet := node.Lhs.(ast.Ident); isIdentGet && vm.cp.inline {
 		variable, err := vm.cp.reach(iGet.Name)
 		if err != nil {
 			panic(err)

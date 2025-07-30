@@ -1,4 +1,4 @@
-package main
+package main imports("io")
 
 fn main() {
     // 1 layer of capture
@@ -16,7 +16,7 @@ fn single() {
 
     // printer
     return fn() {
-        echo message
+        io.println(message)
     }
 }
 
@@ -27,7 +27,7 @@ fn double() {
     return fn() {
         // printer
         return fn() {
-            echo message
+            io.println(message)
         }
     }
 }

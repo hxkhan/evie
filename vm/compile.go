@@ -113,9 +113,7 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 	if vm.cp.pkg == nil {
 		vm.cp.pkg = &packageInstance{
 			name:    node.Name,
-			globals: map[int]*Value{},
-			statics: map[string]Value{},
-			private: ds.Set[string]{},
+			globals: map[int]Global{},
 		}
 		vm.rt.packages[node.Name] = vm.cp.pkg
 	}
@@ -123,15 +121,16 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 	this := vm.cp.pkg
 	// first make sure all static imports are resolved
 	for _, name := range node.Imports {
-		importedPkg := vm.rt.packages[name]
-		if importedPkg == nil {
-			importedPkg = vm.cp.resolver(name).(*packageInstance)
+		pkg := vm.rt.packages[name]
+		if pkg == nil {
+			pkg = vm.cp.resolver(name).(*packageInstance)
 
 			// save as loaded package
-			vm.rt.packages[name] = importedPkg
+			vm.rt.packages[name] = pkg
 		}
 
-		this.statics[name] = importedPkg.Box()
+		v := pkg.Box()
+		this.globals[fields.get(name)] = Global{Value: &v, IsPublic: false, IsStatic: true}
 	}
 
 	/*
@@ -163,22 +162,30 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 			if _, exists := this.globals[index]; exists {
 				panic(fmt.Errorf("double declaration of %s", fn.Name))
 			}
-			this.globals[index] = &Value{}
+
+			// create a stub for now
+			fn := BoxUserFn(UserFn{funcInfoStatic: &funcInfoStatic{
+				name: fn.Name,
+				args: fn.Args,
+				vm:   vm,
+			}})
+			this.globals[index] = Global{Value: &fn, IsStatic: true}
 		} else if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
 			index := fields.get(iDec.Name)
 			if _, exists := this.globals[index]; exists {
 				panic(fmt.Errorf("double declaration of %s", iDec.Name))
 			}
-			this.globals[index] = &Value{}
+			this.globals[index] = Global{Value: &Value{}, IsStatic: false}
 		}
 	}
 
-	// 2. physically move function initialization to the top
+	// 2. initialize functions
 	for _, node := range node.Code {
 		if fn, isFn := node.(ast.Fn); isFn {
 			global := this.globals[fields.get(fn.Name)]
+			ufn := (*UserFn)(global.pointer)
 
-			vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, this: global})
+			vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, this: global.Value})
 			vm.cp.closures.Last(0).scope.OpenBlock()
 
 			// declare the fn arguments and only then compile the code
@@ -186,34 +193,19 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 				vm.cp.closures.Last(0).scope.Declare(arg)
 			}
 
-			action := vm.compile(fn.Action)
+			ufn.code = vm.compile(fn.Action)
 			closure := vm.cp.closures.Pop()
-			capacity := closure.scope.Capacity()
+			ufn.capacity = closure.scope.Capacity()
 
 			// make list of non-escaping variables so they can be recycled after execution
-			recyclable := make([]int, 0, capacity-closure.freeVars.Len())
-			for index := range capacity {
+			ufn.recyclable = make([]int, 0, ufn.capacity-closure.freeVars.Len())
+			for index := range ufn.capacity {
 				if closure.freeVars.Has(index) {
 					vm.log.escapesf("CT: fn %v => Local(%v) escapes\n", fn.Name, index)
 					continue
 				}
-				recyclable = append(recyclable, index)
+				ufn.recyclable = append(ufn.recyclable, index)
 			}
-
-			info := &funcInfoStatic{
-				name:       fn.Name,
-				args:       fn.Args,
-				recyclable: recyclable,
-				capacity:   capacity,
-				code:       action,
-				vm:         vm,
-			}
-
-			code = append(code, func(fbr *fiber) (Value, *Exception) {
-				// store the function
-				*global = BoxUserFn(UserFn{funcInfoStatic: info})
-				return Value{}, nil
-			})
 		}
 	}
 
@@ -236,7 +228,7 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 				}
 
 				// store the value
-				*global = v
+				*(global.Value) = v
 				return Value{}, nil
 			})
 			continue
@@ -290,13 +282,9 @@ func (vm *Instance) emitIdentGet(node ast.Ident) instruction {
 		return func(fbr *fiber) (Value, *Exception) {
 			return fbr.getCaptured(v), nil
 		}
-	case Value:
+	case Global:
 		return func(fbr *fiber) (Value, *Exception) {
-			return v, nil
-		}
-	case *Value:
-		return func(fbr *fiber) (Value, *Exception) {
-			return *v, nil
+			return *v.Value, nil
 		}
 	}
 
@@ -362,32 +350,33 @@ func (vm *Instance) emitIdentSet(node ast.Assign) instruction {
 			}
 
 			switch lhs := variable.(type) {
-			case Value:
-				if pkg, ok := lhs.asPackage(); ok {
-					index := fields.get(fa.Rhs)
-					ref, exists := pkg.globals[index]
-					if !exists {
-						panic(fmt.Errorf("symbol '%s' not found in package '%s'", iGet.Name, fa.Rhs))
-					}
-
-					// compile new value & return setter
-					value := vm.compile(node.Value)
-					return func(fbr *fiber) (Value, *Exception) {
-						value, err := value(fbr)
-						if err != nil {
-							return value, err
+			case Global:
+				if lhs.IsStatic {
+					if pkg, ok := lhs.asPackage(); ok {
+						ref, exists := pkg.globals[fields.get(fa.Rhs)]
+						if !exists {
+							panic(fmt.Errorf("symbol '%s' not found in package '%s'", iGet.Name, fa.Rhs))
 						}
 
-						*ref = value
-						return Value{}, nil
+						// compile new value & return setter
+						value := vm.compile(node.Value)
+						return func(fbr *fiber) (Value, *Exception) {
+							value, err := value(fbr)
+							if err != nil {
+								return value, err
+							}
+
+							*(ref.Value) = value
+							return Value{}, nil
+						}
 					}
+
+					panic("not a package")
 				}
 
-			case *Value:
 				// compile new value & return setter
 				value := vm.compile(node.Value)
 				index := fields.get(fa.Rhs)
-
 				return func(fbr *fiber) (Value, *Exception) {
 					if pkg, ok := lhs.asPackage(); ok {
 						ref, exists := pkg.globals[index]
@@ -400,10 +389,10 @@ func (vm *Instance) emitIdentSet(node ast.Assign) instruction {
 							return value, err
 						}
 
-						*ref = value
+						*(ref.Value) = value
 						return Value{}, nil
 					}
-					panic("FieldAccess LHS is not a package")
+					panic("not a package")
 				}
 			}
 		}
@@ -482,38 +471,80 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 		arguments[i] = vm.compile(arg)
 	}
 
-	// optimise: calling global functions
 	if iGet, isIdentGet := node.Fn.(ast.Ident); isIdentGet && vm.cp.inline {
 		variable, err := vm.cp.reach(iGet.Name)
 		if err != nil {
 			panic(err)
 		}
 
-		if value, isRef := variable.(*Value); isRef {
-			return func(fbr *fiber) (result Value, exc *Exception) {
-				// check if it is a user function
-				if fn, isUserFn := value.AsUserFn(); isUserFn {
-					if len(fn.args) != len(arguments) {
-						if fn.name != "λ" {
-							return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments))
-						}
-						return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments))
+		// optimise: calling global static functions
+		if global, isGlobal := variable.(Global); isGlobal && global.IsStatic {
+			if fn, isUserFn := global.AsUserFn(); isUserFn {
+				if len(fn.args) != len(arguments) {
+					if fn.name != "λ" {
+						panic(CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments)))
 					}
+					panic(CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments)))
+				}
 
-					// create space for all the locals
+				// optimise: call to ourselves (recursion)
+				if global.Value == vm.cp.closures.Last(0).this {
+					return func(fbr *fiber) (result Value, exc *Exception) {
+						// setup stack locals
+						base := len(fbr.stack)
+						for idx := range fn.capacity {
+							fbr.stack = append(fbr.stack, vm.newValue())
+
+							// evaluate arguments
+							if idx < len(arguments) {
+								arg, exc := arguments[idx](fbr)
+								if exc != nil {
+									return arg, exc
+								}
+
+								*(fbr.stack[base+idx]) = arg
+							}
+						}
+
+						// prep for execution & save currently captured values
+						prevBase := fbr.swapBase(base)
+						result, exc = fn.code(fbr)
+
+						// release non-escaping locals
+						for _, idx := range fn.recyclable {
+							vm.putValue(fbr.stack[base+idx])
+						}
+
+						// restore old state
+						fbr.popStack(fn.capacity)
+						fbr.swapBase(prevBase)
+
+						// return result but catch relevant signals
+						switch exc {
+						case returnSignal:
+							return result, nil
+						default:
+							return result, exc
+						}
+					}
+				}
+
+				// arbitrary call to a global
+				return func(fbr *fiber) (result Value, exc *Exception) {
+					// setup stack locals
 					base := len(fbr.stack)
-					for range fn.capacity {
+					for idx := range fn.capacity {
 						fbr.stack = append(fbr.stack, vm.newValue())
-					}
 
-					// evaluate arguments & push them on the stack
-					for idx, argument := range arguments {
-						v, err := argument(fbr)
-						if err != nil {
-							return v, err
+						// evaluate arguments
+						if idx < len(arguments) {
+							arg, exc := arguments[idx](fbr)
+							if exc != nil {
+								return arg, exc
+							}
+
+							*(fbr.stack[base+idx]) = arg
 						}
-
-						*(fbr.stack[base+idx]) = v
 					}
 
 					// prep for execution & save currently captured values
@@ -531,20 +562,14 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					fbr.swapBase(prevBase)
 					fbr.swapActive(prevFn)
 
-					// don't implicitly return the return value of the last executed instruction
+					// return result but catch relevant signals
 					switch exc {
-					case nil:
-						return Value{}, nil
 					case returnSignal:
 						return result, nil
 					default:
 						return result, exc
 					}
-				} else if res, err := fbr.tryNativeCall(*value, arguments); err != notFunction {
-					return res, err
 				}
-
-				return Value{}, CustomError("cannot call a non-function '%v'", *value)
 			}
 		}
 	}
@@ -566,20 +591,20 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments))
 			}
 
-			// create space for all the locals
+			// setup stack locals
 			base := len(fbr.stack)
-			for range fn.capacity {
+			for idx := range fn.capacity {
 				fbr.stack = append(fbr.stack, vm.newValue())
-			}
 
-			// evaluate arguments & push them on the stack
-			for idx, argument := range arguments {
-				v, err := argument(fbr)
-				if err != nil {
-					return v, err
+				// evaluate arguments
+				if idx < len(arguments) {
+					arg, exc := arguments[idx](fbr)
+					if exc != nil {
+						return arg, exc
+					}
+
+					*(fbr.stack[base+idx]) = arg
 				}
-
-				*(fbr.stack[base+idx]) = v
 			}
 
 			// prep for execution & save currently captured values
@@ -597,10 +622,8 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			fbr.swapBase(prevBase)
 			fbr.swapActive(prevFn)
 
-			// don't implicitly return the return value of the last executed instruction
+			// return result but catch relevant signals
 			switch exc {
-			case nil:
-				return Value{}, nil
 			case returnSignal:
 				return result, nil
 			default:
@@ -829,9 +852,9 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 			panic(err)
 		}
 
+		index := fields.get(node.Rhs)
 		switch lhs := variable.(type) {
 		case local:
-			index := fields.get(node.Rhs)
 			return func(fbr *fiber) (Value, *Exception) {
 				v := fbr.getLocal(lhs)
 				if pkg, ok := v.asPackage(); ok {
@@ -839,13 +862,12 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 					if !exists {
 						return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v' - package '%s' has no such symbol", node.Rhs, node, pkg.name)
 					}
-					return *value, nil
+					return *(value.Value), nil
 				}
 				panic("value is not a package")
 			}
 
 		case captured:
-			index := fields.get(node.Rhs)
 			return func(fbr *fiber) (Value, *Exception) {
 				v := fbr.getCaptured(lhs)
 				if pkg, ok := v.asPackage(); ok {
@@ -853,38 +875,35 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 					if !exists {
 						return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v' - package '%s' has no such symbol", node.Rhs, node, pkg.name)
 					}
-					return *value, nil
+					return *(value.Value), nil
 				}
 				panic("value is not a package")
 			}
 
-		case *Value:
-			index := fields.get(node.Rhs)
+		case Global:
+			if lhs.IsStatic {
+				if pkg, ok := lhs.asPackage(); ok {
+					global, exists := pkg.globals[index]
+					if !exists {
+						panic(fmt.Errorf("undefined symbol '%v' in '%v' - package '%s' has no such symbol", node.Rhs, node, pkg.name))
+					}
+
+					return func(fbr *fiber) (Value, *Exception) {
+						return *(global.Value), nil
+					}
+				}
+				panic("value is not a package")
+			}
 			return func(fbr *fiber) (Value, *Exception) {
 				if pkg, ok := lhs.asPackage(); ok {
 					value, exists := pkg.globals[index]
 					if !exists {
 						panic(RuntimeExceptionF("undefined symbol '%v' in '%v' - package '%s' has no such symbol", node.Rhs, node, pkg.name))
 					}
-					return *value, nil
+					return *(value.Value), nil
 				}
 				panic("value is not a package")
 			}
-
-		case Value:
-			if pkg, ok := lhs.asPackage(); ok {
-				index := fields.get(node.Rhs)
-				value, exists := pkg.globals[index]
-				if !exists {
-					panic(fmt.Errorf("undefined symbol '%v' in '%v' - package '%s' has no such symbol", node.Rhs, node, pkg.name))
-				}
-
-				return func(fbr *fiber) (Value, *Exception) {
-					return *value, nil
-				}
-			}
-		default:
-			panic(fmt.Errorf("implement %T", lhs))
 		}
 	}
 

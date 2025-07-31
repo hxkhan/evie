@@ -46,17 +46,16 @@ type runtime struct {
 	wg       sync.WaitGroup              // wait for all fibers to complete
 }
 
-type packageInstance struct {
-	name    string           // name of the package
-	globals map[int]*Value   // all global symbols
-	statics map[string]Value // per package statics
-	private ds.Set[string]   // set of private symbols
-}
-
-// Symbol is just a wrapper for a Value with an `IsPublic` field
-type Symbol struct {
+// Global is just a wrapper for a global variable reference
+type Global struct {
 	*Value
 	IsPublic bool
+	IsStatic bool
+}
+
+type packageInstance struct {
+	name    string         // name of the package
+	globals map[int]Global // all global symbols
 }
 
 // PackageContructor returns a new instance of a host package
@@ -151,22 +150,17 @@ func (pkg *packageInstance) SetSymbol(name string, value Value) (overridden bool
 	index := fields.get(name)
 	ref, exists := pkg.globals[index]
 	if exists {
-		*ref = value
+		*(ref.Value) = value
 	} else {
-		pkg.globals[index] = &value
+		pkg.globals[index] = Global{Value: &value}
 	}
 	return exists
 }
 
-func (pkg *packageInstance) GetSymbol(name string) (sym Symbol, exists bool) {
+func (pkg *packageInstance) GetSymbol(name string) (value Global, exists bool) {
 	index := fields.get(name)
-	ref, exists := pkg.globals[index]
-	if !exists {
-		return sym, false
-	}
-
-	_, private := pkg.private[name]
-	return Symbol{Value: ref, IsPublic: !private}, exists
+	value, exists = pkg.globals[index]
+	return value, exists
 }
 
 func (pkg *packageInstance) HasSymbol(name string) (exists bool) {
@@ -200,11 +194,6 @@ func (cp *compiler) reach(name string) (v any, err error) {
 	// 2. check package globals
 	if ref, exists := cp.pkg.globals[fields.get(name)]; exists {
 		return ref, nil
-	}
-
-	// 3. check package statics
-	if value, exists := cp.pkg.statics[name]; exists {
-		return value, nil
 	}
 
 	// 4. check universal statics

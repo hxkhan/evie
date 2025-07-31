@@ -7,6 +7,21 @@ import (
 	"github.com/hxkhan/evie/ds"
 )
 
+var fields = fieldreg{map[string]int{}}
+
+type fieldreg struct {
+	table map[string]int
+}
+
+func (fr fieldreg) get(field string) int {
+	index, exists := fr.table[field]
+	if !exists {
+		fr.table[field] = len(fr.table)
+		return len(fr.table) - 1
+	}
+	return index
+}
+
 type instruction func(fbr *fiber) (Value, *Exception)
 
 func (vm *Instance) compile(node ast.Node) instruction {
@@ -65,6 +80,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	case ast.Conditional:
 		return vm.emitConditional(node)
 
+	case ast.While:
+		return vm.emitWhile(node)
+
 	case ast.Fn:
 		return vm.emitFn(node)
 
@@ -95,9 +113,9 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 	if vm.cp.pkg == nil {
 		vm.cp.pkg = &packageInstance{
 			name:    node.Name,
-			globals: map[string]*Value{},
-			private: ds.Set[string]{},
+			globals: map[int]*Value{},
 			statics: map[string]Value{},
+			private: ds.Set[string]{},
 		}
 		vm.rt.packages[node.Name] = vm.cp.pkg
 	}
@@ -107,18 +125,7 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 	for _, name := range node.Imports {
 		importedPkg := vm.rt.packages[name]
 		if importedPkg == nil {
-			constructor, exists := vm.cp.constructors[name]
-			if !exists {
-				panic(fmt.Errorf("no constructor found for package %s", name))
-			}
-
-			// instantiate
-			importedPkg = &packageInstance{
-				name:    name,
-				globals: constructor(),
-				private: ds.Set[string]{},
-				statics: map[string]Value{},
-			}
+			importedPkg = vm.cp.resolver(name).(*packageInstance)
 
 			// save as loaded package
 			vm.rt.packages[name] = importedPkg
@@ -152,22 +159,24 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 	// 1. declare all symbols
 	for _, node := range node.Code {
 		if fn, isFn := node.(ast.Fn); isFn {
-			if _, exists := this.globals[fn.Name]; exists {
+			index := fields.get(fn.Name)
+			if _, exists := this.globals[index]; exists {
 				panic(fmt.Errorf("double declaration of %s", fn.Name))
 			}
-			this.globals[fn.Name] = &Value{}
+			this.globals[index] = &Value{}
 		} else if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
-			if _, exists := this.globals[iDec.Name]; exists {
+			index := fields.get(iDec.Name)
+			if _, exists := this.globals[index]; exists {
 				panic(fmt.Errorf("double declaration of %s", iDec.Name))
 			}
-			this.globals[iDec.Name] = &Value{}
+			this.globals[index] = &Value{}
 		}
 	}
 
 	// 2. physically move function initialization to the top
 	for _, node := range node.Code {
 		if fn, isFn := node.(ast.Fn); isFn {
-			global := this.globals[fn.Name]
+			global := this.globals[fields.get(fn.Name)]
 
 			vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, this: global})
 			vm.cp.closures.Last(0).scope.OpenBlock()
@@ -217,7 +226,7 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 
 		// compile global variable initialization in a special way because indices are pre declared
 		if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
-			global := this.globals[iDec.Name]
+			global := this.globals[fields.get(iDec.Name)]
 
 			value := vm.compile(iDec.Value)
 			code = append(code, func(fbr *fiber) (Value, *Exception) {
@@ -355,7 +364,8 @@ func (vm *Instance) emitIdentSet(node ast.Assign) instruction {
 			switch lhs := variable.(type) {
 			case Value:
 				if pkg, ok := lhs.asPackage(); ok {
-					ref, exists := pkg.globals[fa.Rhs]
+					index := fields.get(fa.Rhs)
+					ref, exists := pkg.globals[index]
 					if !exists {
 						panic(fmt.Errorf("symbol '%s' not found in package '%s'", iGet.Name, fa.Rhs))
 					}
@@ -376,9 +386,11 @@ func (vm *Instance) emitIdentSet(node ast.Assign) instruction {
 			case *Value:
 				// compile new value & return setter
 				value := vm.compile(node.Value)
+				index := fields.get(fa.Rhs)
+
 				return func(fbr *fiber) (Value, *Exception) {
 					if pkg, ok := lhs.asPackage(); ok {
-						ref, exists := pkg.globals[fa.Rhs]
+						ref, exists := pkg.globals[index]
 						if !exists {
 							panic(fmt.Errorf("symbol '%s' not found in package '%s'", iGet.Name, fa.Rhs))
 						}
@@ -477,67 +489,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			panic(err)
 		}
 
-		switch value := variable.(type) {
-		case *Value:
-			// optimise: recursion
-			if value == vm.cp.closures.Last(0).this {
-				//vm.log.printf("optimised recursive call to %s\n", iGet.Name)
-				return func(fbr *fiber) (result Value, exc *Exception) {
-					// check if it is a user function
-					if fn, isUserFn := value.AsUserFn(); isUserFn {
-						if len(fn.args) != len(arguments) {
-							if fn.name != "λ" {
-								return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments))
-							}
-							return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments))
-						}
-
-						// create space for all the locals
-						base := len(fbr.stack)
-						for range fn.capacity {
-							fbr.stack = append(fbr.stack, vm.newValue())
-						}
-
-						// evaluate arguments & push them on the stack
-						for idx, argument := range arguments {
-							v, err := argument(fbr)
-							if err != nil {
-								return v, err
-							}
-
-							*(fbr.stack[base+idx]) = v
-						}
-
-						// prep for execution & save currently captured values
-						prevBase := fbr.swapBase(base)
-						// prevFn := fbr.swapActive(fn) -- skip because caller and callee is the same
-						result, exc = fn.code(fbr)
-
-						// release non-escaping locals
-						for _, idx := range fn.recyclable {
-							vm.putValue(fbr.stack[base+idx])
-						}
-
-						// restore old state
-						fbr.popStack(fn.capacity)
-						fbr.swapBase(prevBase)
-						// fbr.swapActive(prevFn) -- skip because caller and callee is the same
-
-						// don't implicitly return the return value of the last executed instruction
-						switch exc {
-						case nil:
-							return Value{}, nil
-						case returnSignal:
-							return result, nil
-						default:
-							return result, exc
-						}
-					}
-
-					return Value{}, CustomError("cannot call a non-function '%v'", *value)
-				}
-			}
-
+		if value, isRef := variable.(*Value); isRef {
 			return func(fbr *fiber) (result Value, exc *Exception) {
 				// check if it is a user function
 				if fn, isUserFn := value.AsUserFn(); isUserFn {
@@ -588,6 +540,8 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					default:
 						return result, exc
 					}
+				} else if res, err := fbr.tryNativeCall(*value, arguments); err != notFunction {
+					return res, err
 				}
 
 				return Value{}, CustomError("cannot call a non-function '%v'", *value)
@@ -781,6 +735,32 @@ func (vm *Instance) emitConditional(node ast.Conditional) instruction {
 	}
 }
 
+func (vm *Instance) emitWhile(node ast.While) instruction {
+	condition := vm.compile(node.Condition)
+	action := vm.compile(node.Action)
+
+	return func(fbr *fiber) (Value, *Exception) {
+		for {
+			// evaluate condition
+			v, err := condition(fbr)
+			if err != nil {
+				return v, err
+			}
+
+			if !v.IsTruthy() {
+				break
+			}
+
+			// evaluate action
+			v, err = action(fbr)
+			if err != nil {
+				return v, err
+			}
+		}
+		return Value{}, nil
+	}
+}
+
 func (vm *Instance) emitBlock(node ast.Block) instruction {
 	vm.cp.closures.Last(0).scope.OpenBlock()
 	defer vm.cp.closures.Last(0).scope.CloseBlock()
@@ -843,12 +823,6 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 }
 
 func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
-	// don't clutter the global namespace
-	type cachedPkgField struct {
-		pkg   *packageInstance
-		field *Value
-	}
-
 	if iGet, isIdentGet := node.Lhs.(ast.Ident); isIdentGet {
 		variable, err := vm.cp.reach(iGet.Name)
 		if err != nil {
@@ -857,79 +831,41 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 
 		switch lhs := variable.(type) {
 		case local:
-			// optimise: call site caching
-			var cached cachedPkgField
+			index := fields.get(node.Rhs)
 			return func(fbr *fiber) (Value, *Exception) {
 				v := fbr.getLocal(lhs)
-
 				if pkg, ok := v.asPackage(); ok {
-					// 1. check cache (fast path)
-					if pkg == cached.pkg {
-						vm.log.cacheHit(node)
-						return *cached.field, nil
-					}
-
-					vm.log.cacheMiss(node)
-					// 1. do map lookup (slow path)
-					value, exists := pkg.globals[node.Rhs]
+					value, exists := pkg.globals[index]
 					if !exists {
 						return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v' - package '%s' has no such symbol", node.Rhs, node, pkg.name)
 					}
-
-					// 3. cache the pkg/field
-					cached = cachedPkgField{pkg, value}
 					return *value, nil
 				}
 				panic("value is not a package")
 			}
 
 		case captured:
-			// optimise: call site caching
-			var cached cachedPkgField
+			index := fields.get(node.Rhs)
 			return func(fbr *fiber) (Value, *Exception) {
 				v := fbr.getCaptured(lhs)
-
 				if pkg, ok := v.asPackage(); ok {
-					// 1. check cache (fast path)
-					if pkg == cached.pkg {
-						vm.log.cacheHit(node)
-						return *cached.field, nil
-					}
-
-					vm.log.cacheMiss(node)
-					// 1. do map lookup (slow path)
-					value, exists := pkg.globals[node.Rhs]
+					value, exists := pkg.globals[index]
 					if !exists {
 						return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v' - package '%s' has no such symbol", node.Rhs, node, pkg.name)
 					}
-
-					// 3. cache the pkg/field
-					cached = cachedPkgField{pkg, value}
 					return *value, nil
 				}
 				panic("value is not a package")
 			}
 
 		case *Value:
-			// optimise: call site caching
-			var cached cachedPkgField
+			index := fields.get(node.Rhs)
 			return func(fbr *fiber) (Value, *Exception) {
 				if pkg, ok := lhs.asPackage(); ok {
-					// 1. check cache (fast path)
-					if pkg == cached.pkg {
-						vm.log.cacheHit(node)
-						return *cached.field, nil
-					}
-
-					vm.log.cacheMiss(node)
-					// 1. do map lookup (slow path)
-					value, exists := pkg.globals[node.Rhs]
+					value, exists := pkg.globals[index]
 					if !exists {
 						panic(RuntimeExceptionF("undefined symbol '%v' in '%v' - package '%s' has no such symbol", node.Rhs, node, pkg.name))
 					}
-
-					// 3. cache the pkg/field
-					cached = cachedPkgField{pkg, value}
 					return *value, nil
 				}
 				panic("value is not a package")
@@ -937,7 +873,8 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 
 		case Value:
 			if pkg, ok := lhs.asPackage(); ok {
-				value, exists := pkg.globals[node.Rhs]
+				index := fields.get(node.Rhs)
+				value, exists := pkg.globals[index]
 				if !exists {
 					panic(fmt.Errorf("undefined symbol '%v' in '%v' - package '%s' has no such symbol", node.Rhs, node, pkg.name))
 				}

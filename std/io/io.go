@@ -6,12 +6,13 @@ import (
 	"github.com/hxkhan/evie/vm"
 )
 
-func Constructor() map[string]*vm.Value {
-	return map[string]*vm.Value{
-		"print":   &print,
-		"println": &println,
-		"input":   &input,
-	}
+func Construct() vm.Package {
+	pkg := vm.NewHostPackage("io")
+	pkg.SetSymbol("print", print)
+	pkg.SetSymbol("println", println)
+	pkg.SetSymbol("input", input)
+	pkg.SetSymbol("dec", dec)
+	return pkg
 }
 
 var print = vm.BoxGoFunc(func(output vm.Value) (vm.Value, *vm.Exception) {
@@ -22,6 +23,15 @@ var print = vm.BoxGoFunc(func(output vm.Value) (vm.Value, *vm.Exception) {
 var println = vm.BoxGoFunc(func(output vm.Value) (vm.Value, *vm.Exception) {
 	fmt.Println(output)
 	return vm.Value{}, nil
+})
+
+var dec = vm.BoxGoFunc(func(n vm.Value) (vm.Value, *vm.Exception) {
+	f64, ok := n.AsFloat64()
+	if !ok {
+		return vm.Value{}, vm.ErrTypes
+	}
+
+	return vm.BoxFloat64(f64 - 1), nil
 })
 
 var input = vm.BoxGoFunc(func(output vm.Value) (vm.Value, *vm.Exception) {

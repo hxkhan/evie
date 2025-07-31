@@ -6,12 +6,10 @@ import (
 	"github.com/hxkhan/evie/vm"
 )
 
-func Constructor() map[string]*vm.Value {
-	readFile := vm.BoxGoFunc(decode)
-
-	return map[string]*vm.Value{
-		"readFile": &readFile,
-	}
+func Construct() vm.Package {
+	pkg := vm.NewHostPackage("json")
+	pkg.SetSymbol("decode", vm.BoxGoFunc(decode))
+	return pkg
 }
 
 func decode(v vm.Value) (vm.Value, *vm.Exception) {

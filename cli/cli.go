@@ -50,7 +50,7 @@ func main() {
 		DisableInlining: !(*inline),
 		Metrics:         *m,
 		//UniversalStatics: evie.ImplicitBuilitins(),
-		PackageContructors: evie.StandardLibrary(),
+		ImportResolver: resolver,
 	})
 	_, err = evm.EvalScript(input)
 	if err != nil {
@@ -98,8 +98,14 @@ func main() {
 		fmt.Printf("Execution time: %v\n", difference)
 	}
 
-	if *m {
+	/* if *m {
 		fmt.Println("Metrics")
-		evm.Metrics()
+	} */
+}
+
+func resolver(name string) vm.Package {
+	if constructor, exists := evie.StandardLibraryPackageConstructors[name]; exists {
+		return constructor()
 	}
+	panic(fmt.Errorf("constructor not found for '%v'", name))
 }

@@ -6,12 +6,10 @@ import (
 	"github.com/hxkhan/evie/vm"
 )
 
-func Constructor() map[string]*vm.Value {
-	timer := vm.BoxGoFunc(timer)
-
-	return map[string]*vm.Value{
-		"timer": &timer,
-	}
+func Construct() vm.Package {
+	pkg := vm.NewHostPackage("io")
+	pkg.SetSymbol("timer", vm.BoxGoFunc(timer))
+	return pkg
 }
 
 func timer(duration vm.Value) (vm.Value, *vm.Exception) {

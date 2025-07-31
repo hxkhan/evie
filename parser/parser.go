@@ -195,6 +195,8 @@ func (ps *parser) handleWords(main token.Token) ast.Node {
 		return ast.Input[bool]{Pos: main.Line, Value: false}
 	case "if":
 		return ps.parseConditional(main)
+	case "while":
+		return ps.parseWhile(main)
 	default:
 		return ps.parseIdentOrCall(main)
 	}
@@ -241,13 +243,7 @@ func (ps *parser) parseIdentOrCall(main token.Token) ast.Node {
 
 func (ps *parser) parseConditional(main token.Token) ast.Node {
 	node := ast.Conditional{Pos: main.Line}
-	if !ps.consume("(") {
-		ps.panic(main, "'('")
-	}
 	node.Condition = ps.parseExpression(0)
-	if !ps.consume(")") {
-		ps.panic(main, "')'")
-	}
 	if !ps.consume("{") {
 		ps.panic(main, "'{'")
 	}
@@ -262,6 +258,16 @@ func (ps *parser) parseConditional(main token.Token) ast.Node {
 			node.Otherwise = ps.parseBlock()
 		}
 	}
+	return node
+}
+
+func (ps *parser) parseWhile(main token.Token) ast.Node {
+	node := ast.While{Pos: main.Line}
+	node.Condition = ps.parseExpression(0)
+	if !ps.consume("{") {
+		ps.panic(main, "'{'")
+	}
+	node.Action = ps.parseBlock()
 	return node
 }
 

@@ -6,14 +6,11 @@ import (
 	"github.com/hxkhan/evie/vm"
 )
 
-func Constructor() map[string]*vm.Value {
-	split := vm.BoxGoFunc(split)
-	join := vm.BoxGoFunc(join)
-
-	return map[string]*vm.Value{
-		"split": &split,
-		"join":  &join,
-	}
+func Construct() vm.Package {
+	pkg := vm.NewHostPackage("builtin")
+	pkg.SetSymbol("split", vm.BoxGoFunc(split))
+	pkg.SetSymbol("join", vm.BoxGoFunc(join))
+	return pkg
 }
 
 func split(str, sep vm.Value) (vm.Value, *vm.Exception) {

@@ -13,21 +13,26 @@ func main() {
 	// universal-statics
 	statics := map[string]vm.Value{
 		"pi":     vm.BoxFloat64(3.14159),
-		"time":   vm.ConstructPackage(time.Constructor).Box(),
+		"time":   time.Construct().Box(),
 		"before": vm.BoxString("Hello World"),
 	}
 
 	// package-statics for packages that import them via the header
 	// e.g. package foo imports("bar")
-	constructors := []vm.PackageContructor{
-		fs.Constructor,
-		json.Constructor,
+	resolver := func(name string) vm.Package {
+		switch name {
+		case "fs":
+			return fs.Construct()
+		case "json":
+			return json.Construct()
+		}
+		panic(fmt.Errorf("constructor not found for '%v'", name))
 	}
 
 	// create a vm with our options
 	evm := vm.New(vm.Options{
-		UniversalStatics:   statics,
-		PackageContructors: constructors,
+		UniversalStatics: statics,
+		ImportResolver:   resolver,
 	})
 
 	// evaluate our script

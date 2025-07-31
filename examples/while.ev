@@ -1,0 +1,9 @@
+package main
+
+fn main() {
+    x := 10
+    while x > 0 {
+        echo x
+        x -= 1
+    }
+}

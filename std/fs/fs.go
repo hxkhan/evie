@@ -6,12 +6,10 @@ import (
 	"github.com/hxkhan/evie/vm"
 )
 
-func Constructor() map[string]*vm.Value {
-	readFile := vm.BoxGoFunc(readFile)
-
-	return map[string]*vm.Value{
-		"readFile": &readFile,
-	}
+func Construct() vm.Package {
+	pkg := vm.NewHostPackage("fs")
+	pkg.SetSymbol("readFile", vm.BoxGoFunc(readFile))
+	return pkg
 }
 
 func readFile(fileName vm.Value) (vm.Value, *vm.Exception) {

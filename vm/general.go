@@ -34,7 +34,7 @@ type compiler struct {
 	pkg      *packageInstance   // the package being compiled right now
 	closures ds.Slice[*closure] // currently open closures
 
-	constructors map[string]PackageContructor // maps package names to their contructors for easy access
+	resolver func(name string) Package
 }
 
 type runtime struct {
@@ -47,12 +47,13 @@ type runtime struct {
 }
 
 type packageInstance struct {
-	name    string            // name of the package
-	globals map[string]*Value // all global symbols
-	private ds.Set[string]    // set of private symbols
-	statics map[string]Value  // per package statics
+	name    string           // name of the package
+	globals map[int]*Value   // all global symbols
+	statics map[string]Value // per package statics
+	private ds.Set[string]   // set of private symbols
 }
 
+// Symbol is just a wrapper for a Value with an `IsPublic` field
 type Symbol struct {
 	*Value
 	IsPublic bool
@@ -61,37 +62,24 @@ type Symbol struct {
 // PackageContructor returns a new instance of a host package
 type PackageContructor func() map[string]*Value
 
-// ConstructPackage creates a package instance from the constructor
-func ConstructPackage(pc PackageContructor) Package {
-	return &packageInstance{
-		name:    packageName(pc),
-		globals: pc(),
-		private: ds.Set[string]{},
-		statics: map[string]Value{},
-	}
-}
-
 type Options struct {
-	LogCache           bool                // log cache hits/misses
-	LogCaptures        bool                // log when and what is captured
-	DisableInlining    bool                // use dispatch inlining (combining instructions into one)
-	Metrics            bool                // collect metrics (affects performance)
-	TopLevelLogic      bool                // whether to only allow declarations at top level
-	PackageContructors []PackageContructor // to instantiate host packages when user packages import them
-	UniversalStatics   map[string]Value    // implicitly visible to all user packages
+	LogCache        bool // log cache hits/misses
+	LogCaptures     bool // log when and what is captured
+	DisableInlining bool // use dispatch inlining (combining instructions into one)
+	Metrics         bool // collect metrics (affects performance)
+	TopLevelLogic   bool // whether to only allow declarations at top level
+
+	ImportResolver   func(name string) Package // to instantiate host packages when user packages import them
+	UniversalStatics map[string]Value          // implicitly visible to all user packages
 }
 
 func New(opts Options) *Instance {
-	constructors := make(map[string]PackageContructor, len(opts.PackageContructors))
-	for _, constructor := range opts.PackageContructors {
-		constructors[packageName(constructor)] = constructor
-	}
 
 	return &Instance{
 		compiler{
-			constructors: constructors,
-			statics:      opts.UniversalStatics,
-			inline:       !opts.DisableInlining,
+			resolver: opts.ImportResolver,
+			statics:  opts.UniversalStatics,
+			inline:   !opts.DisableInlining,
 		},
 		runtime{
 			packages: make(map[string]*packageInstance),
@@ -105,15 +93,9 @@ func New(opts Options) *Instance {
 		},
 		logger{
 			Logger:      *log.New(os.Stdout, "", 0),
-			logCache:    opts.LogCache,
 			logCaptures: opts.LogCaptures,
 		},
 	}
-}
-
-func (vm *Instance) Metrics() {
-	fmt.Println("Cache hits:", vm.log.cacheHits)
-	fmt.Println("Cache miss:", vm.log.cacheMisses)
 }
 
 func (vm *Instance) EvalNode(node ast.Node) (Value, error) {
@@ -156,6 +138,7 @@ func (vm *Instance) Packages() iter.Seq[Package] {
 	}
 }
 
+// GetPackage retrieves a loaded package, if not found; then nil is returned
 func (vm *Instance) GetPackage(name string) (pkg Package) {
 	pkg, exists := vm.rt.packages[name]
 	if !exists {
@@ -164,25 +147,20 @@ func (vm *Instance) GetPackage(name string) (pkg Package) {
 	return pkg
 }
 
-func (vm *Instance) GetElseCreatePackage(name string) (pkg Package) {
-	pkg, exists := vm.rt.packages[name]
+func (pkg *packageInstance) SetSymbol(name string, value Value) (overridden bool) {
+	index := fields.get(name)
+	ref, exists := pkg.globals[index]
 	if exists {
-		return pkg
+		*ref = value
+	} else {
+		pkg.globals[index] = &value
 	}
-
-	new := &packageInstance{
-		name:    name,
-		globals: map[string]*Value{},
-		private: ds.Set[string]{},
-		statics: map[string]Value{},
-	}
-
-	vm.rt.packages[name] = new
-	return new
+	return exists
 }
 
 func (pkg *packageInstance) GetSymbol(name string) (sym Symbol, exists bool) {
-	ref, exists := pkg.globals[name]
+	index := fields.get(name)
+	ref, exists := pkg.globals[index]
 	if !exists {
 		return sym, false
 	}
@@ -192,7 +170,7 @@ func (pkg *packageInstance) GetSymbol(name string) (sym Symbol, exists bool) {
 }
 
 func (pkg *packageInstance) HasSymbol(name string) (exists bool) {
-	_, exists = pkg.globals[name]
+	_, exists = pkg.globals[fields.get(name)]
 	return exists
 }
 
@@ -220,7 +198,7 @@ func (cp *compiler) reach(name string) (v any, err error) {
 	}
 
 	// 2. check package globals
-	if ref, exists := cp.pkg.globals[name]; exists {
+	if ref, exists := cp.pkg.globals[fields.get(name)]; exists {
 		return ref, nil
 	}
 

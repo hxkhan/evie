@@ -1,0 +1,16 @@
+package main imports("io")
+
+fn main() {
+    test := io
+
+    n := 10000000
+    while n > 0 {
+        n = test.dec(n) // swap io with test
+    }   
+}
+
+// for n := 10000000
+// direct static call to io.dec:   ~120ms
+// via local variable as test.dec: ~130ms --- with inline cache
+// via local variable as test.dec: ~210ms --- with string lookup
+// via local variable as test.dec: ~145ms --- with integer lookup

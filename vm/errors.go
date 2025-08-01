@@ -70,3 +70,7 @@ func TypeError(args []Value, expected ...string) *Exception {
 func RuntimeExceptionF(format string, a ...any) *Exception {
 	return &Exception{name: "RuntimeException", message: fmt.Sprintf(format, a...)}
 }
+
+func TypeErrorF(format string, a ...any) *Exception {
+	return &Exception{name: "TypeError", message: fmt.Sprintf(format, a...)}
+}

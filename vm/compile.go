@@ -355,9 +355,13 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 			case Global:
 				if lhs.IsStatic {
 					if pkg, ok := lhs.asPackage(); ok {
-						ref, exists := pkg.globals[fields.get(fa.Rhs)]
+						field, exists := pkg.globals[fields.get(fa.Rhs)]
 						if !exists {
-							panic(fmt.Errorf("symbol '%s' not found in package '%s'", iGet.Name, fa.Rhs))
+							panic(TypeErrorF("Symbol '%s' not found in package '%s'.", fa.Rhs, pkg.name))
+						}
+
+						if field.IsStatic {
+							panic(TypeErrorF("Assignment to constant symbol '%v' of package '%v'.", fa.Rhs, pkg.name))
 						}
 
 						// compile new value & return setter
@@ -368,7 +372,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 								return value, err
 							}
 
-							*(ref.Value) = value
+							*(field.Value) = value
 							return Value{}, nil
 						}
 					}
@@ -381,9 +385,13 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 				index := fields.get(fa.Rhs)
 				return func(fbr *fiber) (Value, *Exception) {
 					if pkg, ok := lhs.asPackage(); ok {
-						ref, exists := pkg.globals[index]
+						field, exists := pkg.globals[index]
 						if !exists {
-							panic(fmt.Errorf("symbol '%s' not found in package '%s'", iGet.Name, fa.Rhs))
+							panic(TypeErrorF("Symbol '%s' not found in package '%s'.", fa.Rhs, pkg.name))
+						}
+
+						if field.IsStatic {
+							panic(TypeErrorF("Assignment to constant symbol '%v' of package '%v'.", fa.Rhs, pkg.name))
 						}
 
 						value, err := value(fbr)
@@ -391,7 +399,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 							return value, err
 						}
 
-						*(ref.Value) = value
+						*(field.Value) = value
 						return Value{}, nil
 					}
 					panic("not a package")

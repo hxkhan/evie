@@ -2,7 +2,8 @@ package main imports("io")
 
 fn main() {
     name := io.input("Please enter your name: ")
+    age := io.input("Please enter your age: ")
 
-    io.print("Hello ")
-    io.println(name)
+    io.println("Hello " + name + "!")
+    io.println("You are " + str(age) + " years old!")
 }

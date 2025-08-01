@@ -33,7 +33,7 @@
 	  {
 		"comment": "Constant",
 		"name": "constant.language.evie",
-		"match": "\\b(null)\\b"
+		"match": "\\b(nil)\\b"
 	  },
 	  {
 		"comment": "Built-in functions",

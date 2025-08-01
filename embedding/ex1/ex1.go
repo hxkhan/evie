@@ -3,28 +3,24 @@ package main
 import (
 	"fmt"
 
-	"github.com/hxkhan/evie/std/fs"
-	"github.com/hxkhan/evie/std/json"
+	"github.com/hxkhan/evie/std/io"
 	"github.com/hxkhan/evie/std/time"
 	"github.com/hxkhan/evie/vm"
 )
 
 func main() {
 	// universal-statics
-	statics := map[string]vm.Value{
-		"pi":     vm.BoxFloat64(3.14159),
-		"time":   time.Construct().Box(),
-		"before": vm.BoxString("Hello World"),
+	statics := map[string]*vm.Value{
+		"pi":   vm.BoxFloat64(3.14159).Allocate(), // constant value
+		"time": time.Construct().Box().Allocate(), // already instantiated package
 	}
 
 	// package-statics for packages that import them via the header
 	// e.g. package foo imports("bar")
 	resolver := func(name string) vm.Package {
 		switch name {
-		case "fs":
-			return fs.Construct()
-		case "json":
-			return json.Construct()
+		case "io":
+			return io.Construct()
 		}
 		panic(fmt.Errorf("constructor not found for '%v'", name))
 	}
@@ -37,16 +33,14 @@ func main() {
 
 	// evaluate our script
 	result, err := evm.EvalScript([]byte(
-		`package main imports("fs")
+		`package main imports("io")
 		
-		fn main() {
-            after := "Bye World"
+		fn add(a, b) {
+            io.println("add called in the evie world")
 
-            echo before
-            await time.timer(pi * 1000)
-            echo after
-
-            return await fs.readFile("file.txt")
+			io.println("about to start awaiting PI seconds")
+            await time.timer(pi * 1000) // wait 3.14 seconds
+            return a + b
 		}`,
 	))
 
@@ -56,7 +50,7 @@ func main() {
 	}
 
 	// print the result (nothing in this case)
-	if result.IsTruthy() {
+	if !result.IsNil() {
 		fmt.Println(result)
 	}
 
@@ -67,27 +61,25 @@ func main() {
 	}
 
 	// get a reference to the main symbol
-	symMain, exists := pkgMain.GetSymbol("main")
+	symAdd, exists := pkgMain.GetSymbol("add")
 	if !exists {
 		panic("symbol fib not found")
 	}
 
 	// type assert it
-	main, ok := symMain.AsUserFn()
+	add, ok := symAdd.AsUserFn()
 	if !ok {
 		panic("symbol fib is not a function")
 	}
 
 	// call it & check for errors
-	result, err = main.Call()
+	result, err = add.Call(vm.BoxFloat64(3), vm.BoxFloat64(2))
 	if err != nil {
 		panic(err)
 	}
 
 	// print the result
-	if !result.IsNull() {
-		if buffer, ok := result.AsBuffer(); ok {
-			fmt.Println(string(buffer))
-		}
+	if !result.IsNil() {
+		fmt.Println(result)
 	}
 }

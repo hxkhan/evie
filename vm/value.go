@@ -17,7 +17,7 @@ When we are storing a reference, the scalar tells us the type of the reference.
 So how do we know what it is? We follow some basic rules.
 
 RULES:
-	1.  null:    the pointer has to be equal to nil; the scalar is irrelevant
+	1.  nil:     the pointer has to be equal to nil; the scalar is irrelevant
 	2.  bool:    the pointer has to be equal to boolType; the scalar is 0 for false else true
 	3.  float64: the pointer has to be equal to f64Type; the scalar then stores the value
 	4.  string:  the pointer has to be none of (f64Type, boolType); the scalar has to be stringType
@@ -30,7 +30,7 @@ RULES:
 
 Another alternative to these two is using this exact same Value struct with different rules.
 The scalar would use nan-tagging and would either be a valid float64 or a NaN and contain meta data that
-would suggest if it's null, a bool, an int32 (if needed) or a reference value,
+would suggest if it is nil, a bool, an int32 (if needed) or a reference value,
 in the last case, we would use the pointer part of the struct and cast it to the appropriate type.
 Although arguably simpler in design, we lose 64 bit integers so idk.
 */
@@ -134,7 +134,7 @@ func BoxCustom(cv CustomValue) Value {
 	return Value{scalar: customType, pointer: unsafe.Pointer(&cv)}
 }
 
-func (x Value) IsNull() bool {
+func (x Value) IsNil() bool {
 	return x.pointer == nil
 }
 
@@ -214,6 +214,11 @@ func (x Value) AsCustom() (cv CustomValue, ok bool) {
 	return *(*CustomValue)(x.pointer), true
 }
 
+// Allocate will copy the current value to the heap and return a pointer to it
+func (x Value) Allocate() *Value {
+	return &x
+}
+
 func isKnown(p unsafe.Pointer) bool {
 	switch p {
 	case nil, f64Type, boolType:
@@ -286,7 +291,7 @@ func (x Value) Equals(y Value) bool {
 func (x Value) String() string {
 	switch x.pointer {
 	case nil:
-		return "null"
+		return "nil"
 	case boolType:
 		if x.scalar == 0 {
 			return "false"
@@ -358,7 +363,7 @@ func (x Value) String() string {
 func (x Value) TypeOf() string {
 	switch x.pointer {
 	case nil:
-		return "null"
+		return "nil"
 	case boolType:
 		return "bool"
 	case f64Type:

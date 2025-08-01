@@ -462,7 +462,6 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 				v = fbr.getCapturedByRef(ref.index)
 			}
 			captured[i] = v
-			vm.log.capturef("RT: closure => Capture(%v) -> %v -> %v\n", i, ref, v)
 		}
 
 		// create the user fn & return it
@@ -931,33 +930,35 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 		switch v := variable.(type) {
 		case local:
 			// optimise: rhs being a constant
-			if rhs, isInput := node.Rhs.(ast.Input[float64]); isInput {
+			if input, isInput := node.Rhs.(ast.Input[float64]); isInput {
+				rhs := input.Value
+
 				switch node.Operator {
 				case ast.AddOp:
 					return func(fbr *fiber) (Value, *Exception) {
-						a := fbr.getLocal(v)
-						if a, ok := a.AsFloat64(); ok {
-							return BoxFloat64(a + rhs.Value), nil
+						lhs := fbr.getLocal(v)
+						if lhs, ok := lhs.AsFloat64(); ok {
+							return BoxFloat64(lhs + rhs), nil
 						}
-						return Value{}, operatorError("+", a, rhs.Value)
+						return Value{}, operatorError("+", lhs, BoxFloat64(rhs))
 					}
 
 				case ast.SubOp:
 					return func(fbr *fiber) (Value, *Exception) {
-						a := fbr.getLocal(v)
-						if a, ok := a.AsFloat64(); ok {
-							return BoxFloat64(a - rhs.Value), nil
+						lhs := fbr.getLocal(v)
+						if lhs, ok := lhs.AsFloat64(); ok {
+							return BoxFloat64(lhs - rhs), nil
 						}
-						return Value{}, operatorError("-", a, rhs.Value)
+						return Value{}, operatorError("-", lhs, BoxFloat64(rhs))
 					}
 
 				case ast.LtOp:
 					return func(fbr *fiber) (Value, *Exception) {
-						a := fbr.getLocal(v)
-						if a, ok := a.AsFloat64(); ok {
-							return BoxBool(a < rhs.Value), nil
+						lhs := fbr.getLocal(v)
+						if lhs, ok := lhs.AsFloat64(); ok {
+							return BoxBool(lhs < rhs), nil
 						}
-						return Value{}, operatorError("<", a, rhs.Value)
+						return Value{}, operatorError("<", lhs, BoxFloat64(rhs))
 					}
 				}
 			}
@@ -978,6 +979,13 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							return BoxFloat64(a + b), nil
 						}
 					}
+
+					if a, ok := a.AsString(); ok {
+						if b, ok := b.AsString(); ok {
+							return BoxString(a + b), nil
+						}
+					}
+
 					return Value{}, operatorError("+", a, b)
 				}
 			case ast.SubOp:
@@ -1029,7 +1037,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 				if a, ok := lhs.AsFloat64(); ok {
 					return BoxFloat64(a + float64(rhs.Value)), nil
 				}
-				return Value{}, operatorError("+", lhs, rhs)
+				return Value{}, operatorError("+", lhs, BoxFloat64(rhs.Value))
 			}
 
 		case ast.SubOp:
@@ -1042,7 +1050,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 				if a, ok := lhs.AsFloat64(); ok {
 					return BoxFloat64(a - float64(rhs.Value)), nil
 				}
-				return Value{}, operatorError("-", lhs, rhs)
+				return Value{}, operatorError("-", lhs, BoxFloat64(rhs.Value))
 			}
 
 		case ast.LtOp:
@@ -1055,7 +1063,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 				if a, ok := lhs.AsFloat64(); ok {
 					return BoxBool(a < float64(rhs.Value)), nil
 				}
-				return Value{}, operatorError("<", lhs, rhs)
+				return Value{}, operatorError("<", lhs, BoxFloat64(rhs.Value))
 			}
 		}
 	}
@@ -1078,6 +1086,12 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if a, ok := a.AsFloat64(); ok {
 				if b, ok := b.AsFloat64(); ok {
 					return BoxFloat64(a + b), nil
+				}
+			}
+
+			if a, ok := a.AsString(); ok {
+				if b, ok := b.AsString(); ok {
+					return BoxString(a + b), nil
 				}
 			}
 

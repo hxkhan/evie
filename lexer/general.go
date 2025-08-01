@@ -8,15 +8,6 @@ import (
 
 const iEOS rune = 0x03 // 0x03 = End of Source
 
-// all recognized keywords
-/* var keywords = []string{
-	"package",
-	"null", "true", "false",
-	"fn", "return",
-	"go", "await", "echo",
-	"if", "else",
-} */
-
 type Lexer struct {
 	src    []byte    // the whole input
 	cursor int       // current position in source

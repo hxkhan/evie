@@ -18,7 +18,7 @@ type parser struct {
 	last token.Token
 }
 
-var keywords = []string{"package", "null", "true", "false", "fn", "return", "go", "await", "echo", "if", "else"}
+var keywords = []string{"package", "nil", "true", "false", "fn", "return", "go", "await", "echo", "if", "else"}
 
 var operators = map[string]ast.Operator{
 	"+": ast.AddOp, "-": ast.SubOp, "*": ast.MulOp, "/": ast.DivOp,
@@ -179,7 +179,7 @@ func (ps *parser) handleWords(main token.Token) ast.Node {
 		return ast.Go{Pos: main.Line, Fn: ps.parseExpression(0)}
 	case "await":
 		return ps.parseAwait(main)
-	case "null":
+	case "nil":
 		return ast.Input[struct{}]{Pos: main.Line}
 	case "true":
 		return ast.Input[bool]{Pos: main.Line, Value: true}

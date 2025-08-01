@@ -2,7 +2,7 @@ package main imports("io")
 
 fn main() {
     // 1 layer of capture
-    printer := single()
+    var printer := single()
     printer()
 
     // 2 layers of capture

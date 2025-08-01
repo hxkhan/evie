@@ -43,8 +43,8 @@ func CustomError(msg string, a ...any) *Exception {
 	return &Exception{"RuntimeError", fmt.Sprintf(msg, a...)}
 }
 
-func operatorError(op string, a any, b any) *Exception {
-	return &Exception{"RuntimeError", fmt.Sprintf("cannot apply '%v' operator on '%v' and '%v'", op, a, b)}
+func operatorError(op string, a Value, b Value) *Exception {
+	return &Exception{"RuntimeError", fmt.Sprintf("cannot apply '%v' operator on a '%v' and '%v'.", op, a.TypeOf(), b.TypeOf())}
 }
 
 func TypeError(args []Value, expected ...string) *Exception {

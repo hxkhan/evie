@@ -86,7 +86,7 @@ func main() {
 	evm.WaitForNoActivity()
 	difference := time.Since(before)
 
-	if !res.IsNull() {
+	if !res.IsNil() {
 		fmt.Println(res)
 	}
 

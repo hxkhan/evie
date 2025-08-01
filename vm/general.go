@@ -28,8 +28,8 @@ type closure struct {
 }
 
 type compiler struct {
-	inline  bool             // use dispatch inlining (combining instructions into one)
-	statics map[string]Value // implicitly available to all user packages
+	inline  bool              // use dispatch inlining (combining instructions into one)
+	statics map[string]*Value // implicitly available to all user packages
 
 	pkg      *packageInstance   // the package being compiled right now
 	closures ds.Slice[*closure] // currently open closures
@@ -69,11 +69,10 @@ type Options struct {
 	TopLevelLogic   bool // whether to only allow declarations at top level
 
 	ImportResolver   func(name string) Package // to instantiate host packages when user packages import them
-	UniversalStatics map[string]Value          // implicitly visible to all user packages
+	UniversalStatics map[string]*Value         // implicitly visible to all user packages
 }
 
 func New(opts Options) *Instance {
-
 	return &Instance{
 		compiler{
 			resolver: opts.ImportResolver,
@@ -196,9 +195,16 @@ func (cp *compiler) reach(name string) (v any, err error) {
 		return ref, nil
 	}
 
-	// 4. check universal statics
+	// 3. check universal statics
 	if value, exists := cp.statics[name]; exists {
-		return value, nil
+		// wrap as a global
+		return Global{Value: value, IsPublic: true, IsStatic: true}, nil
+	}
+
+	// 4. check builtins
+	if value, exists := builtins[name]; exists {
+		// wrap as a global
+		return Global{Value: value, IsPublic: true, IsStatic: true}, nil
 	}
 
 	return nil, fmt.Errorf("cp.reach(\"%v\") -> unreachable symbol", name)

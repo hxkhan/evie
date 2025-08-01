@@ -4,8 +4,9 @@ import "github.com/hxkhan/evie/token"
 
 type Decl struct {
 	token.Pos
-	Name  string
-	Value Node
+	Name     string
+	Value    Node
+	IsStatic bool
 }
 
 type Ident struct {

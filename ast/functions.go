@@ -8,9 +8,10 @@ import (
 
 type Fn struct {
 	token.Pos
-	Name   string
-	Args   []string
-	Action Node
+	Name     string
+	Args     []string
+	Action   Node
+	IsPublic bool
 }
 
 type Go struct {

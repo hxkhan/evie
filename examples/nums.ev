@@ -1,6 +1,6 @@
 package main
 
-inc := null
+var inc := null
 
 fn test(x) {
     inc = fn() {

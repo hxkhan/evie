@@ -173,14 +173,6 @@ func (ps *parser) handleWords(main token.Token) ast.Node {
 	switch main.Literal {
 	case "echo":
 		return ast.Echo{Pos: main.Line, Value: ps.parseExpression(0)}
-	case "return":
-		ret := ast.Return{Pos: main.Line}
-		if !ps.PeekToken().IsSimple("}") {
-			ret.Value = ps.parseExpression(0)
-		} else {
-			ret.Value = ast.Input[struct{}]{Pos: main.Line}
-		}
-		return ret
 	case "fn":
 		return ps.parseFn(main)
 	case "go":
@@ -197,6 +189,24 @@ func (ps *parser) handleWords(main token.Token) ast.Node {
 		return ps.parseConditional(main)
 	case "while":
 		return ps.parseWhile(main)
+	case "return":
+		ret := ast.Return{Pos: main.Line}
+		if !ps.PeekToken().IsSimple("}") {
+			ret.Value = ps.parseExpression(0)
+		} else {
+			ret.Value = ast.Input[struct{}]{Pos: main.Line}
+		}
+		return ret
+	case "var":
+		name := ps.NextToken()
+		if !ps.consume(":=") {
+			panic(fmt.Errorf("expected ':=' after 'var %v' on line %v, got '%v' instead", name.Literal, main.Line, ps.PeekToken().Literal))
+		}
+		return ast.Decl{Pos: main.Line, Name: name.Literal, IsStatic: false, Value: ps.parseExpression(0)}
+	case "pub":
+		// skip for now
+		return ps.next()
+
 	default:
 		return ps.parseIdentOrCall(main)
 	}
@@ -218,9 +228,9 @@ func (ps *parser) parseAwait(main token.Token) ast.Node {
 }
 
 func (ps *parser) parseIdentOrCall(main token.Token) ast.Node {
-	// handle declarations explicitly
+	// handle const declarations explicitly
 	if ps.consume(":=") {
-		return ast.Decl{Pos: main.Line, Name: main.Literal, Value: ps.parseExpression(0)}
+		return ast.Decl{Pos: main.Line, Name: main.Literal, IsStatic: true, Value: ps.parseExpression(0)}
 	}
 
 	// try infix stuff

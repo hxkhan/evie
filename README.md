@@ -4,33 +4,16 @@ Evie is a dynamically typed programming language written in Go. The goal is to p
 
 Here is some example code
 ```php
-fn pow(x, n) {
-    if (n == 0) return 1
-    
-    return x * pow(x, n-1)
-}
-
-fn clamp(value, min, max) {
-    if (value < min) 
-        return min
-    else if (value > max)
-        return max
-
-    return value
-}
-
-fn factorial(n) {
-    if (n < 2) return 1
-
-    return n * factorial(n-1)
-}
-
 fn main() {
-    echo pow(2, 3)
-    echo clamp(50, 0, 100)
-    echo clamp(50, 75, 100)
-    echo clamp(50, 0, 25)
-    echo factorial(5)
+    io.println(fib(35))
+}
+
+fn fib(n) {
+    if n < 2 {
+        return n
+    }
+    
+    return fib(n-1) + fib(n-2)
 }
 ```
 
@@ -38,7 +21,7 @@ Also a concurrency example below
 ```php
 fn print(message, duration) {
     await time.timer(duration)
-    echo message
+    io.println(message)
 }
 
 fn main() {
@@ -56,9 +39,7 @@ fn main() {
 ```
 To test this exact program, run `go run ./cli -t ./examples/go.ev`. Then remove all of the `go` keywords infront of the `print` calls and re-run to see the difference.
 
-## Flags
-- flag `-t` prints the execution time
-- flag `-inline=true/false` enables or disables inlining certain instruction combinations for performance. It is `true` by default
+> The flag `-t` prints the execution time
 
 ## Goals
 - Highly performant ✅
@@ -74,7 +55,7 @@ To test this exact program, run `go run ./cli -t ./examples/go.ev`. Then remove 
 ## Benchmarks
 | Language | fib(35)  | Host Language |
 | :-       | :-       | :-            |
-| [**Evie**](https://github.com/hxkhan/evie) | `478ms` | Go |
+| [**Evie**](https://github.com/hxkhan/evie) | `416ms` | Go |
 | [Lua 5.4.2](https://lua.org/) | `536ms` | C | 
 | [QuickJS](https://bellard.org/quickjs/) | `703ms` | C | 
 | [Python 3.13](https://python.org/) | `826ms` | C |

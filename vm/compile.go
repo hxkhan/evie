@@ -72,7 +72,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		return vm.emitIdentGet(node)
 
 	case ast.Assign:
-		return vm.emitIdentSet(node)
+		return vm.emitAssign(node)
 
 	case ast.Block:
 		return vm.emitBlock(node)
@@ -175,7 +175,7 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 			if _, exists := this.globals[index]; exists {
 				panic(fmt.Errorf("double declaration of %s", iDec.Name))
 			}
-			this.globals[index] = Global{Value: &Value{}, IsStatic: false}
+			this.globals[index] = Global{Value: &Value{}, IsStatic: iDec.IsStatic}
 		}
 	}
 
@@ -291,7 +291,7 @@ func (vm *Instance) emitIdentGet(node ast.Ident) instruction {
 	panic("ayo what")
 }
 
-func (vm *Instance) emitIdentSet(node ast.Assign) instruction {
+func (vm *Instance) emitAssign(node ast.Assign) instruction {
 	// handle variables
 	if iGet, isIdentGet := node.Lhs.(ast.Ident); isIdentGet {
 		variable, err := vm.cp.reach(iGet.Name)
@@ -325,19 +325,21 @@ func (vm *Instance) emitIdentSet(node ast.Assign) instruction {
 				return Value{}, nil
 			}
 
-		case *Value:
+		case Global:
+			if v.IsStatic {
+				panic(fmt.Sprintf("Assignment to constant symbol '%v'.", iGet.Name))
+			}
+
 			return func(fbr *fiber) (Value, *Exception) {
 				value, err := value(fbr)
 				if err != nil {
 					return value, err
 				}
 
-				*v = value
+				*(v.Value) = value
 				return Value{}, nil
 			}
 
-		case Value:
-			panic(fmt.Errorf("cannot set value of symbol '%s' because it is declared in a static scope", iGet.Name))
 		}
 	}
 

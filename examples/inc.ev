@@ -1,24 +1,18 @@
-package main
+package main imports("time")
 
-x := 0
+var x := 0
 
 fn inc(n) {
-    if (n > 0) {
-        x = x + 1
-        inc(n-1)
+    while (n > 0) {
+        x += 1
+        n -= 1
     }
-}
-
-fn print() {
-    echo x
 }
 
 fn main() {
     go inc(10000)
     go inc(10000)
 
-    //await time.timer(10, false)
-
-    //echo x
-    go print()
+    await time.timer(10) // yield for 10ms
+    echo x
 }

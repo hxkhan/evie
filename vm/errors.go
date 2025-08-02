@@ -16,6 +16,9 @@ func (e Exception) Error() string {
 }
 
 var returnSignal = &Exception{name: "signal", message: "return"}
+var continueSignal = &Exception{name: "signal", message: "continue"}
+var breakSignal = &Exception{name: "signal", message: "break"}
+
 var notFunction = &Exception{name: "signal", message: "not a function"}
 
 type trace struct {

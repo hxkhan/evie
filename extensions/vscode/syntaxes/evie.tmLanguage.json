@@ -79,7 +79,7 @@
 		"patterns": [
 		  {
 			"name": "keyword.control.evie",
-			"match": "\\b(package|pub|if|else|while|for|var|return|fn|echo|go)\\b"
+			"match": "\\b(package|pub|if|else|while|for|continue|break|var|return|fn|echo|go)\\b"
 		  }
 		]
 	  },

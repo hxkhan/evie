@@ -19,6 +19,14 @@ type While struct {
 	Action    Node // [required]
 }
 
+type Continue struct {
+	token.Pos
+}
+
+type Break struct {
+	token.Pos
+}
+
 func (node Conditional) String() string {
 	if node.Action == nil {
 		return fmt.Sprintf("if (%v)", node.Condition)
@@ -30,4 +38,12 @@ func (node Conditional) String() string {
 
 func (node While) String() string {
 	return fmt.Sprintf("while (%v) %v", node.Condition, node.Action)
+}
+
+func (node Continue) String() string {
+	return "continue"
+}
+
+func (node Break) String() string {
+	return "break"
 }

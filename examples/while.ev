@@ -3,7 +3,16 @@ package main
 fn main() {
     var x := 10
     while x > 0 {
-        echo x
         x -= 1
+
+        if x == 5 {
+            echo "skip"
+            continue
+        } else if x == 2 {
+            echo "break"
+            break
+        }
+
+        echo x
     }
 }

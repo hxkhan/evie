@@ -11,6 +11,7 @@ import (
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/ds"
 	"github.com/hxkhan/evie/parser"
+	"github.com/hxkhan/evie/vm/fields"
 )
 
 type Instance struct {
@@ -146,7 +147,7 @@ func (vm *Instance) GetPackage(name string) (pkg Package) {
 }
 
 func (pkg *packageInstance) SetSymbol(name string, value Value) (overridden bool) {
-	index := fields.get(name)
+	index := fields.Get(name)
 	ref, exists := pkg.globals[index]
 	if exists {
 		*(ref.Value) = value
@@ -157,13 +158,13 @@ func (pkg *packageInstance) SetSymbol(name string, value Value) (overridden bool
 }
 
 func (pkg *packageInstance) GetSymbol(name string) (value Global, exists bool) {
-	index := fields.get(name)
+	index := fields.Get(name)
 	value, exists = pkg.globals[index]
 	return value, exists
 }
 
 func (pkg *packageInstance) HasSymbol(name string) (exists bool) {
-	_, exists = pkg.globals[fields.get(name)]
+	_, exists = pkg.globals[fields.Get(name)]
 	return exists
 }
 
@@ -191,7 +192,7 @@ func (cp *compiler) reach(name string) (v any, err error) {
 	}
 
 	// 2. check package globals
-	if ref, exists := cp.pkg.globals[fields.get(name)]; exists {
+	if ref, exists := cp.pkg.globals[fields.Get(name)]; exists {
 		return ref, nil
 	}
 

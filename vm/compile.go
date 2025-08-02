@@ -5,22 +5,8 @@ import (
 
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/ds"
+	"github.com/hxkhan/evie/vm/fields"
 )
-
-var fields = fieldreg{map[string]int{}}
-
-type fieldreg struct {
-	table map[string]int
-}
-
-func (fr fieldreg) get(field string) int {
-	index, exists := fr.table[field]
-	if !exists {
-		fr.table[field] = len(fr.table)
-		return len(fr.table) - 1
-	}
-	return index
-}
 
 type instruction func(fbr *fiber) (Value, *Exception)
 
@@ -83,6 +69,16 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	case ast.While:
 		return vm.emitWhile(node)
 
+	case ast.Break:
+		return func(fbr *fiber) (Value, *Exception) {
+			return Value{}, breakSignal
+		}
+
+	case ast.Continue:
+		return func(fbr *fiber) (Value, *Exception) {
+			return Value{}, continueSignal
+		}
+
 	case ast.Fn:
 		return vm.emitFn(node)
 
@@ -130,7 +126,7 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 		}
 
 		v := pkg.Box()
-		this.globals[fields.get(name)] = Global{Value: &v, IsPublic: false, IsStatic: true}
+		this.globals[fields.Get(name)] = Global{Value: &v, IsPublic: false, IsStatic: true}
 	}
 
 	/*
@@ -158,7 +154,7 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 	// 1. declare all symbols
 	for _, node := range node.Code {
 		if fn, isFn := node.(ast.Fn); isFn {
-			index := fields.get(fn.Name)
+			index := fields.Get(fn.Name)
 			if _, exists := this.globals[index]; exists {
 				panic(fmt.Errorf("double declaration of %s", fn.Name))
 			}
@@ -171,7 +167,7 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 			}})
 			this.globals[index] = Global{Value: &fn, IsStatic: true}
 		} else if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
-			index := fields.get(iDec.Name)
+			index := fields.Get(iDec.Name)
 			if _, exists := this.globals[index]; exists {
 				panic(fmt.Errorf("double declaration of %s", iDec.Name))
 			}
@@ -182,7 +178,7 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 	// 2. initialize functions
 	for _, node := range node.Code {
 		if fn, isFn := node.(ast.Fn); isFn {
-			global := this.globals[fields.get(fn.Name)]
+			global := this.globals[fields.Get(fn.Name)]
 			ufn := (*UserFn)(global.pointer)
 
 			vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, this: global.Value})
@@ -218,7 +214,7 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 
 		// compile global variable initialization in a special way because indices are pre declared
 		if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
-			global := this.globals[fields.get(iDec.Name)]
+			global := this.globals[fields.Get(iDec.Name)]
 
 			value := vm.compile(iDec.Value)
 			code = append(code, func(fbr *fiber) (Value, *Exception) {
@@ -355,7 +351,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 			case Global:
 				if lhs.IsStatic {
 					if pkg, ok := lhs.asPackage(); ok {
-						field, exists := pkg.globals[fields.get(fa.Rhs)]
+						field, exists := pkg.globals[fields.Get(fa.Rhs)]
 						if !exists {
 							panic(TypeErrorF("Symbol '%s' not found in package '%s'.", fa.Rhs, pkg.name))
 						}
@@ -382,7 +378,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 
 				// compile new value & return setter
 				value := vm.compile(node.Value)
-				index := fields.get(fa.Rhs)
+				index := fields.Get(fa.Rhs)
 				return func(fbr *fiber) (Value, *Exception) {
 					if pkg, ok := lhs.asPackage(); ok {
 						field, exists := pkg.globals[index]
@@ -786,6 +782,11 @@ func (vm *Instance) emitWhile(node ast.While) instruction {
 			// evaluate action
 			v, err = action(fbr)
 			if err != nil {
+				if err == continueSignal {
+					continue
+				} else if err == breakSignal {
+					break
+				}
 				return v, err
 			}
 		}
@@ -861,7 +862,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 			panic(err)
 		}
 
-		index := fields.get(node.Rhs)
+		index := fields.Get(node.Rhs)
 		switch lhs := variable.(type) {
 		case local:
 			return func(fbr *fiber) (Value, *Exception) {

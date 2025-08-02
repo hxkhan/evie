@@ -189,6 +189,10 @@ func (ps *parser) handleWords(main token.Token) ast.Node {
 		return ps.parseConditional(main)
 	case "while":
 		return ps.parseWhile(main)
+	case "break":
+		return ast.Break{Pos: main.Line}
+	case "continue":
+		return ast.Continue{Pos: main.Line}
 	case "return":
 		ret := ast.Return{Pos: main.Line}
 		if !ps.PeekToken().IsSimple("}") {

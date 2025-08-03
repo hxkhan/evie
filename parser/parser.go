@@ -58,13 +58,13 @@ func Parse(input []byte) (node ast.Node, err error) {
 		// create package & parse imports
 		pack = ps.parsePackage()
 		for {
-			pack.Code = append(pack.Code, ps.next())
+			pack.Code = append(pack.Code, ps.next(false))
 		}
 	}
 
 	// no package, just code
 	for {
-		cb.Code = append(cb.Code, ps.next())
+		cb.Code = append(cb.Code, ps.next(false))
 	}
 }
 
@@ -130,7 +130,7 @@ func (ps *parser) panic(main token.Token, expected string) {
 	panic(fmt.Errorf("%v on line %v expected %v, got '%v'", what, main.Line, expected, ps.PeekToken().Literal))
 }
 
-func (ps *parser) next() ast.Node {
+func (ps *parser) next(asExpr bool) ast.Node {
 	main := ps.PeekToken()
 	if main.IsEOS() {
 		panic(errEOS)
@@ -138,13 +138,13 @@ func (ps *parser) next() ast.Node {
 
 	switch {
 	case main.Type == token.Word:
-		return ps.handleWords(ps.NextToken())
+		return ps.handleWords(ps.NextToken(), asExpr)
 	case main.Type == token.String:
 		return ast.Input[string]{Pos: main.Line, Value: ps.NextToken().Literal}
 	case main.Type == token.Number:
 		return ast.Input[float64]{Pos: main.Line, Value: ps.parseFloat(ps.NextToken().Literal)}
 	case main.IsSimple("-"):
-		return ps.parseNegation(main)
+		return ps.parseNegation(ps.NextToken())
 	default:
 		return ps.parseExpression(0)
 	}
@@ -169,12 +169,12 @@ func (ps *parser) parseNegation(main token.Token) ast.Node {
 	return neg
 }
 
-func (ps *parser) handleWords(main token.Token) ast.Node {
+func (ps *parser) handleWords(main token.Token, asExpr bool) ast.Node {
 	switch main.Literal {
 	case "echo":
 		return ast.Echo{Pos: main.Line, Value: ps.parseExpression(0)}
 	case "fn":
-		return ps.parseFn(main)
+		return ps.parseFn(main, asExpr)
 	case "go":
 		return ast.Go{Pos: main.Line, Fn: ps.parseExpression(0)}
 	case "await":
@@ -209,7 +209,7 @@ func (ps *parser) handleWords(main token.Token) ast.Node {
 		return ast.Decl{Pos: main.Line, Name: name.Literal, IsStatic: false, Value: ps.parseExpression(0)}
 	case "pub":
 		// skip for now
-		return ps.next()
+		return ps.next(false)
 
 	default:
 		return ps.parseIdentOrCall(main)
@@ -289,14 +289,14 @@ func (ps *parser) parseWhile(main token.Token) ast.Node {
 func (ps *parser) parseBlock() ast.Node {
 	var block ast.Block
 	for !ps.consume("}") {
-		block.Code = append(block.Code, ps.next())
+		block.Code = append(block.Code, ps.next(false))
 	}
 	return block
 }
 
 // helper to parse an fn
-func (ps *parser) parseFn(main token.Token) ast.Node {
-	fn := ast.Fn{Pos: main.Line}
+func (ps *parser) parseFn(main token.Token, asExpr bool) ast.Node {
+	fn := ast.Fn{Pos: main.Line, UsedAsExpr: asExpr}
 	if ps.PeekToken().Type == token.Word {
 		fn.Name = ps.NextToken().Literal
 	}
@@ -306,7 +306,7 @@ func (ps *parser) parseFn(main token.Token) ast.Node {
 		fn.Action = ps.parseBlock()
 	} else if ps.consume("=>") {
 		// TODO: we should check so next already isn't a return
-		fn.Action = ast.Return{Pos: main.Line, Value: ps.next()}
+		fn.Action = ast.Return{Pos: main.Line, Value: ps.next(true)}
 	} else {
 		ps.panic(main, "'{' or '=>'")
 	}
@@ -372,7 +372,7 @@ func (ps *parser) parseExpression(precedenceLevel int) ast.Node {
 		return ps.parseInfixExpression(expr, precedenceLevel)
 	}
 	// parse the left-hand side
-	return ps.parseInfixExpression(ps.next(), precedenceLevel)
+	return ps.parseInfixExpression(ps.next(true), precedenceLevel)
 }
 
 func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) ast.Node {

@@ -408,10 +408,6 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 }
 
 func (vm *Instance) emitFn(node ast.Fn) instruction {
-	if node.Name != "" {
-		panic("named functions are only allowed as top level declarations")
-	}
-
 	vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}})
 	vm.cp.closures.Last(0).scope.OpenBlock()
 
@@ -435,7 +431,7 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 	}
 
 	info := &funcInfoStatic{
-		name:       "λ",
+		name:       node.Name,
 		args:       node.Args,
 		captures:   closure.captures,
 		recyclable: recyclable,
@@ -448,6 +444,37 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 		vm.log.capturef("CT: closure => Capture(%v) -> %v\n", i, ref)
 	}
 
+	// create the function & return it
+	if node.UsedAsExpr {
+		return func(fbr *fiber) (Value, *Exception) {
+			captured := make([]*Value, len(closure.captures))
+			for i, ref := range closure.captures {
+				var v *Value
+				if ref.isLocal {
+					v = fbr.getLocalByRef(ref.index)
+				} else {
+					v = fbr.getCapturedByRef(ref.index)
+				}
+				captured[i] = v
+			}
+			fn := UserFn{
+				funcInfoStatic: info,
+				references:     captured,
+			}
+			return BoxUserFn(fn), nil
+		}
+	}
+
+	if node.Name == "" {
+		panic("cannot declare an fn statement with no name")
+	}
+
+	index, ok := vm.cp.closures.Last(0).scope.Declare(node.Name)
+	if !ok {
+		panic(fmt.Errorf("double declaration of %s", node.Name))
+	}
+
+	// create the function & declare it
 	return func(fbr *fiber) (Value, *Exception) {
 		captured := make([]*Value, len(closure.captures))
 		for i, ref := range closure.captures {
@@ -459,13 +486,12 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 			}
 			captured[i] = v
 		}
-
-		// create the user fn & return it
 		fn := UserFn{
 			funcInfoStatic: info,
 			references:     captured,
 		}
-		return BoxUserFn(fn), nil
+		fbr.storeLocal(local(index), BoxUserFn(fn))
+		return Value{}, nil
 	}
 }
 

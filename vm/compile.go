@@ -873,13 +873,15 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 }
 
 func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
+	index := fields.Get(node.Rhs)
+
+	// optimise: ident as lhs
 	if iGet, isIdentGet := node.Lhs.(ast.Ident); isIdentGet {
 		variable, err := vm.cp.reach(iGet.Name)
 		if err != nil {
 			panic(err)
 		}
 
-		index := fields.Get(node.Rhs)
 		switch lhs := variable.(type) {
 		case local:
 			return func(fbr *fiber) (Value, *Exception) {
@@ -926,7 +928,20 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 		}
 	}
 
-	panic(fmt.Errorf("implement %T", node.Lhs))
+	// generic compilation
+	lhs := vm.compile(node.Lhs)
+	return func(fbr *fiber) (Value, *Exception) {
+		lhs, exc := lhs(fbr)
+		if exc != nil {
+			return lhs, exc
+		}
+
+		if field, exists := lhs.getField(index); exists {
+			return field, nil
+		}
+
+		return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", node.Rhs, node)
+	}
 }
 
 func (vm *Instance) emitBinOp(node ast.BinOp) instruction {

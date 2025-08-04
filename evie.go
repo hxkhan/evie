@@ -3,6 +3,7 @@ package evie
 import (
 	"fmt"
 
+	"github.com/hxkhan/evie/std/builtin"
 	"github.com/hxkhan/evie/std/fs"
 	"github.com/hxkhan/evie/std/io"
 	"github.com/hxkhan/evie/std/time"
@@ -10,9 +11,10 @@ import (
 )
 
 var StandardLibraryPackageConstructors = map[string]func() vm.Package{
-	"io":   io.Construct,
-	"fs":   fs.Construct,
-	"time": time.Construct,
+	"io":      io.Construct,
+	"fs":      fs.Construct,
+	"time":    time.Construct,
+	"builtin": builtin.Construct,
 }
 
 var Defaults = vm.Options{

@@ -1,6 +1,10 @@
 package ast
 
-import "github.com/hxkhan/evie/token"
+import (
+	"fmt"
+
+	"github.com/hxkhan/evie/token"
+)
 
 type Decl struct {
 	token.Pos
@@ -22,4 +26,11 @@ type Assign struct {
 
 func (node Ident) String() string {
 	return node.Name
+}
+
+func (node Decl) String() string {
+	if node.IsStatic {
+		return fmt.Sprintf("%s := %v", node.Name, node.Value)
+	}
+	return fmt.Sprintf("var %s := %v", node.Name, node.Value)
 }

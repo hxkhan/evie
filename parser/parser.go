@@ -21,12 +21,18 @@ type parser struct {
 var keywords = []string{"package", "nil", "true", "false", "fn", "return", "go", "await", "echo", "if", "else"}
 
 var operators = map[string]ast.Operator{
-	"+": ast.AddOp, "-": ast.SubOp, "*": ast.MulOp, "/": ast.DivOp,
+	"+": ast.AddOp, "-": ast.SubOp, "*": ast.MulOp, "/": ast.DivOp, "%": ast.ModOp,
 	"+=": ast.AddOp, "-=": ast.SubOp, "*=": ast.MulOp, "/=": ast.DivOp,
 	"==": ast.EqOp, "<": ast.LtOp, ">": ast.GtOp,
 }
 
-var precedence = map[string]int{"+": 1, "-": 1, "*": 2, "/": 2, "==": 0, "<": 0, ">": 0}
+var precedence = map[string]int{
+	"+": 1, "-": 1,
+	"*": 2, "/": 2, "%": 2,
+	"<": 0, ">": 0, "==": 0,
+	".": 3,
+	"(": 4,
+}
 
 func Parse(input []byte) (node ast.Node, err error) {
 	ps := parser{Lexer: lexer.New(input)}
@@ -212,7 +218,7 @@ func (ps *parser) handleWords(main token.Token, asExpr bool) ast.Node {
 		return ps.next(false)
 
 	default:
-		return ps.parseIdentOrCall(main)
+		return ps.parseIdent(main)
 	}
 }
 
@@ -231,7 +237,7 @@ func (ps *parser) parseAwait(main token.Token) ast.Node {
 	return ast.Await{Task: ps.parseExpression(0)}
 }
 
-func (ps *parser) parseIdentOrCall(main token.Token) ast.Node {
+func (ps *parser) parseIdent(main token.Token) ast.Node {
 	// handle const declarations explicitly
 	if ps.consume(":=") {
 		return ast.Decl{Pos: main.Line, Name: main.Literal, IsStatic: true, Value: ps.parseExpression(0)}
@@ -249,9 +255,7 @@ func (ps *parser) parseIdentOrCall(main token.Token) ast.Node {
 			Operator: operators[ps.last.Literal], Rhs: ps.parseExpression(0),
 		}}
 	}
-	if ps.consume("(") {
-		return ast.Call{Pos: main.Line, Fn: left, Args: ps.parseArgsList()}
-	}
+
 	return left
 }
 
@@ -381,11 +385,38 @@ func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) ast.N
 
 		// field access
 		if next.IsSimple(".") {
-			ps.NextToken()
+			ps.NextToken() // consume '.'
 			if ps.PeekToken().Type != token.Word {
 				panic(fmt.Errorf("dot operator expected name on line %v", next.Line))
 			}
 			left = ast.FieldAccess{Pos: next.Line, Lhs: left, Rhs: ps.NextToken().Literal}
+			continue
+		}
+
+		// function call
+		if next.IsSimple("(") {
+			line := next.Line
+			ps.NextToken() // consume '('
+
+			var args []ast.Node
+			// parse arguments if any
+			if !ps.PeekToken().IsSimple(")") {
+				for {
+					arg := ps.parseExpression(0)
+					args = append(args, arg)
+
+					if ps.PeekToken().IsSimple(",") {
+						ps.NextToken() // consume ','
+					} else {
+						break
+					}
+				}
+			}
+
+			if !ps.consume(")") {
+				panic(fmt.Errorf("'(' expected ')' on line %v, got '%v'", line, ps.PeekToken().Literal))
+			}
+			left = ast.Call{Pos: line, Fn: left, Args: args}
 			continue
 		}
 

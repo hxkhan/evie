@@ -14,6 +14,7 @@ const (
 	SubOp
 	MulOp
 	DivOp
+	ModOp
 
 	EqOp
 	LtOp
@@ -32,6 +33,8 @@ func (node BinOp) String() string {
 	switch node.Operator {
 	case AddOp:
 		return fmt.Sprintf("%v + %v", node.Lhs, node.Rhs)
+	case SubOp:
+		return fmt.Sprintf("%v - %v", node.Lhs, node.Rhs)
 	case LtOp:
 		return fmt.Sprintf("%v < %v", node.Lhs, node.Rhs)
 	}

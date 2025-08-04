@@ -184,6 +184,7 @@ func (vm *Instance) WaitForNoActivity() {
 type local struct {
 	index      int
 	isCaptured bool
+	isStatic   bool
 }
 
 // reach searches for a symbol across all scopes
@@ -191,14 +192,14 @@ func (cp *compiler) reach(name string) (v any, err error) {
 	// 1. check stack
 	for scroll := range cp.closures.Len() {
 		closure := cp.closures.Last(scroll)
-		if index, success := closure.scope.Reach(name); success {
-			// check if it's a local
+		if binding, success := closure.scope.Reach(name); success {
+			// check if it is a local
 			if scroll == 0 {
-				return local{index: index, isCaptured: false}, nil
+				return local{index: binding.Index, isCaptured: false, isStatic: binding.IsStatic}, nil
 			}
 
 			// otherwise capture it & return the index
-			return local{index: cp.addToCaptured(scroll, index), isCaptured: true}, nil
+			return local{index: cp.addToCaptured(scroll, binding.Index), isCaptured: true, isStatic: binding.IsStatic}, nil
 		}
 	}
 

@@ -184,7 +184,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 
 			// declare the fn arguments and only then compile the code
 			for _, arg := range fn.Args {
-				vm.cp.closures.Last(0).scope.Declare(arg)
+				vm.cp.closures.Last(0).scope.Declare(arg, false)
 			}
 
 			ufn.code = vm.compile(fn.Action)
@@ -239,7 +239,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 }
 
 func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
-	index, success := vm.cp.closures.Last(0).scope.Declare(node.Name)
+	index, success := vm.cp.closures.Last(0).scope.Declare(node.Name, node.IsStatic)
 	if !success {
 		panic(fmt.Errorf("double declaration of %s", node.Name))
 	}
@@ -294,6 +294,10 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 
 		switch v := variable.(type) {
 		case local:
+			if v.isStatic {
+				panic(fmt.Sprintf("Assignment to constant binding '%v'.", iGet.Name))
+			}
+
 			if v.isCaptured {
 				return func(fbr *fiber) (Value, *Exception) {
 					value, err := value(fbr)
@@ -317,7 +321,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 
 		case Global:
 			if v.IsStatic {
-				panic(fmt.Sprintf("Assignment to constant symbol '%v'.", iGet.Name))
+				panic(fmt.Sprintf("Assignment to constant binding '%v'.", iGet.Name))
 			}
 
 			return func(fbr *fiber) (Value, *Exception) {
@@ -407,7 +411,7 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 
 	// declare the fn arguments and only then compile the code
 	for _, arg := range node.Args {
-		vm.cp.closures.Last(0).scope.Declare(arg)
+		vm.cp.closures.Last(0).scope.Declare(arg, false)
 	}
 
 	action := vm.compile(node.Action)
@@ -463,7 +467,7 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 		panic("cannot declare an fn statement with no name")
 	}
 
-	index, ok := vm.cp.closures.Last(0).scope.Declare(node.Name)
+	index, ok := vm.cp.closures.Last(0).scope.Declare(node.Name, true)
 	if !ok {
 		panic(fmt.Errorf("double declaration of %s", node.Name))
 	}

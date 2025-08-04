@@ -5,7 +5,12 @@ import (
 	"strings"
 )
 
-type bindings map[string]int
+type Binding struct {
+	Index    int
+	IsStatic bool
+}
+
+type bindings map[string]Binding
 
 type Scope struct {
 	blocks []bindings // each block-scope gets its own bindings table
@@ -39,24 +44,24 @@ func (sc *Scope) ReuseBlock() {
 }
 
 // Declare adds a new binding to the current block-scope
-func (sc *Scope) Declare(name string) (index int, success bool) {
+func (sc *Scope) Declare(name string, isStatic bool) (index int, success bool) {
 	top := sc.blocks[len(sc.blocks)-1]
 	if _, exists := top[name]; exists {
 		return 0, false
 	}
-	top[name] = sc.index
+	top[name] = Binding{Index: sc.index, IsStatic: isStatic}
 	sc.index++
 	return sc.index - 1, true
 }
 
 // Reach searches for a binding in this scope
-func (sc *Scope) Reach(name string) (index int, success bool) {
+func (sc *Scope) Reach(name string) (binding Binding, success bool) {
 	for bi := len(sc.blocks) - 1; bi >= 0; bi-- {
-		if index, exists := sc.blocks[bi][name]; exists {
-			return index, true
+		if b, exists := sc.blocks[bi][name]; exists {
+			return b, true
 		}
 	}
-	return 0, false
+	return binding, false
 }
 
 func (sc Scope) String() string {

@@ -59,56 +59,69 @@ func (fbr *fiber) swapActive(new *UserFn) (old *UserFn) {
 	return old
 }
 
-func (fbr *fiber) tryNativeCall(value Value, args []instruction) (result Value, exc *Exception) {
-	nfn, ok := value.AsGoFunc()
-	if !ok {
-		return Value{}, notFunction
+func (fbr *fiber) tryNonStandardCall(value Value, arguments []instruction) (result Value, exc *Exception) {
+	// check if it is a go function
+	if fn, isGoFunc := value.AsGoFunc(); isGoFunc {
+		if fn.nargs != len(arguments) {
+			return Value{}, CustomError("function requires %v argument(s), %v provided", fn.nargs, len(arguments))
+		}
+
+		switch fn.nargs {
+		case -1:
+			panic("variadic functions not supported yet")
+		case 0:
+			function := *(*func() (Value, *Exception))(fn.ptr)
+			return function()
+		case 1:
+			function := *(*func(Value) (Value, *Exception))(fn.ptr)
+			arg0, err := arguments[0](fbr)
+			if err != nil {
+				return arg0, err
+			}
+			return function(arg0)
+		case 2:
+			function := *(*func(Value, Value) (Value, *Exception))(fn.ptr)
+			arg0, err := arguments[0](fbr)
+			if err != nil {
+				return arg0, err
+			}
+
+			arg1, err := arguments[1](fbr)
+			if err != nil {
+				return arg0, err
+			}
+			return function(arg0, arg1)
+		}
+
+		panic("unsuported call")
 	}
 
-	switch len(args) {
-	case 0:
-		if fn, ok := nfn.(func() (Value, *Exception)); ok {
-			return fn()
+	// check if it is a method and owner combo
+	if m, ok := value.asMethod(); ok {
+		fn, ok := m.fn.AsGoFunc()
+		if !ok {
+			return Value{}, notFunction
 		}
-	case 1:
-		if fn, ok := nfn.(func(Value) (Value, *Exception)); ok {
-			arg0, err := args[0](fbr)
-			if err != nil {
-				return arg0, err
-			}
-			return fn(arg0)
-		}
-	case 2:
-		if fn, ok := nfn.(func(Value, Value) (Value, *Exception)); ok {
-			arg0, err := args[0](fbr)
-			if err != nil {
-				return arg0, err
-			}
-			arg1, err := args[1](fbr)
-			if err != nil {
-				return arg1, err
-			}
 
-			return fn(arg0, arg1)
-		}
-	case 3:
-		if fn, ok := nfn.(func(Value, Value, Value) (Value, *Exception)); ok {
-			arg0, err := args[0](fbr)
+		switch fn.nargs {
+		case -1:
+			panic("variadic functions not supported yet")
+		case 0:
+			panic("how did we get a method that does not even take itself as an arguement?")
+		case 1:
+			function := *(*func(Value) (Value, *Exception))(fn.ptr)
+			return function(m.this)
+		case 2:
+			function := *(*func(Value, Value) (Value, *Exception))(fn.ptr)
+			arg0, err := arguments[0](fbr)
 			if err != nil {
 				return arg0, err
 			}
-			arg1, err := args[1](fbr)
-			if err != nil {
-				return arg1, err
-			}
-			arg2, err := args[2](fbr)
-			if err != nil {
-				return arg2, err
-			}
-
-			return fn(arg0, arg1, arg2)
+			return function(m.this, arg0)
 		}
+
+		panic("unsuported call")
 	}
 
-	panic("this cant be")
+	return Value{}, CustomError("cannot call a non-function '%v'", value)
 }

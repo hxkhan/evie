@@ -13,8 +13,8 @@ func Construct() vm.Package {
 	return pkg
 }
 
-func split(str, sep vm.Value) (vm.Value, *vm.Exception) {
-	if str, ok := str.AsString(); ok {
+func split(this, sep vm.Value) (vm.Value, *vm.Exception) {
+	if str, ok := this.AsString(); ok {
 		if sep, ok := sep.AsString(); ok {
 
 			parts := strings.Split(str, sep)
@@ -28,8 +28,8 @@ func split(str, sep vm.Value) (vm.Value, *vm.Exception) {
 	return vm.Value{}, vm.ErrTypes
 }
 
-func join(parts, sep vm.Value) (vm.Value, *vm.Exception) {
-	if parts, ok := parts.AsArray(); ok {
+func join(this, sep vm.Value) (vm.Value, *vm.Exception) {
+	if parts, ok := this.AsArray(); ok {
 		if sep, ok := sep.AsString(); ok {
 
 			strs := make([]string, len(parts))

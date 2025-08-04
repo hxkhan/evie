@@ -2,6 +2,7 @@ package vm
 
 import (
 	"math"
+	"reflect"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -45,6 +46,7 @@ const (
 	stringType = iota
 	userFnType
 	goFuncType
+	methodType
 	arrayType
 	taskType
 	packageType
@@ -98,10 +100,15 @@ func BoxUserFn(fn UserFn) Value {
 	return Value{scalar: userFnType, pointer: unsafe.Pointer(&fn)}
 }
 
+type goFunc struct {
+	nargs int
+	ptr   unsafe.Pointer
+}
+
 // BoxGoFunc boxes a golang function
 func BoxGoFunc[T GoFunc](fn T) Value {
-	iface := any(fn)
-	return Value{scalar: goFuncType, pointer: unsafe.Pointer(&iface)}
+	ptr := unsafe.Pointer(&goFunc{nargs: reflect.TypeOf(fn).NumIn(), ptr: unsafe.Pointer(&fn)})
+	return Value{scalar: goFuncType, pointer: ptr}
 }
 
 // BoxArray boxes an evie array
@@ -122,6 +129,10 @@ func BoxTask(task chan evaluation) Value {
 // Box boxes an evie package
 func (pkg *packageInstance) Box() Value {
 	return Value{scalar: packageType, pointer: unsafe.Pointer(pkg)}
+}
+
+func boxMethod(m method) Value {
+	return Value{scalar: methodType, pointer: unsafe.Pointer(&m)}
 }
 
 // BoxBuffer boxes a Golang byte slice
@@ -165,11 +176,11 @@ func (x Value) AsUserFn() (fn *UserFn, ok bool) {
 	return (*UserFn)(x.pointer), true
 }
 
-func (x Value) AsGoFunc() (iface any, ok bool) {
+func (x Value) AsGoFunc() (fn *goFunc, ok bool) {
 	if x.scalar != goFuncType || isKnown(x.pointer) {
 		return nil, false
 	}
-	return *(*any)(x.pointer), true
+	return (*goFunc)(x.pointer), true
 }
 
 func (x Value) AsArray() (array []Value, ok bool) {
@@ -198,6 +209,13 @@ func (x Value) AsPackage() (pkg Package, ok bool) {
 		return nil, false
 	}
 	return (*packageInstance)(x.pointer), true
+}
+
+func (x Value) asMethod() (m *method, ok bool) {
+	if x.scalar != methodType || isKnown(x.pointer) {
+		return nil, false
+	}
+	return (*method)(x.pointer), true
 }
 
 func (x Value) AsBuffer() (buffer []byte, ok bool) {
@@ -335,6 +353,8 @@ func (x Value) String() string {
 		return "<task>"
 	case packageType:
 		return "<package>"
+	case methodType:
+		return "<method>"
 	case bufferType:
 		array := *(*[]byte)(x.pointer)
 		builder := strings.Builder{}
@@ -379,6 +399,10 @@ func (x Value) TypeOf() string {
 		return "array"
 	case taskType:
 		return "task"
+	case packageType:
+		return "package"
+	case methodType:
+		return "method"
 	case bufferType:
 		return "buffer"
 	case customType:
@@ -387,4 +411,39 @@ func (x Value) TypeOf() string {
 	}
 
 	return "<unknown>"
+}
+
+type method struct {
+	this Value
+	fn   Value
+}
+
+func (x Value) getField(f int) (field Value, ok bool) {
+	switch x.scalar {
+	case stringType:
+		value, exists := stringMethods[f]
+		if !exists {
+			return Value{}, false
+		}
+
+		m := method{this: x, fn: value}
+		return boxMethod(m), true
+
+	case arrayType:
+		value, exists := arrayMethods[f]
+		if !exists {
+			return Value{}, false
+		}
+
+		m := method{this: x, fn: value}
+		return boxMethod(m), true
+
+	case packageType:
+		pkg := (*packageInstance)(x.pointer)
+		value, exists := pkg.globals[f]
+		return *(value.Value), exists
+
+	default:
+		panic("getField(f) unknown!")
+	}
 }

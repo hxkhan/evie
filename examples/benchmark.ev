@@ -5,8 +5,10 @@ fn main() {
 
     n := 10000000
     while n > 0 {
-        n = test.dec(n) // swap io with test
-    }   
+        n = io.dec(n) // swap io with test here
+    }
+
+    echo "done"
 }
 
 // for n := 10000000

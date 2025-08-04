@@ -2,5 +2,9 @@ package main
 
 fn main() {
     message := "hello world"
-    echo message.split(" ")
+    parts := message.split(" ")
+    whole := parts.join("_")
+
+    // hello world -> ["hello", "world"] -> hello_world
+    echo message + " -> " + str(parts) + " -> " +  whole
 }

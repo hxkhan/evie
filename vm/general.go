@@ -97,23 +97,32 @@ func New(opts Options) *Instance {
 	}
 }
 
-func (vm *Instance) EvalNode(node ast.Node) (Value, error) {
-	code := vm.compile(node)
-
+func (vm *Instance) EvalNode(node ast.Node) (result Value, err error) {
 	vm.rt.gil.Lock()
 	defer vm.rt.gil.Unlock()
 
-	// run code
-	v, exc := code(vm.main)
+	if pkg, isPackage := node.(ast.Package); isPackage {
+		v, exc := vm.runPackage(pkg)
+		if exc != nil {
+			err = exc
+		}
+		result = v
+	} else {
+		v, exc := vm.compile(node)(vm.main)
+		if exc != nil {
+			err = exc
+		}
+		result = v
+	}
 
 	// don't implicitly return the return value of the last executed instruction
-	switch exc {
+	switch err {
 	case nil:
-		return v, nil
+		return result, nil
 	case returnSignal:
-		return v, nil
+		return result, nil
 	default:
-		return v, exc
+		return result, err
 	}
 }
 

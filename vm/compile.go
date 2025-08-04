@@ -13,7 +13,7 @@ type instruction func(fbr *fiber) (Value, *Exception)
 func (vm *Instance) compile(node ast.Node) instruction {
 	switch node := node.(type) {
 	case ast.Package:
-		return vm.emitPackage(node)
+		panic("cannot compile package here")
 
 	case ast.Input[bool]:
 		value := BoxBool(node.Value)
@@ -104,7 +104,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	panic(fmt.Errorf("implement %T", node))
 }
 
-func (vm *Instance) emitPackage(node ast.Package) instruction {
+func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 	vm.cp.pkg = vm.rt.packages[node.Name]
 	if vm.cp.pkg == nil {
 		vm.cp.pkg = &packageInstance{
@@ -130,7 +130,7 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 	}
 
 	/*
-		------ Hoisting Protocol ------
+		------ Hoisting Protocol ------ (invalid since recent changes probably)
 
 		All symbols are first symbolically pre-declared without initialization.
 		This is so when we later initialize them; they can reference each other.
@@ -148,8 +148,6 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 				return a + b
 			}
 	*/
-
-	var code []instruction
 
 	// 1. declare all symbols
 	for _, node := range node.Code {
@@ -203,6 +201,19 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 				ufn.recyclable = append(ufn.recyclable, index)
 			}
 		}
+
+		// compile global variable initialization in a special way because indices are pre declared
+		if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
+			global := this.globals[fields.Get(iDec.Name)]
+			value := vm.compile(iDec.Value)
+			v, exc := value(vm.main)
+			if exc != nil {
+				return v, exc
+			}
+			// store the value
+			*(global.Value) = v
+			continue
+		}
 	}
 
 	// 3. compile the rest of the code
@@ -212,37 +223,19 @@ func (vm *Instance) emitPackage(node ast.Package) instruction {
 			continue
 		}
 
-		// compile global variable initialization in a special way because indices are pre declared
-		if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
-			global := this.globals[fields.Get(iDec.Name)]
-
-			value := vm.compile(iDec.Value)
-			code = append(code, func(fbr *fiber) (Value, *Exception) {
-				v, err := value(fbr)
-				if err != nil {
-					return v, err
-				}
-
-				// store the value
-				*(global.Value) = v
-				return Value{}, nil
-			})
+		// skip declarations now
+		if _, isIdentDec := node.(ast.Decl); isIdentDec {
 			continue
 		}
 
 		// other code
-		in := vm.compile(node)
-		code = append(code, in)
+		v, exc := vm.compile(node)(vm.main)
+		if exc != nil {
+			return v, exc
+		}
 	}
 
-	return func(fbr *fiber) (Value, *Exception) {
-		for _, in := range code {
-			if v, err := in(fbr); err != nil {
-				return v, err
-			}
-		}
-		return Value{}, nil
-	}
+	return Value{}, nil
 }
 
 func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
@@ -660,11 +653,9 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			default:
 				return result, exc
 			}
-		} else if res, err := fbr.tryNativeCall(value, arguments); err != notFunction {
-			return res, err
 		}
 
-		return Value{}, CustomError("cannot call a non-function '%v'", value)
+		return fbr.tryNonStandardCall(value, arguments)
 	}
 }
 
@@ -893,27 +884,19 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 		case local:
 			return func(fbr *fiber) (Value, *Exception) {
 				v := fbr.getLocal(lhs)
-				if pkg, ok := v.asPackage(); ok {
-					value, exists := pkg.globals[index]
-					if !exists {
-						return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v' - package '%s' has no such symbol", node.Rhs, node, pkg.name)
-					}
-					return *(value.Value), nil
+				if field, exists := v.getField(index); exists {
+					return field, nil
 				}
-				panic("value is not a package")
+				return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", node.Rhs, node)
 			}
 
 		case captured:
 			return func(fbr *fiber) (Value, *Exception) {
 				v := fbr.getCaptured(lhs)
-				if pkg, ok := v.asPackage(); ok {
-					value, exists := pkg.globals[index]
-					if !exists {
-						return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v' - package '%s' has no such symbol", node.Rhs, node, pkg.name)
-					}
-					return *(value.Value), nil
+				if field, exists := v.getField(index); exists {
+					return field, nil
 				}
-				panic("value is not a package")
+				return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", node.Rhs, node)
 			}
 
 		case Global:

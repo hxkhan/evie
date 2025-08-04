@@ -100,11 +100,6 @@ func BoxUserFn(fn UserFn) Value {
 	return Value{scalar: userFnType, pointer: unsafe.Pointer(&fn)}
 }
 
-type goFunc struct {
-	nargs int
-	ptr   unsafe.Pointer
-}
-
 // BoxGoFunc boxes a golang function
 func BoxGoFunc[T GoFunc](fn T) Value {
 	ptr := unsafe.Pointer(&goFunc{nargs: reflect.TypeOf(fn).NumIn(), ptr: unsafe.Pointer(&fn)})

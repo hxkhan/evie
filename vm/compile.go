@@ -495,65 +495,19 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 		arguments[i] = vm.compile(arg)
 	}
 
-	if iGet, isIdentGet := node.Fn.(ast.Ident); isIdentGet && vm.cp.inline {
-		variable, err := vm.cp.reach(iGet.Name)
-		if err != nil {
-			panic(err)
-		}
-
-		// optimise: calling global static functions
-		if global, isGlobal := variable.(Global); isGlobal && global.IsStatic {
-			if fn, isUserFn := global.AsUserFn(); isUserFn {
-				if len(fn.args) != len(arguments) {
-					if fn.name != "λ" {
-						panic(CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments)))
-					}
-					panic(CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments)))
+	// optimise: calling static functions/bindings
+	if value, ok := vm.evaluate(node.Fn); ok {
+		// try user fn
+		if fn, isUserFn := value.AsUserFn(); isUserFn {
+			if len(fn.args) != len(arguments) {
+				if fn.name != "λ" {
+					panic(CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments)))
 				}
+				panic(CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments)))
+			}
 
-				// optimise: call to ourselves (recursion)
-				if global.Value == vm.cp.closures.Last(0).this {
-					return func(fbr *fiber) (result Value, exc *Exception) {
-						// setup stack locals
-						base := len(fbr.stack)
-						for idx := range fn.capacity {
-							fbr.stack = append(fbr.stack, vm.newValue())
-
-							// evaluate arguments
-							if idx < len(arguments) {
-								arg, exc := arguments[idx](fbr)
-								if exc != nil {
-									return arg, exc
-								}
-
-								*(fbr.stack[base+idx]) = arg
-							}
-						}
-
-						// prep for execution & save currently captured values
-						prevBase := fbr.swapBase(base)
-						result, exc = fn.code(fbr)
-
-						// release non-escaping locals
-						for _, idx := range fn.recyclable {
-							vm.putValue(fbr.stack[base+idx])
-						}
-
-						// restore old state
-						fbr.popStack(fn.capacity)
-						fbr.swapBase(prevBase)
-
-						// return result but catch relevant signals
-						switch exc {
-						case returnSignal:
-							return result, nil
-						default:
-							return result, exc
-						}
-					}
-				}
-
-				// arbitrary call to a global
+			// optimise: call to ourselves (recursion)
+			if value == *(vm.cp.closures.Last(0).this) {
 				return func(fbr *fiber) (result Value, exc *Exception) {
 					// setup stack locals
 					base := len(fbr.stack)
@@ -573,7 +527,6 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 					// prep for execution & save currently captured values
 					prevBase := fbr.swapBase(base)
-					prevFn := fbr.swapActive(fn)
 					result, exc = fn.code(fbr)
 
 					// release non-escaping locals
@@ -584,7 +537,6 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					// restore old state
 					fbr.popStack(fn.capacity)
 					fbr.swapBase(prevBase)
-					fbr.swapActive(prevFn)
 
 					// return result but catch relevant signals
 					switch exc {
@@ -594,6 +546,55 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 						return result, exc
 					}
 				}
+			}
+
+			// optimise: call to an arbitrary static global
+			return func(fbr *fiber) (result Value, exc *Exception) {
+				// setup stack locals
+				base := len(fbr.stack)
+				for idx := range fn.capacity {
+					fbr.stack = append(fbr.stack, vm.newValue())
+
+					// evaluate arguments
+					if idx < len(arguments) {
+						arg, exc := arguments[idx](fbr)
+						if exc != nil {
+							return arg, exc
+						}
+
+						*(fbr.stack[base+idx]) = arg
+					}
+				}
+
+				// prep for execution & save currently captured values
+				prevBase := fbr.swapBase(base)
+				prevFn := fbr.swapActive(fn)
+				result, exc = fn.code(fbr)
+
+				// release non-escaping locals
+				for _, idx := range fn.recyclable {
+					vm.putValue(fbr.stack[base+idx])
+				}
+
+				// restore old state
+				fbr.popStack(fn.capacity)
+				fbr.swapBase(prevBase)
+				fbr.swapActive(prevFn)
+
+				// return result but catch relevant signals
+				switch exc {
+				case returnSignal:
+					return result, nil
+				default:
+					return result, exc
+				}
+			}
+		}
+
+		// try go func
+		if fn, isGoFunc := value.AsGoFunc(); isGoFunc {
+			return func(fbr *fiber) (Value, *Exception) {
+				return fbr.call(fn, arguments)
 			}
 		}
 	}
@@ -875,8 +876,10 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 	index := fields.Get(node.Rhs)
 
+	//if lhs, ok := vm.evaluate()
+
 	// optimise: ident as lhs
-	if iGet, isIdentGet := node.Lhs.(ast.Ident); isIdentGet {
+	if iGet, isIdentGet := node.Lhs.(ast.Ident); isIdentGet && vm.cp.inline {
 		variable, err := vm.cp.reach(iGet.Name)
 		if err != nil {
 			panic(err)
@@ -903,27 +906,18 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 
 		case Global:
 			if lhs.IsStatic {
-				if pkg, ok := lhs.asPackage(); ok {
-					global, exists := pkg.globals[index]
-					if !exists {
-						panic(fmt.Errorf("undefined symbol '%v' in '%v' - package '%s' has no such symbol", node.Rhs, node, pkg.name))
-					}
-
+				if field, exists := lhs.getField(index); exists {
 					return func(fbr *fiber) (Value, *Exception) {
-						return *(global.Value), nil
+						return field, nil
 					}
 				}
-				panic("value is not a package")
+				panic(TypeErrorF("undefined symbol '%v' in '%v'", node.Rhs, node))
 			}
 			return func(fbr *fiber) (Value, *Exception) {
-				if pkg, ok := lhs.asPackage(); ok {
-					value, exists := pkg.globals[index]
-					if !exists {
-						panic(RuntimeExceptionF("undefined symbol '%v' in '%v' - package '%s' has no such symbol", node.Rhs, node, pkg.name))
-					}
-					return *(value.Value), nil
+				if field, exists := lhs.getField(index); exists {
+					return field, nil
 				}
-				panic("value is not a package")
+				panic(TypeErrorF("undefined symbol '%v' in '%v'", node.Rhs, node))
 			}
 		}
 	}
@@ -1240,3 +1234,255 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 	panic(fmt.Errorf("implement Operator(%v)", node.Operator))
 }
+
+// optimise: inline field access calls
+/* 	if iFA, isFieldAccess := node.Fn.(ast.FieldAccess); isFieldAccess && vm.cp.inline {
+	if iGet, isIdentGet := iFA.Lhs.(ast.Ident); isIdentGet && vm.cp.inline {
+		index := fields.Get(iFA.Rhs)
+		variable, err := vm.cp.reach(iGet.Name)
+		if err != nil {
+			panic(err)
+		}
+
+		switch lhs := variable.(type) {
+		case local:
+			return func(fbr *fiber) (Value, *Exception) {
+				v := fbr.getLocal(lhs)
+				field, exists := v.getField(index)
+				if !exists {
+					return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", iFA.Rhs, node)
+				}
+
+				// check if it is a user function
+				if fn, isUserFn := field.AsUserFn(); isUserFn {
+					if len(fn.args) != len(arguments) {
+						if fn.name != "λ" {
+							return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments))
+						}
+						return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments))
+					}
+
+					// setup stack locals
+					base := len(fbr.stack)
+					for idx := range fn.capacity {
+						fbr.stack = append(fbr.stack, vm.newValue())
+
+						// evaluate arguments
+						if idx < len(arguments) {
+							arg, exc := arguments[idx](fbr)
+							if exc != nil {
+								return arg, exc
+							}
+
+							*(fbr.stack[base+idx]) = arg
+						}
+					}
+
+					// prep for execution & save currently captured values
+					prevBase := fbr.swapBase(base)
+					prevFn := fbr.swapActive(fn)
+					result, exc := fn.code(fbr)
+
+					// release non-escaping locals
+					for _, idx := range fn.recyclable {
+						vm.putValue(fbr.stack[base+idx])
+					}
+
+					// restore old state
+					fbr.popStack(fn.capacity)
+					fbr.swapBase(prevBase)
+					fbr.swapActive(prevFn)
+
+					// return result but catch relevant signals
+					switch exc {
+					case returnSignal:
+						return result, nil
+					default:
+						return result, exc
+					}
+				}
+
+				return fbr.tryNonStandardCall(field, arguments)
+			}
+
+		case captured:
+			return func(fbr *fiber) (Value, *Exception) {
+				v := fbr.getCaptured(lhs)
+				field, exists := v.getField(index)
+				if !exists {
+					return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", iFA.Rhs, node)
+				}
+
+				// check if it is a user function
+				if fn, isUserFn := field.AsUserFn(); isUserFn {
+					if len(fn.args) != len(arguments) {
+						if fn.name != "λ" {
+							return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments))
+						}
+						return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments))
+					}
+
+					// setup stack locals
+					base := len(fbr.stack)
+					for idx := range fn.capacity {
+						fbr.stack = append(fbr.stack, vm.newValue())
+
+						// evaluate arguments
+						if idx < len(arguments) {
+							arg, exc := arguments[idx](fbr)
+							if exc != nil {
+								return arg, exc
+							}
+
+							*(fbr.stack[base+idx]) = arg
+						}
+					}
+
+					// prep for execution & save currently captured values
+					prevBase := fbr.swapBase(base)
+					prevFn := fbr.swapActive(fn)
+					result, exc := fn.code(fbr)
+
+					// release non-escaping locals
+					for _, idx := range fn.recyclable {
+						vm.putValue(fbr.stack[base+idx])
+					}
+
+					// restore old state
+					fbr.popStack(fn.capacity)
+					fbr.swapBase(prevBase)
+					fbr.swapActive(prevFn)
+
+					// return result but catch relevant signals
+					switch exc {
+					case returnSignal:
+						return result, nil
+					default:
+						return result, exc
+					}
+				}
+
+				return fbr.tryNonStandardCall(field, arguments)
+			}
+
+		case Global:
+			if lhs.IsStatic {
+				field, exists := lhs.getField(index)
+				if !exists {
+					panic(TypeErrorF("undefined symbol '%v' in '%v'", iFA.Rhs, node))
+				}
+
+				return func(fbr *fiber) (Value, *Exception) {
+					// check if it is a user function
+					if fn, isUserFn := field.AsUserFn(); isUserFn {
+						if len(fn.args) != len(arguments) {
+							if fn.name != "λ" {
+								return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments))
+							}
+							return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments))
+						}
+
+						// setup stack locals
+						base := len(fbr.stack)
+						for idx := range fn.capacity {
+							fbr.stack = append(fbr.stack, vm.newValue())
+
+							// evaluate arguments
+							if idx < len(arguments) {
+								arg, exc := arguments[idx](fbr)
+								if exc != nil {
+									return arg, exc
+								}
+
+								*(fbr.stack[base+idx]) = arg
+							}
+						}
+
+						// prep for execution & save currently captured values
+						prevBase := fbr.swapBase(base)
+						prevFn := fbr.swapActive(fn)
+						result, exc := fn.code(fbr)
+
+						// release non-escaping locals
+						for _, idx := range fn.recyclable {
+							vm.putValue(fbr.stack[base+idx])
+						}
+
+						// restore old state
+						fbr.popStack(fn.capacity)
+						fbr.swapBase(prevBase)
+						fbr.swapActive(prevFn)
+
+						// return result but catch relevant signals
+						switch exc {
+						case returnSignal:
+							return result, nil
+						default:
+							return result, exc
+						}
+					}
+
+					return fbr.tryNonStandardCall(field, arguments)
+				}
+			}
+			return func(fbr *fiber) (Value, *Exception) {
+				field, exists := lhs.getField(index)
+				if !exists {
+					panic(TypeErrorF("undefined symbol '%v' in '%v'", iFA.Rhs, node))
+				}
+
+				// check if it is a user function
+				if fn, isUserFn := field.AsUserFn(); isUserFn {
+					if len(fn.args) != len(arguments) {
+						if fn.name != "λ" {
+							return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments))
+						}
+						return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments))
+					}
+
+					// setup stack locals
+					base := len(fbr.stack)
+					for idx := range fn.capacity {
+						fbr.stack = append(fbr.stack, vm.newValue())
+
+						// evaluate arguments
+						if idx < len(arguments) {
+							arg, exc := arguments[idx](fbr)
+							if exc != nil {
+								return arg, exc
+							}
+
+							*(fbr.stack[base+idx]) = arg
+						}
+					}
+
+					// prep for execution & save currently captured values
+					prevBase := fbr.swapBase(base)
+					prevFn := fbr.swapActive(fn)
+					result, exc := fn.code(fbr)
+
+					// release non-escaping locals
+					for _, idx := range fn.recyclable {
+						vm.putValue(fbr.stack[base+idx])
+					}
+
+					// restore old state
+					fbr.popStack(fn.capacity)
+					fbr.swapBase(prevBase)
+					fbr.swapActive(prevFn)
+
+					// return result but catch relevant signals
+					switch exc {
+					case returnSignal:
+						return result, nil
+					default:
+						return result, exc
+					}
+				}
+
+				return fbr.tryNonStandardCall(field, arguments)
+			}
+		}
+	}
+}
+*/

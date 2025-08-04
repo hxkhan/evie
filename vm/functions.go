@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"reflect"
+	"unsafe"
 )
 
 type capture struct {
@@ -15,6 +16,11 @@ func (c capture) String() string {
 		return fmt.Sprintf("Local(%v)", c.index)
 	}
 	return fmt.Sprintf("Captured(%v)", c.index)
+}
+
+type goFunc struct {
+	nargs int
+	ptr   unsafe.Pointer
 }
 
 // funcInfoStatic holds static function information

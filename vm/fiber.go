@@ -125,3 +125,38 @@ func (fbr *fiber) tryNonStandardCall(value Value, arguments []instruction) (resu
 
 	return Value{}, CustomError("cannot call a non-function '%v'", value)
 }
+
+func (fbr *fiber) call(fn *goFunc, arguments []instruction) (result Value, exc *Exception) {
+	if fn.nargs != len(arguments) {
+		return Value{}, CustomError("function requires %v argument(s), %v provided", fn.nargs, len(arguments))
+	}
+
+	switch fn.nargs {
+	case -1:
+		panic("variadic functions not supported yet")
+	case 0:
+		function := *(*func() (Value, *Exception))(fn.ptr)
+		return function()
+	case 1:
+		function := *(*func(Value) (Value, *Exception))(fn.ptr)
+		arg0, err := arguments[0](fbr)
+		if err != nil {
+			return arg0, err
+		}
+		return function(arg0)
+	case 2:
+		function := *(*func(Value, Value) (Value, *Exception))(fn.ptr)
+		arg0, err := arguments[0](fbr)
+		if err != nil {
+			return arg0, err
+		}
+
+		arg1, err := arguments[1](fbr)
+		if err != nil {
+			return arg0, err
+		}
+		return function(arg0, arg1)
+	}
+
+	panic("unsuported call")
+}

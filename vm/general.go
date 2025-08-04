@@ -181,8 +181,10 @@ func (vm *Instance) WaitForNoActivity() {
 	vm.rt.wg.Wait()
 }
 
-type local int
-type captured int
+type local struct {
+	index      int
+	isCaptured bool
+}
 
 // reach searches for a symbol across all scopes
 func (cp *compiler) reach(name string) (v any, err error) {
@@ -192,11 +194,11 @@ func (cp *compiler) reach(name string) (v any, err error) {
 		if index, success := closure.scope.Reach(name); success {
 			// check if it's a local
 			if scroll == 0 {
-				return local(index), nil
+				return local{index: index, isCaptured: false}, nil
 			}
 
 			// otherwise capture it & return the index
-			return captured(cp.addToCaptured(scroll, index)), nil
+			return local{index: cp.addToCaptured(scroll, index), isCaptured: true}, nil
 		}
 	}
 

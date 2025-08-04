@@ -251,7 +251,7 @@ func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
 			return v, err
 		}
 
-		fbr.storeLocal(local(index), v)
+		fbr.storeLocal(index, v)
 		return Value{}, nil
 	}
 }
@@ -264,12 +264,13 @@ func (vm *Instance) emitIdentGet(node ast.Ident) instruction {
 
 	switch v := variable.(type) {
 	case local:
-		return func(fbr *fiber) (Value, *Exception) {
-			return fbr.getLocal(v), nil
+		if v.isCaptured {
+			return func(fbr *fiber) (Value, *Exception) {
+				return fbr.getCaptured(v.index), nil
+			}
 		}
-	case captured:
 		return func(fbr *fiber) (Value, *Exception) {
-			return fbr.getCaptured(v), nil
+			return fbr.getLocal(v.index), nil
 		}
 	case Global:
 		return func(fbr *fiber) (Value, *Exception) {
@@ -293,24 +294,24 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 
 		switch v := variable.(type) {
 		case local:
-			return func(fbr *fiber) (Value, *Exception) {
-				value, err := value(fbr)
-				if err != nil {
-					return value, err
-				}
+			if v.isCaptured {
+				return func(fbr *fiber) (Value, *Exception) {
+					value, err := value(fbr)
+					if err != nil {
+						return value, err
+					}
 
-				fbr.storeLocal(v, value)
-				return Value{}, nil
+					fbr.storeCaptured(v.index, value)
+					return Value{}, nil
+				}
 			}
-
-		case captured:
 			return func(fbr *fiber) (Value, *Exception) {
 				value, err := value(fbr)
 				if err != nil {
 					return value, err
 				}
 
-				fbr.storeCaptured(v, value)
+				fbr.storeLocal(v.index, value)
 				return Value{}, nil
 			}
 
@@ -483,7 +484,7 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 			funcInfoStatic: info,
 			references:     captured,
 		}
-		fbr.storeLocal(local(index), BoxUserFn(fn))
+		fbr.storeLocal(index, BoxUserFn(fn))
 		return Value{}, nil
 	}
 }
@@ -698,16 +699,21 @@ func (vm *Instance) emitReturn(node ast.Return) instruction {
 			}
 		}
 
-		// optimise: returning local variables
+		// optimise: returning locals variable
 		if iGet, isIdentGet := node.Value.(ast.Ident); isIdentGet {
 			variable, err := vm.cp.reach(iGet.Name)
 			if err != nil {
 				panic(err)
 			}
 
-			if idx, isLocal := variable.(local); isLocal {
+			if v, isLocal := variable.(local); isLocal {
+				if v.isCaptured {
+					return func(fbr *fiber) (Value, *Exception) {
+						return fbr.getCaptured(v.index), returnSignal
+					}
+				}
 				return func(fbr *fiber) (Value, *Exception) {
-					return fbr.getLocal(idx), returnSignal
+					return fbr.getLocal(v.index), returnSignal
 				}
 			}
 		}
@@ -829,16 +835,21 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 				}
 			}
 
-			// optimise: returning local variables
+			// optimise: returning locals
 			if iGet, isIdentGet := ret.Value.(ast.Ident); isIdentGet {
 				variable, err := vm.cp.reach(iGet.Name)
 				if err != nil {
 					panic(err)
 				}
 
-				if idx, isLocal := variable.(local); isLocal {
+				if v, isLocal := variable.(local); isLocal {
+					if v.isCaptured {
+						return func(fbr *fiber) (Value, *Exception) {
+							return fbr.getCaptured(v.index), returnSignal
+						}
+					}
 					return func(fbr *fiber) (Value, *Exception) {
-						return fbr.getLocal(idx), returnSignal
+						return fbr.getLocal(v.index), returnSignal
 					}
 				}
 			}
@@ -887,17 +898,18 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 
 		switch lhs := variable.(type) {
 		case local:
-			return func(fbr *fiber) (Value, *Exception) {
-				v := fbr.getLocal(lhs)
-				if field, exists := v.getField(index); exists {
-					return field, nil
+			if lhs.isCaptured {
+				return func(fbr *fiber) (Value, *Exception) {
+					v := fbr.getCaptured(lhs.index)
+					if field, exists := v.getField(index); exists {
+						return field, nil
+					}
+					return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", node.Rhs, node)
 				}
-				return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", node.Rhs, node)
 			}
 
-		case captured:
 			return func(fbr *fiber) (Value, *Exception) {
-				v := fbr.getCaptured(lhs)
+				v := fbr.getLocal(lhs.index)
 				if field, exists := v.getField(index); exists {
 					return field, nil
 				}
@@ -939,7 +951,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 }
 
 func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
-	// optimise: lhs being a local variable
+	// optimise: lhs being a local
 	if iGet, isIdentGet := node.Lhs.(ast.Ident); isIdentGet && vm.cp.inline {
 		variable, err := vm.cp.reach(iGet.Name)
 		if err != nil {
@@ -955,7 +967,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 				switch node.Operator {
 				case ast.AddOp:
 					return func(fbr *fiber) (Value, *Exception) {
-						lhs := fbr.getLocal(v)
+						lhs := fbr.get(v)
 						if lhs, ok := lhs.AsFloat64(); ok {
 							return BoxFloat64(lhs + rhs), nil
 						}
@@ -964,7 +976,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 				case ast.SubOp:
 					return func(fbr *fiber) (Value, *Exception) {
-						lhs := fbr.getLocal(v)
+						lhs := fbr.get(v)
 						if lhs, ok := lhs.AsFloat64(); ok {
 							return BoxFloat64(lhs - rhs), nil
 						}
@@ -973,7 +985,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 				case ast.LtOp:
 					return func(fbr *fiber) (Value, *Exception) {
-						lhs := fbr.getLocal(v)
+						lhs := fbr.get(v)
 						if lhs, ok := lhs.AsFloat64(); ok {
 							return BoxBool(lhs < rhs), nil
 						}
@@ -987,7 +999,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			switch node.Operator {
 			case ast.AddOp:
 				return func(fbr *fiber) (Value, *Exception) {
-					a := fbr.getLocal(v)
+					a := fbr.get(v)
 					b, err := rhs(fbr)
 					if err != nil {
 						return a, err
@@ -1009,7 +1021,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 				}
 			case ast.SubOp:
 				return func(fbr *fiber) (Value, *Exception) {
-					a := fbr.getLocal(v)
+					a := fbr.get(v)
 					b, err := rhs(fbr)
 					if err != nil {
 						return a, err
@@ -1025,7 +1037,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 			case ast.LtOp:
 				return func(fbr *fiber) (Value, *Exception) {
-					a := fbr.getLocal(v)
+					a := fbr.get(v)
 					b, err := rhs(fbr)
 					if err != nil {
 						return a, err

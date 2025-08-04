@@ -19,19 +19,26 @@ type fiber struct {
 	base   int      // where locals of the active function start at
 }
 
-func (fbr *fiber) getLocal(index local) Value {
-	return *(fbr.stack[fbr.base+int(index)])
+func (fbr *fiber) get(v local) Value {
+	if v.isCaptured {
+		return *(fbr.active.references[v.index])
+	}
+	return *(fbr.stack[fbr.base+v.index])
 }
 
-func (fbr *fiber) storeLocal(index local, value Value) {
-	*(fbr.stack[fbr.base+int(index)]) = value
+func (fbr *fiber) getLocal(index int) Value {
+	return *(fbr.stack[fbr.base+index])
 }
 
-func (fbr *fiber) getCaptured(index captured) Value {
+func (fbr *fiber) storeLocal(index int, value Value) {
+	*(fbr.stack[fbr.base+index]) = value
+}
+
+func (fbr *fiber) getCaptured(index int) Value {
 	return *(fbr.active.references[index])
 }
 
-func (fbr *fiber) storeCaptured(index captured, value Value) {
+func (fbr *fiber) storeCaptured(index int, value Value) {
 	*(fbr.active.references[index]) = value
 }
 

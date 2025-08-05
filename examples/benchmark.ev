@@ -1,8 +1,8 @@
-package main imports("io")
+package main imports("io", "builtin")
 
 fn main() {
-    n := 10000000
-    // for n := 10000000
+    var n := 10000000
+    // for n = 10000000
     // direct static call to io.dec:   ~120ms
     // via local variable as test.dec: ~130ms --- with inline cache
     // via local variable as test.dec: ~210ms --- with string lookup
@@ -10,7 +10,7 @@ fn main() {
 
     test := io
     while n > 0 {
-        n = io.dec(n) // swap io with test here
+        n = test.dec(n) // swap test with io here
     }
 
     echo "done"
@@ -19,7 +19,7 @@ fn main() {
 /* fn main() {
     message := "hello world"
 
-    n := 1000000
+    var n := 1000000
     while n > 0 {
         parts := message.split(" ")
         whole := parts.join("_")

@@ -5,19 +5,20 @@ import (
 	"github.com/hxkhan/evie/vm/fields"
 )
 
-func (vm *Instance) evaluate(node ast.Node) (Value, bool) {
+// evaluate can return values of type (Value, Global, local) or nil
+func (vm *Instance) evaluate(node ast.Node) any {
 	switch node := node.(type) {
 	case ast.Input[bool]:
-		return BoxBool(node.Value), true
+		return BoxBool(node.Value)
 
 	case ast.Input[float64]:
-		return BoxFloat64(node.Value), true
+		return BoxFloat64(node.Value)
 
 	case ast.Input[string]:
-		return BoxString(node.Value), true
+		return BoxString(node.Value)
 
 	case ast.Input[struct{}]:
-		return Value{}, true
+		return Value{}
 
 	case ast.Ident:
 		variable, err := vm.cp.reach(node.Name)
@@ -25,19 +26,27 @@ func (vm *Instance) evaluate(node ast.Node) (Value, bool) {
 			panic(err)
 		}
 
-		if global, isGlobal := variable.(Global); isGlobal && global.IsStatic {
-			return *(global.Value), true
+		if global, isGlobal := variable.(Global); isGlobal {
+			// global statics evaluate to Value instead of Global
+			if global.IsStatic {
+				return *(global.Value)
+			}
+			return global
+		} else if local, isLocal := variable.(local); isLocal {
+			return local
 		}
 
-		return Value{}, false
+		return nil
 
 	case ast.FieldAccess:
-		if lhs, ok := vm.evaluate(node.Lhs); ok {
-			if field, exists := lhs.getField(fields.Get(node.Rhs)); exists {
-				return field, true
+		if lhs := vm.evaluate(node.Lhs); lhs != nil {
+			if lhs, isValue := lhs.(Value); isValue {
+				if field, exists := lhs.getField(fields.Get(node.Rhs)); exists {
+					return field
+				}
 			}
 		}
 	}
 
-	return Value{}, false
+	return nil
 }

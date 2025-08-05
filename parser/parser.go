@@ -150,7 +150,11 @@ func (ps *parser) next(asExpr bool) ast.Node {
 	case main.Type == token.Number:
 		return ast.Input[float64]{Pos: main.Line, Value: ps.parseFloat(ps.NextToken().Literal)}
 	case main.IsSimple("-"):
-		return ps.parseNegation(ps.NextToken())
+		ps.NextToken()
+		if ps.PeekToken().Type == token.Number {
+			return ast.Input[float64]{Pos: main.Line, Value: -ps.parseFloat(ps.NextToken().Literal)}
+		}
+		return ast.Neg{Pos: main.Line, Value: ps.parseExpression(0)}
 	default:
 		return ps.parseExpression(0)
 	}
@@ -162,17 +166,6 @@ func (ps *parser) parseFloat(literal string) float64 {
 		panic(fmt.Errorf("error parsing number: %v", err))
 	}
 	return num
-}
-
-func (ps *parser) parseNegation(main token.Token) ast.Node {
-	ps.NextToken()
-	neg := ast.Neg{Pos: main.Line}
-	if ps.PeekToken().Type == token.Number {
-		neg.O = ast.Input[float64]{Pos: main.Line, Value: ps.parseFloat(ps.NextToken().Literal)}
-	} else {
-		neg.O = ps.parseExpression(0)
-	}
-	return neg
 }
 
 func (ps *parser) handleWords(main token.Token, asExpr bool) ast.Node {

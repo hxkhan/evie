@@ -2,6 +2,7 @@ package ast
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/hxkhan/evie/token"
@@ -28,6 +29,13 @@ type Input[T Literal] struct {
 }
 
 func (node Input[T]) String() string {
+	if f, isFloat := any(node.Value).(float64); isFloat {
+		return strconv.FormatFloat(f, 'f', -1, 64)
+	}
+	if s, isString := any(node.Value).(string); isString {
+		return fmt.Sprintf("\"%v\"", s)
+	}
+
 	return fmt.Sprint(node.Value)
 }
 

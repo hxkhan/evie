@@ -97,6 +97,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	case ast.Await:
 		return vm.emitAwait(node)
 
+	case ast.Neg:
+		return vm.emitNeg(node)
+
 	case ast.BinOp:
 		return vm.emitBinOp(node)
 	}
@@ -244,6 +247,26 @@ func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
 		panic(fmt.Errorf("double declaration of %s", node.Name))
 	}
 
+	// try to evaluate
+	switch value := vm.evaluate(node.Value).(type) {
+	case local:
+		return func(fbr *fiber) (Value, *Exception) {
+			fbr.storeLocal(index, fbr.get(value))
+			return Value{}, nil
+		}
+	case Value:
+		return func(fbr *fiber) (Value, *Exception) {
+			fbr.storeLocal(index, value)
+			return Value{}, nil
+		}
+	case Global:
+		return func(fbr *fiber) (Value, *Exception) {
+			fbr.storeLocal(index, *value.Value)
+			return Value{}, nil
+		}
+	}
+
+	// generic
 	value := vm.compile(node.Value)
 	return func(fbr *fiber) (Value, *Exception) {
 		v, err := value(fbr)
@@ -501,60 +524,18 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 	}
 
 	// optimise: calling static functions/bindings
-	if value := vm.evaluate(node.Fn); value != nil {
-		if value, isValue := value.(Value); isValue {
-			// try user fn
-			if fn, isUserFn := value.AsUserFn(); isUserFn {
-				if len(fn.args) != len(arguments) {
-					if fn.name != "λ" {
-						panic(CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments)))
-					}
-					panic(CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments)))
+	if value, ok := vm.evaluate(node.Fn).(Value); ok {
+		// try evie fn
+		if fn, isUserFn := value.AsUserFn(); isUserFn {
+			if len(fn.args) != len(arguments) {
+				if fn.name != "λ" {
+					panic(CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments)))
 				}
+				panic(CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments)))
+			}
 
-				// optimise: call to ourselves (recursion)
-				if value == *(vm.cp.closures.Last(0).this) {
-					return func(fbr *fiber) (result Value, exc *Exception) {
-						// setup stack locals
-						base := len(fbr.stack)
-						for idx := range fn.capacity {
-							fbr.stack = append(fbr.stack, vm.newValue())
-
-							// evaluate arguments
-							if idx < len(arguments) {
-								arg, exc := arguments[idx](fbr)
-								if exc != nil {
-									return arg, exc
-								}
-
-								*(fbr.stack[base+idx]) = arg
-							}
-						}
-
-						// prep for execution & save currently captured values
-						prevBase := fbr.swapBase(base)
-						result, exc = fn.code(fbr)
-
-						// release non-escaping locals
-						for _, idx := range fn.recyclable {
-							vm.putValue(fbr.stack[base+idx])
-						}
-
-						// restore old state
-						fbr.popStack(fn.capacity)
-						fbr.swapBase(prevBase)
-
-						// return result but catch relevant signals
-						switch exc {
-						case returnSignal:
-							return result, nil
-						default:
-							return result, exc
-						}
-					}
-				}
-
-				// optimise: call to an arbitrary static global
+			// optimise: call to ourselves (recursion)
+			if value == *(vm.cp.closures.Last(0).this) {
 				return func(fbr *fiber) (result Value, exc *Exception) {
 					// setup stack locals
 					base := len(fbr.stack)
@@ -574,7 +555,6 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 					// prep for execution & save currently captured values
 					prevBase := fbr.swapBase(base)
-					prevFn := fbr.swapActive(fn)
 					result, exc = fn.code(fbr)
 
 					// release non-escaping locals
@@ -585,7 +565,6 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					// restore old state
 					fbr.popStack(fn.capacity)
 					fbr.swapBase(prevBase)
-					fbr.swapActive(prevFn)
 
 					// return result but catch relevant signals
 					switch exc {
@@ -597,11 +576,53 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				}
 			}
 
-			// try go func
-			if fn, isGoFunc := value.AsGoFunc(); isGoFunc {
-				return func(fbr *fiber) (Value, *Exception) {
-					return fbr.call(fn, arguments)
+			// optimise: call to an arbitrary static global
+			return func(fbr *fiber) (result Value, exc *Exception) {
+				// setup stack locals
+				base := len(fbr.stack)
+				for idx := range fn.capacity {
+					fbr.stack = append(fbr.stack, vm.newValue())
+
+					// evaluate arguments
+					if idx < len(arguments) {
+						arg, exc := arguments[idx](fbr)
+						if exc != nil {
+							return arg, exc
+						}
+
+						*(fbr.stack[base+idx]) = arg
+					}
 				}
+
+				// prep for execution & save currently captured values
+				prevBase := fbr.swapBase(base)
+				prevFn := fbr.swapActive(fn)
+				result, exc = fn.code(fbr)
+
+				// release non-escaping locals
+				for _, idx := range fn.recyclable {
+					vm.putValue(fbr.stack[base+idx])
+				}
+
+				// restore old state
+				fbr.popStack(fn.capacity)
+				fbr.swapBase(prevBase)
+				fbr.swapActive(prevFn)
+
+				// return result but catch relevant signals
+				switch exc {
+				case returnSignal:
+					return result, nil
+				default:
+					return result, exc
+				}
+			}
+		}
+
+		// try go func
+		if fn, isGoFunc := value.AsGoFunc(); isGoFunc {
+			return func(fbr *fiber) (Value, *Exception) {
+				return fbr.call(fn, arguments)
 			}
 		}
 	}
@@ -941,106 +962,120 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 	}
 }
 
+func (vm *Instance) emitNeg(node ast.Neg) instruction {
+	value := vm.compile(node.Value)
+
+	return func(fbr *fiber) (Value, *Exception) {
+		value, exc := value(fbr)
+		if exc != nil {
+			return value, exc
+		}
+
+		if float, ok := value.AsFloat64(); ok {
+			return BoxFloat64(-float), nil
+		}
+		return Value{}, RuntimeExceptionF("Cannot negate '%v'.", value)
+	}
+}
+
 func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
-	if lhs := vm.evaluate(node.Lhs); lhs != nil {
-		// optimise: lhs being a local
-		if lhs, isLocal := lhs.(local); isLocal {
-			if rhs := vm.evaluate(node.Rhs); rhs != nil {
-				// optimise: rhs being a constant
-				if rhs, isValue := rhs.(Value); isValue {
-					switch node.Operator {
-					case ast.AddOp:
-						return func(fbr *fiber) (Value, *Exception) {
-							lhs := fbr.get(lhs)
-							if lhs, ok := lhs.AsFloat64(); ok {
-								if rhs, ok := rhs.AsFloat64(); ok {
-									return BoxFloat64(lhs + rhs), nil
-								}
+	// optimise: lhs being a local
+	if lhs, isLocal := vm.evaluate(node.Lhs).(local); isLocal {
+		if rhs := vm.evaluate(node.Rhs); rhs != nil {
+			// optimise: rhs being a constant
+			if rhs, isValue := rhs.(Value); isValue {
+				switch node.Operator {
+				case ast.AddOp:
+					return func(fbr *fiber) (Value, *Exception) {
+						lhs := fbr.get(lhs)
+						if lhs, ok := lhs.AsFloat64(); ok {
+							if rhs, ok := rhs.AsFloat64(); ok {
+								return BoxFloat64(lhs + rhs), nil
 							}
-							return Value{}, operatorError("+", lhs, rhs)
 						}
+						return Value{}, operatorError("+", lhs, rhs)
+					}
 
-					case ast.SubOp:
-						return func(fbr *fiber) (Value, *Exception) {
-							lhs := fbr.get(lhs)
-							if lhs, ok := lhs.AsFloat64(); ok {
-								if rhs, ok := rhs.AsFloat64(); ok {
-									return BoxFloat64(lhs - rhs), nil
-								}
+				case ast.SubOp:
+					return func(fbr *fiber) (Value, *Exception) {
+						lhs := fbr.get(lhs)
+						if lhs, ok := lhs.AsFloat64(); ok {
+							if rhs, ok := rhs.AsFloat64(); ok {
+								return BoxFloat64(lhs - rhs), nil
 							}
-							return Value{}, operatorError("-", lhs, rhs)
 						}
+						return Value{}, operatorError("-", lhs, rhs)
+					}
 
-					case ast.LtOp:
-						return func(fbr *fiber) (Value, *Exception) {
-							lhs := fbr.get(lhs)
-							if lhs, ok := lhs.AsFloat64(); ok {
-								if rhs, ok := rhs.AsFloat64(); ok {
-									return BoxBool(lhs < rhs), nil
-								}
+				case ast.LtOp:
+					return func(fbr *fiber) (Value, *Exception) {
+						lhs := fbr.get(lhs)
+						if lhs, ok := lhs.AsFloat64(); ok {
+							if rhs, ok := rhs.AsFloat64(); ok {
+								return BoxBool(lhs < rhs), nil
 							}
-							return Value{}, operatorError("<", lhs, rhs)
 						}
+						return Value{}, operatorError("<", lhs, rhs)
 					}
 				}
 			}
+		}
 
-			// generic rhs
-			rhs := vm.compile(node.Rhs)
-			switch node.Operator {
-			case ast.AddOp:
-				return func(fbr *fiber) (Value, *Exception) {
-					a := fbr.get(lhs)
-					b, err := rhs(fbr)
-					if err != nil {
-						return a, err
-					}
-
-					if a, ok := a.AsFloat64(); ok {
-						if b, ok := b.AsFloat64(); ok {
-							return BoxFloat64(a + b), nil
-						}
-					}
-
-					if a, ok := a.AsString(); ok {
-						if b, ok := b.AsString(); ok {
-							return BoxString(a + b), nil
-						}
-					}
-
-					return Value{}, operatorError("+", a, b)
-				}
-			case ast.SubOp:
-				return func(fbr *fiber) (Value, *Exception) {
-					a := fbr.get(lhs)
-					b, err := rhs(fbr)
-					if err != nil {
-						return a, err
-					}
-
-					if a, ok := a.AsFloat64(); ok {
-						if b, ok := b.AsFloat64(); ok {
-							return BoxFloat64(a - b), nil
-						}
-					}
-					return Value{}, operatorError("-", a, b)
+		// generic rhs
+		rhs := vm.compile(node.Rhs)
+		switch node.Operator {
+		case ast.AddOp:
+			return func(fbr *fiber) (Value, *Exception) {
+				a := fbr.get(lhs)
+				b, err := rhs(fbr)
+				if err != nil {
+					return a, err
 				}
 
-			case ast.LtOp:
-				return func(fbr *fiber) (Value, *Exception) {
-					a := fbr.get(lhs)
-					b, err := rhs(fbr)
-					if err != nil {
-						return a, err
+				if a, ok := a.AsFloat64(); ok {
+					if b, ok := b.AsFloat64(); ok {
+						return BoxFloat64(a + b), nil
 					}
-
-					if a, ok := a.AsFloat64(); ok {
-						if b, ok := b.AsFloat64(); ok {
-							return BoxBool(a < b), nil
-						}
-					}
-					return Value{}, operatorError("<", a, b)
 				}
+
+				if a, ok := a.AsString(); ok {
+					if b, ok := b.AsString(); ok {
+						return BoxString(a + b), nil
+					}
+				}
+
+				return Value{}, operatorError("+", a, b)
+			}
+		case ast.SubOp:
+			return func(fbr *fiber) (Value, *Exception) {
+				a := fbr.get(lhs)
+				b, err := rhs(fbr)
+				if err != nil {
+					return a, err
+				}
+
+				if a, ok := a.AsFloat64(); ok {
+					if b, ok := b.AsFloat64(); ok {
+						return BoxFloat64(a - b), nil
+					}
+				}
+				return Value{}, operatorError("-", a, b)
+			}
+
+		case ast.LtOp:
+			return func(fbr *fiber) (Value, *Exception) {
+				a := fbr.get(lhs)
+				b, err := rhs(fbr)
+				if err != nil {
+					return a, err
+				}
+
+				if a, ok := a.AsFloat64(); ok {
+					if b, ok := b.AsFloat64(); ok {
+						return BoxBool(a < b), nil
+					}
+				}
+				return Value{}, operatorError("<", a, b)
 			}
 		}
 	}

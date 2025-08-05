@@ -7,6 +7,10 @@ import (
 
 // evaluate can return values of type (Value, Global, local) or nil
 func (vm *Instance) evaluate(node ast.Node) any {
+	if !vm.cp.inline {
+		return nil
+	}
+
 	switch node := node.(type) {
 	case ast.Input[bool]:
 		return BoxBool(node.Value)
@@ -39,10 +43,72 @@ func (vm *Instance) evaluate(node ast.Node) any {
 		return nil
 
 	case ast.FieldAccess:
-		if lhs := vm.evaluate(node.Lhs); lhs != nil {
-			if lhs, isValue := lhs.(Value); isValue {
-				if field, exists := lhs.getField(fields.Get(node.Rhs)); exists {
-					return field
+		if lhs, ok := vm.evaluate(node.Lhs).(Value); ok {
+			if field, exists := lhs.getField(fields.Get(node.Rhs)); exists {
+				return field
+			}
+		}
+
+	case ast.BinOp:
+		if lhs, ok := vm.evaluate(node.Lhs).(Value); ok {
+			if rhs, ok := vm.evaluate(node.Rhs).(Value); ok {
+				switch node.Operator {
+				case ast.AddOp:
+					if a, ok := lhs.AsFloat64(); ok {
+						if b, ok := rhs.AsFloat64(); ok {
+							return BoxFloat64(a + b)
+						}
+					}
+
+					if a, ok := lhs.AsString(); ok {
+						if b, ok := rhs.AsString(); ok {
+							return BoxString(a + b)
+						}
+					}
+
+				case ast.SubOp:
+					if a, ok := lhs.AsFloat64(); ok {
+						if b, ok := rhs.AsFloat64(); ok {
+							return BoxFloat64(a - b)
+						}
+					}
+
+				case ast.MulOp:
+					if a, ok := lhs.AsFloat64(); ok {
+						if b, ok := rhs.AsFloat64(); ok {
+							return BoxFloat64(a * b)
+						}
+					}
+
+				case ast.DivOp:
+					if a, ok := lhs.AsFloat64(); ok {
+						if b, ok := rhs.AsFloat64(); ok {
+							return BoxFloat64(a / b)
+						}
+					}
+				case ast.ModOp:
+					if a, ok := lhs.AsFloat64(); ok {
+						if b, ok := rhs.AsFloat64(); ok {
+							return BoxFloat64(float64(int64(a) % int64(b)))
+						}
+					}
+
+				case ast.EqOp:
+					return BoxBool(lhs.Equals(rhs))
+
+				case ast.LtOp:
+					if a, ok := lhs.AsFloat64(); ok {
+						if b, ok := rhs.AsFloat64(); ok {
+							return BoxBool(a < b)
+						}
+					}
+
+				case ast.GtOp:
+					if a, ok := lhs.AsFloat64(); ok {
+						if b, ok := rhs.AsFloat64(); ok {
+							return BoxBool(a > b)
+						}
+					}
 				}
 			}
 		}

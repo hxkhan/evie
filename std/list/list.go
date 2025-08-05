@@ -1,4 +1,4 @@
-package builtin
+package list
 
 import (
 	"strings"
@@ -7,8 +7,7 @@ import (
 )
 
 func Construct() vm.Package {
-	pkg := vm.NewHostPackage("builtin")
-	pkg.SetSymbol("split", vm.BoxGoFunc(split))
+	pkg := vm.NewHostPackage("list")
 	pkg.SetSymbol("join", vm.BoxGoFunc(join))
 	return pkg
 }

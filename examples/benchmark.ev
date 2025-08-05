@@ -1,4 +1,4 @@
-package main imports("io", "builtin")
+package main imports("io", "list", "string")
 
 fn main() {
     var n := 10000000
@@ -21,13 +21,13 @@ fn main() {
 
     var n := 1000000
     while n > 0 {
-        parts := message.split(" ")
-        whole := parts.join("_")
+        //parts := message.split(" ")
+        //whole := parts.join("_")
 
-        //parts := builtin.split(message, " ")
-        //whole := builtin.join(parts, "_")
+        parts := string.split(message, " ")
+        whole := list.join(parts, "_")
 
-        n = io.dec(n)
+        n -= 1
     }
 
     echo "done"

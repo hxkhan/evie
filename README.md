@@ -4,13 +4,13 @@ Evie is a dynamically typed programming language written in Go. The goal is to p
 
 #### Here is some example code from [examples/fib.ev](./examples/fib.ev)
 <a href="./examples/fib.ev">
-    <img src="./docs/images/fib.png" width="600" alt="A snippet of Evie code">
+    <img src="./docs/images/fib.png" width="500" alt="A snippet of Evie code">
 </a>
 
 
 #### Also a concurrency example from [examples/go.ev](./examples/go.ev)
 <a href="./examples/go.ev">
-    <img src="./docs/images/go.png" width="600" alt="A snippet of Evie code">
+    <img src="./docs/images/go.png" width="500" alt="A snippet of Evie code">
 </a>
 
 To test this exact program, run `go run ./cli -t ./examples/go.ev`. Then remove all of the `go` keywords infront of the `print` calls and re-run to see the difference.

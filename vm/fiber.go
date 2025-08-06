@@ -133,7 +133,7 @@ func (fbr *fiber) tryNonStandardCall(value Value, arguments []instruction) (resu
 	return Value{}, CustomError("cannot call a non-function '%v'", value)
 }
 
-func (fbr *fiber) call(fn *goFunc, arguments []instruction) (result Value, exc *Exception) {
+func (fbr *fiber) callFunc(fn *goFunc, arguments []instruction) (result Value, exc *Exception) {
 	if fn.nargs != len(arguments) {
 		return Value{}, CustomError("function requires %v argument(s), %v provided", fn.nargs, len(arguments))
 	}
@@ -163,6 +163,36 @@ func (fbr *fiber) call(fn *goFunc, arguments []instruction) (result Value, exc *
 			return arg0, err
 		}
 		return function(arg0, arg1)
+	}
+
+	panic("unsuported call")
+}
+
+func (fbr *fiber) callMethod(m *method, arguments []instruction) (result Value, exc *Exception) {
+	fn, ok := m.fn.AsGoFunc()
+	if !ok {
+		return Value{}, notFunction
+	}
+
+	if fn.nargs-1 != len(arguments) {
+		return Value{}, CustomError("method requires %v argument(s), %v provided", fn.nargs-1, len(arguments))
+	}
+
+	switch fn.nargs {
+	case -1:
+		panic("variadic functions not supported yet")
+	case 0:
+		panic("how did we get a method that does not even take itself as an arguement?")
+	case 1:
+		function := *(*func(Value) (Value, *Exception))(fn.ptr)
+		return function(m.this)
+	case 2:
+		function := *(*func(Value, Value) (Value, *Exception))(fn.ptr)
+		arg0, err := arguments[0](fbr)
+		if err != nil {
+			return arg0, err
+		}
+		return function(m.this, arg0)
 	}
 
 	panic("unsuported call")

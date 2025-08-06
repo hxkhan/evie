@@ -3,29 +3,32 @@ package main imports("io", "list", "string")
 fn main() {
     var n := 10000000
     // for n = 10000000
-    // direct static call to io.dec:   ~120ms
-    // via local variable as test.dec: ~130ms --- with inline cache
-    // via local variable as test.dec: ~210ms --- with string lookup
-    // via local variable as test.dec: ~145ms --- with integer lookup
+    // direct static call to io.dec:   ~80ms
+    // via local variable as test.dec: ~150ms --- with integer lookup
 
     test := io
     while n > 0 {
-        n = test.dec(n) // swap test with io here
+        //n = io.dec(n)
+        n = test.dec(n)
     }
 
     echo "done"
 }
 
-/* fn main() {
-    message := "hello world"
+/* message := "hello world"
 
+fn main() {
     var n := 1000000
-    while n > 0 {
-        //parts := message.split(" ")
-        //whole := parts.join("_")
+    // for n = 1000000
+    // direct static call to string.split & list.join: ~175ms
+    // dynamic dispatch to message.split & parts.join: ~205ms
 
-        parts := string.split(message, " ")
-        whole := list.join(parts, "_")
+    while n > 0 {
+        //parts := string.split(message, " ")
+        //whole := list.join(parts, "_")
+
+        parts := message.split(" ")
+        whole := parts.join("_")
 
         n -= 1
     }

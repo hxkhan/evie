@@ -18,11 +18,6 @@ func (c capture) String() string {
 	return fmt.Sprintf("Captured(%v)", c.index)
 }
 
-type goFunc struct {
-	nargs int
-	ptr   unsafe.Pointer
-}
-
 // funcInfoStatic holds static function information
 type funcInfoStatic struct {
 	name       string      // name of the function
@@ -174,4 +169,79 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 
 	reflect.ValueOf(ptr).Elem().Set(wrapper)
 	return nil
+}
+
+type Method struct {
+	this Value
+	fn   Value
+}
+
+func (m Method) call(fbr *fiber, arguments []instruction) (result Value, exc *Exception) {
+	fn, ok := m.fn.AsGoFunc()
+	if !ok {
+		return Value{}, notFunction
+	}
+
+	if fn.nargs-1 != len(arguments) {
+		return Value{}, CustomError("method requires %v argument(s), %v provided", fn.nargs-1, len(arguments))
+	}
+
+	switch fn.nargs {
+	case -1:
+		panic("variadic functions not supported yet")
+	case 0:
+		panic("how did we get a method that does not even take itself as an arguement?")
+	case 1:
+		function := *(*func(Value) (Value, *Exception))(fn.ptr)
+		return function(m.this)
+	case 2:
+		function := *(*func(Value, Value) (Value, *Exception))(fn.ptr)
+		arg0, err := arguments[0](fbr)
+		if err != nil {
+			return arg0, err
+		}
+		return function(m.this, arg0)
+	}
+
+	panic("unsuported call")
+}
+
+type GoFunc struct {
+	nargs int
+	ptr   unsafe.Pointer
+}
+
+func (fn *GoFunc) call(fbr *fiber, arguments []instruction) (result Value, exc *Exception) {
+	if fn.nargs != len(arguments) {
+		return Value{}, CustomError("function requires %v argument(s), %v provided", fn.nargs, len(arguments))
+	}
+
+	switch fn.nargs {
+	case -1:
+		panic("variadic functions not supported yet")
+	case 0:
+		function := *(*func() (Value, *Exception))(fn.ptr)
+		return function()
+	case 1:
+		function := *(*func(Value) (Value, *Exception))(fn.ptr)
+		arg0, err := arguments[0](fbr)
+		if err != nil {
+			return arg0, err
+		}
+		return function(arg0)
+	case 2:
+		function := *(*func(Value, Value) (Value, *Exception))(fn.ptr)
+		arg0, err := arguments[0](fbr)
+		if err != nil {
+			return arg0, err
+		}
+
+		arg1, err := arguments[1](fbr)
+		if err != nil {
+			return arg0, err
+		}
+		return function(arg0, arg1)
+	}
+
+	panic("unsuported call")
 }

@@ -622,14 +622,46 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 		// try go func
 		if fn, isGoFunc := value.AsGoFunc(); isGoFunc {
 			return func(fbr *fiber) (Value, *Exception) {
-				return fbr.callFunc(fn, arguments)
+				return fn.call(fbr, arguments)
 			}
 		}
 
 		// try method
 		if m, isMethod := value.asMethod(); isMethod {
 			return func(fbr *fiber) (Value, *Exception) {
-				return fbr.callMethod(m, arguments)
+				return m.call(fbr, arguments)
+			}
+		}
+
+		panic("cannot call whatever this is")
+	}
+
+	// optimise: calling methods (avoids heap allocation of Method{})
+	if iFA, ok := node.Fn.(ast.FieldAccess); ok {
+		if lhs, ok := vm.evaluate(iFA.Lhs).(local); ok {
+			index := fields.Get(iFA.Rhs)
+			return func(fbr *fiber) (Value, *Exception) {
+				obj := fbr.get(lhs)
+				if pkg, ok := obj.asPackage(); ok {
+					value, exists := pkg.globals[index]
+					if !exists {
+						return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", iFA.Rhs, iFA)
+					}
+
+					// try go func
+					if fn, isGoFunc := value.AsGoFunc(); isGoFunc {
+						return fn.call(fbr, arguments)
+					}
+
+					panic("fix.")
+				}
+
+				// 100% method
+				value := obj.dotAccess(index)
+				if value == nil {
+					return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", iFA.Rhs, iFA)
+				}
+				return Method{this: obj, fn: *value}.call(fbr, arguments)
 			}
 		}
 	}
@@ -691,7 +723,17 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			}
 		}
 
-		return fbr.tryNonStandardCall(value, arguments)
+		// try go func
+		if fn, isGoFunc := value.AsGoFunc(); isGoFunc {
+			return fn.call(fbr, arguments)
+		}
+
+		// try method
+		if m, isMethod := value.asMethod(); isMethod {
+			return m.call(fbr, arguments)
+		}
+
+		return Value{}, CustomError("cannot call a non-function '%v'", value)
 	}
 }
 

@@ -6,7 +6,7 @@ import (
 	"github.com/hxkhan/evie/vm/fields"
 )
 
-var stringMethods = map[int]Value{
+var stringMethods = map[int]*Value{
 	fields.Get("split"): BoxGoFunc(func(this, sep Value) (Value, *Exception) {
 		if str, ok := this.AsString(); ok {
 			if sep, ok := sep.AsString(); ok {
@@ -20,10 +20,10 @@ var stringMethods = map[int]Value{
 			}
 		}
 		return Value{}, ErrTypes
-	}),
+	}).Allocate(),
 }
 
-var arrayMethods = map[int]Value{
+var arrayMethods = map[int]*Value{
 	fields.Get("join"): BoxGoFunc(func(this, sep Value) (Value, *Exception) {
 		if parts, ok := this.AsArray(); ok {
 			if sep, ok := sep.AsString(); ok {
@@ -41,5 +41,5 @@ var arrayMethods = map[int]Value{
 			}
 		}
 		return Value{}, ErrTypes
-	}),
+	}).Allocate(),
 }

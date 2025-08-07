@@ -1,6 +1,6 @@
 package main imports("io", "list", "string")
 
-fn main() {
+/* fn main() {
     var n := 10000000
     // for n = 10000000
     // direct static call to io.dec:   ~80ms
@@ -13,16 +13,16 @@ fn main() {
     }
 
     echo "done"
-}
+} */
 
-/* message := "hello world"
 
 fn main() {
     var n := 1000000
     // for n = 1000000
     // direct static call to string.split & list.join: ~175ms
-    // dynamic dispatch to message.split & parts.join: ~205ms
+    // dynamic dispatch to message.split & parts.join: ~185ms
 
+    message := "hello world"
     while n > 0 {
         //parts := string.split(message, " ")
         //whole := list.join(parts, "_")
@@ -34,4 +34,4 @@ fn main() {
     }
 
     echo "done"
-} */
+}

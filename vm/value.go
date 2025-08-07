@@ -58,6 +58,10 @@ const (
 var f64Type = unsafe.Pointer(new(byte))
 var boolType = unsafe.Pointer(new(byte))
 
+// scalar types
+var strTypeID = unsafe.Pointer(new(byte))
+var arrayTypeID = unsafe.Pointer(new(byte))
+
 // CustomValue is an interface for evie hosts to add their own custom values to the language
 type CustomValue interface {
 	String() string
@@ -66,8 +70,8 @@ type CustomValue interface {
 	Equals(b CustomValue) bool
 }
 
-// GoFunc is a compile time safety interface so uncallable functions don't get into the system
-type GoFunc interface {
+// SafeGoFunc is a compile time safety interface so uncallable functions don't get into the system
+type SafeGoFunc interface {
 	func() (Value, *Exception) |
 		func(Value) (Value, *Exception) |
 		func(Value, Value) (Value, *Exception) |
@@ -101,8 +105,8 @@ func BoxUserFn(fn UserFn) Value {
 }
 
 // BoxGoFunc boxes a golang function
-func BoxGoFunc[T GoFunc](fn T) Value {
-	ptr := unsafe.Pointer(&goFunc{nargs: reflect.TypeOf(fn).NumIn(), ptr: unsafe.Pointer(&fn)})
+func BoxGoFunc[T SafeGoFunc](fn T) Value {
+	ptr := unsafe.Pointer(&GoFunc{nargs: reflect.TypeOf(fn).NumIn(), ptr: unsafe.Pointer(&fn)})
 	return Value{scalar: goFuncType, pointer: ptr}
 }
 
@@ -126,7 +130,7 @@ func (pkg *packageInstance) Box() Value {
 	return Value{scalar: packageType, pointer: unsafe.Pointer(pkg)}
 }
 
-func boxMethod(m method) Value {
+func boxMethod(m Method) Value {
 	return Value{scalar: methodType, pointer: unsafe.Pointer(&m)}
 }
 
@@ -171,11 +175,11 @@ func (x Value) AsUserFn() (fn *UserFn, ok bool) {
 	return (*UserFn)(x.pointer), true
 }
 
-func (x Value) AsGoFunc() (fn *goFunc, ok bool) {
+func (x Value) AsGoFunc() (fn *GoFunc, ok bool) {
 	if x.scalar != goFuncType || isKnown(x.pointer) {
 		return nil, false
 	}
-	return (*goFunc)(x.pointer), true
+	return (*GoFunc)(x.pointer), true
 }
 
 func (x Value) AsArray() (array []Value, ok bool) {
@@ -206,11 +210,11 @@ func (x Value) AsPackage() (pkg Package, ok bool) {
 	return (*packageInstance)(x.pointer), true
 }
 
-func (x Value) asMethod() (m *method, ok bool) {
+func (x Value) asMethod() (m *Method, ok bool) {
 	if x.scalar != methodType || isKnown(x.pointer) {
 		return nil, false
 	}
-	return (*method)(x.pointer), true
+	return (*Method)(x.pointer), true
 }
 
 func (x Value) AsBuffer() (buffer []byte, ok bool) {
@@ -408,12 +412,30 @@ func (x Value) TypeOf() string {
 	return "<unknown>"
 }
 
-type method struct {
-	this Value
-	fn   Value
+func (x Value) TypeID() unsafe.Pointer {
+	if isKnown(x.pointer) {
+		return nil
+	}
+
+	switch x.scalar {
+	case stringType:
+		return strTypeID
+	case arrayType:
+		return arrayTypeID
+	case packageType:
+		return x.pointer
+	}
+
+	return nil
+
+	//panic("TypeID() -> cant figure it out")
 }
 
 func (x Value) getField(f int) (field Value, ok bool) {
+	if isKnown(x.pointer) {
+		return Value{}, false
+	}
+
 	switch x.scalar {
 	case stringType:
 		value, exists := stringMethods[f]
@@ -421,7 +443,7 @@ func (x Value) getField(f int) (field Value, ok bool) {
 			return Value{}, false
 		}
 
-		m := method{this: x, fn: value}
+		m := Method{this: x, fn: *value}
 		return boxMethod(m), true
 
 	case arrayType:
@@ -430,15 +452,32 @@ func (x Value) getField(f int) (field Value, ok bool) {
 			return Value{}, false
 		}
 
-		m := method{this: x, fn: value}
+		m := Method{this: x, fn: *value}
 		return boxMethod(m), true
 
 	case packageType:
 		pkg := (*packageInstance)(x.pointer)
 		value, exists := pkg.globals[f]
+		if !value.IsPublic {
+			return Value{}, false
+		}
 		return *(value.Value), exists
-
-	default:
-		panic("getField(f) unknown!")
 	}
+
+	return Value{}, false
+}
+
+func (x Value) dotAccess(f int) (field *Value) {
+	if isKnown(x.pointer) {
+		return nil
+	}
+
+	switch x.scalar {
+	case stringType:
+		return stringMethods[f]
+	case arrayType:
+		return arrayMethods[f]
+	}
+
+	panic("add more types?")
 }

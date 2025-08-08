@@ -17,6 +17,8 @@ To test this exact program, run `go run ./cli -t ./examples/go.ev`. Then remove 
 
 > The flag `-t` prints the execution time of just Evie, i.e. total time `-` the time it took to compile Evie itself. You could alternatively build Evie first by doing `go build ./cli`, as shown at the bottom of this page.
 
+> Also you need Go installed of course. But don't worry as it is probably the simplest language to setup. See [here](https://go.dev/doc/install).
+
 ## Goals
 - Highly performant
 - Builtin concurrency
@@ -62,7 +64,12 @@ Why `fib(35)`? Because Evie barely has a standard library so micro-benchmarks is
 - Number crunching (primative math)
 - Conditional logic
 
+# Setup
 All of these exist in the [examples](./examples) directory. To build the evie cli you can do:
+1. First install go from [here](https://go.dev/doc/install)
+2. Then git clone this repo
+3. Build the standalone cli
+4. Use it like any other language
 ```
 git clone https://github.com/hxkhan/evie.git
 cd evie

@@ -3,8 +3,8 @@ package main imports("io", "list", "string")
 /* fn main() {
     var n := 10000000
     // for n = 10000000
-    // direct static call to io.dec:   ~80ms
-    // via local variable as test.dec: ~150ms --- with integer lookup
+    // direct static call to io.dec:   ~76ms
+    // via local variable as test.dec: ~115ms
 
     test := io
     while n > 0 {

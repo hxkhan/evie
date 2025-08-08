@@ -29,9 +29,8 @@ type closure struct {
 }
 
 type compiler struct {
-	inline        bool              // use dispatch inlining (combining instructions into one)
-	statics       map[string]*Value // implicitly available to all user packages
-	uninitialized ds.Set[*Value]
+	inline  bool              // use dispatch inlining (combining instructions into one)
+	statics map[string]*Value // implicitly available to all user packages
 
 	pkg      *packageInstance   // the package being compiled right now
 	closures ds.Slice[*closure] // currently open closures
@@ -77,10 +76,9 @@ type Options struct {
 func New(opts Options) *Instance {
 	return &Instance{
 		compiler{
-			resolver:      opts.ImportResolver,
-			statics:       opts.UniversalStatics,
-			inline:        !opts.DisableInlining,
-			uninitialized: make(ds.Set[*Value]),
+			resolver: opts.ImportResolver,
+			statics:  opts.UniversalStatics,
+			inline:   !opts.DisableInlining,
 		},
 		runtime{
 			packages: make(map[string]*packageInstance),

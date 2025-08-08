@@ -101,3 +101,15 @@ func (block Block) String() string {
 
 	return b.String()
 }
+
+func IsCallFree(node Node) bool {
+	switch node := node.(type) {
+	case Call:
+		return false
+
+	case BinOp:
+		return IsCallFree(node.Lhs) && IsCallFree(node.Rhs)
+	}
+
+	return true
+}

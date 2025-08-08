@@ -135,41 +135,27 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 	/*
 		------ Hoisting Protocol ------
 
-		1. Put all variable declarations at the top.
-		2. For any variable that depends on a function, move that function above the variable.
-		This preserves the original order of variables among themselves and
-		functions among themselves, except where rule 2 forces a change.
-
-
-		Then all symbols are first allocated without initialization.
-		This is so when we later initialize them; they can reference each other.
+		1. Allocated all symbols without initialization.
+		2. Initialize variables in the order they appear
+		3. Initialize functions (order doesn't matter)
 
 		So this is not possible because the order is maintained:
 			x := y + 2
 			y := 10
 
-		But this is, because dependency functions are hoisted to the top:
-			n := add(3, 7) // n <- 10
-
-			fn add(a, b) {
-				return a + b
+		But this is:
+			fn hop(a) {
+				return a + x
 			}
+			x := 3
+
+		Also, we only allow literal declarations on the top level
+		This means no calling like:
+			z := hop(8)
 	*/
 
-	// 1. allocate all symbols
+	// 1. allocate all function
 	for _, node := range node.Code {
-		if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
-			index := fields.Get(iDec.Name)
-			if _, exists := this.globals[index]; exists {
-				panic(fmt.Errorf("double declaration of %s", iDec.Name))
-			}
-
-			memory := &Value{}
-			this.globals[index] = Global{Value: memory, IsStatic: iDec.IsStatic}
-			vm.cp.uninitialized.Add(memory)
-			continue
-		}
-
 		if fn, isFn := node.(ast.Fn); isFn {
 			index := fields.Get(fn.Name)
 			if _, exists := this.globals[index]; exists {
@@ -183,26 +169,34 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 				vm:   vm,
 			}})
 			this.globals[index] = Global{Value: &fn, IsStatic: true}
-			continue
 		}
 	}
 
-	// 2. initialization based on the new order
-	ordered := node.OrderedCode()
-	for _, node := range ordered {
+	// 2. initialization (ident)
+	for _, node := range node.Code {
 		if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
-			global := this.globals[fields.Get(iDec.Name)]
+			// check if contains function calls
+			if !ast.IsCallFree(iDec.Value) {
+				panic(fmt.Errorf("declaration of %s contains functions calls", iDec.Name))
+			}
+
+			index := fields.Get(iDec.Name)
+			if _, exists := this.globals[index]; exists {
+				panic(fmt.Errorf("double declaration of %s", iDec.Name))
+			}
+
 			value := vm.compile(iDec.Value)
 			v, exc := value(vm.main)
 			if exc != nil {
 				return v, exc
 			}
 			// store the value
-			*(global.Value) = v
-			vm.cp.uninitialized.Remove(global.Value)
-			continue
+			this.globals[index] = Global{Value: v.Allocate(), IsStatic: iDec.IsStatic}
 		}
+	}
 
+	// 3. initialization (fn)
+	for _, node := range node.Code {
 		if fn, isFn := node.(ast.Fn); isFn {
 			global := this.globals[fields.Get(fn.Name)]
 			ufn := (*UserFn)(global.pointer)
@@ -228,13 +222,6 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 				}
 				ufn.recyclable = append(ufn.recyclable, index)
 			}
-			continue
-		}
-
-		// other code
-		v, exc := vm.compile(node)(vm.main)
-		if exc != nil {
-			return v, exc
 		}
 	}
 	return Value{}, nil
@@ -295,9 +282,6 @@ func (vm *Instance) emitIdentGet(node ast.Ident) instruction {
 			return fbr.getLocal(v.index), nil
 		}
 	case Global:
-		if vm.cp.uninitialized.Has(v.Value) {
-			panic(fmt.Errorf("accessing uninitialized binding '%v'", node.Name))
-		}
 		return func(fbr *fiber) (Value, *Exception) {
 			return *v.Value, nil
 		}

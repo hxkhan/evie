@@ -32,7 +32,7 @@ func (vm *Instance) evaluate(node ast.Node) any {
 
 		if global, isGlobal := variable.(Global); isGlobal {
 			// global statics evaluate to Value instead of Global
-			if global.IsStatic {
+			if global.IsStatic && !vm.cp.uninitialized.Has(global.Value) {
 				return *(global.Value)
 			}
 			return global

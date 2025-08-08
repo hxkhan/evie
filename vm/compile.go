@@ -133,27 +133,43 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 	}
 
 	/*
-		------ Hoisting Protocol ------ (invalid since recent changes probably)
+		------ Hoisting Protocol ------
 
-		All symbols are first symbolically pre-declared without initialization.
+		1. Put all variable declarations at the top.
+		2. For any variable that depends on a function, move that function above the variable.
+		This preserves the original order of variables among themselves and
+		functions among themselves, except where rule 2 forces a change.
+
+
+		Then all symbols are first allocated without initialization.
 		This is so when we later initialize them; they can reference each other.
-		Function initializations are physically moved to the top of the code.
-		The rest of the code follows right after.
 
 		So this is not possible because the order is maintained:
 			x := y + 2
 			y := 10
 
-		But this is, because functions declarations are hoisted to the top:
+		But this is, because dependency functions are hoisted to the top:
 			n := add(3, 7) // n <- 10
 
-			fn square(a, b) {
+			fn add(a, b) {
 				return a + b
 			}
 	*/
 
-	// 1. declare all symbols
+	// 1. allocate all symbols
 	for _, node := range node.Code {
+		if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
+			index := fields.Get(iDec.Name)
+			if _, exists := this.globals[index]; exists {
+				panic(fmt.Errorf("double declaration of %s", iDec.Name))
+			}
+
+			memory := &Value{}
+			this.globals[index] = Global{Value: memory, IsStatic: iDec.IsStatic}
+			vm.cp.uninitialized.Add(memory)
+			continue
+		}
+
 		if fn, isFn := node.(ast.Fn); isFn {
 			index := fields.Get(fn.Name)
 			if _, exists := this.globals[index]; exists {
@@ -167,17 +183,26 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 				vm:   vm,
 			}})
 			this.globals[index] = Global{Value: &fn, IsStatic: true}
-		} else if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
-			index := fields.Get(iDec.Name)
-			if _, exists := this.globals[index]; exists {
-				panic(fmt.Errorf("double declaration of %s", iDec.Name))
-			}
-			this.globals[index] = Global{Value: &Value{}, IsStatic: iDec.IsStatic}
+			continue
 		}
 	}
 
-	// 2. initialize functions
-	for _, node := range node.Code {
+	// 2. initialization based on the new order
+	ordered := node.OrderedCode()
+	for _, node := range ordered {
+		if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
+			global := this.globals[fields.Get(iDec.Name)]
+			value := vm.compile(iDec.Value)
+			v, exc := value(vm.main)
+			if exc != nil {
+				return v, exc
+			}
+			// store the value
+			*(global.Value) = v
+			vm.cp.uninitialized.Remove(global.Value)
+			continue
+		}
+
 		if fn, isFn := node.(ast.Fn); isFn {
 			global := this.globals[fields.Get(fn.Name)]
 			ufn := (*UserFn)(global.pointer)
@@ -203,31 +228,6 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 				}
 				ufn.recyclable = append(ufn.recyclable, index)
 			}
-		}
-
-		// compile global variable initialization in a special way because indices are pre declared
-		if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
-			global := this.globals[fields.Get(iDec.Name)]
-			value := vm.compile(iDec.Value)
-			v, exc := value(vm.main)
-			if exc != nil {
-				return v, exc
-			}
-			// store the value
-			*(global.Value) = v
-			continue
-		}
-	}
-
-	// 3. compile the rest of the code
-	for _, node := range node.Code {
-		// skip functions now
-		if _, isFn := node.(ast.Fn); isFn {
-			continue
-		}
-
-		// skip declarations now
-		if _, isIdentDec := node.(ast.Decl); isIdentDec {
 			continue
 		}
 
@@ -237,7 +237,6 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 			return v, exc
 		}
 	}
-
 	return Value{}, nil
 }
 
@@ -296,6 +295,9 @@ func (vm *Instance) emitIdentGet(node ast.Ident) instruction {
 			return fbr.getLocal(v.index), nil
 		}
 	case Global:
+		if vm.cp.uninitialized.Has(v.Value) {
+			panic(fmt.Errorf("accessing uninitialized binding '%v'", node.Name))
+		}
 		return func(fbr *fiber) (Value, *Exception) {
 			return *v.Value, nil
 		}
@@ -535,7 +537,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			}
 
 			// optimise: call to ourselves (recursion)
-			if value == *(vm.cp.closures.Last(0).this) {
+			if vm.cp.closures.Len() > 0 && value == *(vm.cp.closures.Last(0).this) {
 				return func(fbr *fiber) (result Value, exc *Exception) {
 					// setup stack locals
 					base := len(fbr.stack)

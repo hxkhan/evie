@@ -29,8 +29,9 @@ type closure struct {
 }
 
 type compiler struct {
-	inline  bool              // use dispatch inlining (combining instructions into one)
-	statics map[string]*Value // implicitly available to all user packages
+	inline        bool              // use dispatch inlining (combining instructions into one)
+	statics       map[string]*Value // implicitly available to all user packages
+	uninitialized ds.Set[*Value]
 
 	pkg      *packageInstance   // the package being compiled right now
 	closures ds.Slice[*closure] // currently open closures
@@ -76,9 +77,10 @@ type Options struct {
 func New(opts Options) *Instance {
 	return &Instance{
 		compiler{
-			resolver: opts.ImportResolver,
-			statics:  opts.UniversalStatics,
-			inline:   !opts.DisableInlining,
+			resolver:      opts.ImportResolver,
+			statics:       opts.UniversalStatics,
+			inline:        !opts.DisableInlining,
+			uninitialized: make(ds.Set[*Value]),
 		},
 		runtime{
 			packages: make(map[string]*packageInstance),
@@ -168,8 +170,8 @@ func (pkg *packageInstance) SetSymbol(name string, value Value) (overridden bool
 
 func (pkg *packageInstance) GetSymbol(name string) (value Global, exists bool) {
 	index := fields.Get(name)
-	value, exists = pkg.globals[index]
-	return value, exists
+	v, exists := pkg.globals[index]
+	return v, exists
 }
 
 func (pkg *packageInstance) HasSymbol(name string) (exists bool) {

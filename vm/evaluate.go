@@ -16,7 +16,7 @@ func (vm *Instance) evaluate(node ast.Node) any {
 		return BoxBool(node.Value)
 
 	case ast.Input[float64]:
-		return BoxFloat64(node.Value)
+		return BoxNumber(node.Value)
 
 	case ast.Input[string]:
 		return BoxString(node.Value)
@@ -57,7 +57,7 @@ func (vm *Instance) evaluate(node ast.Node) any {
 				case ast.AddOp:
 					if a, ok := lhs.AsFloat64(); ok {
 						if b, ok := rhs.AsFloat64(); ok {
-							return BoxFloat64(a + b)
+							return BoxNumber(a + b)
 						}
 					}
 
@@ -70,27 +70,27 @@ func (vm *Instance) evaluate(node ast.Node) any {
 				case ast.SubOp:
 					if a, ok := lhs.AsFloat64(); ok {
 						if b, ok := rhs.AsFloat64(); ok {
-							return BoxFloat64(a - b)
+							return BoxNumber(a - b)
 						}
 					}
 
 				case ast.MulOp:
 					if a, ok := lhs.AsFloat64(); ok {
 						if b, ok := rhs.AsFloat64(); ok {
-							return BoxFloat64(a * b)
+							return BoxNumber(a * b)
 						}
 					}
 
 				case ast.DivOp:
 					if a, ok := lhs.AsFloat64(); ok {
 						if b, ok := rhs.AsFloat64(); ok {
-							return BoxFloat64(a / b)
+							return BoxNumber(a / b)
 						}
 					}
 				case ast.ModOp:
 					if a, ok := lhs.AsFloat64(); ok {
 						if b, ok := rhs.AsFloat64(); ok {
-							return BoxFloat64(float64(int64(a) % int64(b)))
+							return BoxNumber(float64(int64(a) % int64(b)))
 						}
 					}
 

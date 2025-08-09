@@ -31,7 +31,7 @@ var dec = vm.BoxGoFunc(func(n vm.Value) (vm.Value, *vm.Exception) {
 		return vm.Value{}, vm.ErrTypes
 	}
 
-	return vm.BoxFloat64(f64 - 1), nil
+	return vm.BoxNumber(f64 - 1), nil
 })
 
 var input = vm.BoxGoFunc(func(output vm.Value) (vm.Value, *vm.Exception) {

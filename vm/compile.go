@@ -22,7 +22,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		}
 
 	case ast.Input[float64]:
-		value := BoxFloat64(node.Value)
+		value := BoxNumber(node.Value)
 		return func(fbr *fiber) (Value, *Exception) {
 			return value, nil
 		}
@@ -755,7 +755,7 @@ func (vm *Instance) emitReturn(node ast.Return) instruction {
 	if vm.cp.inline {
 		// optimise: returning constants
 		if in, isInput := node.Value.(ast.Input[float64]); isInput {
-			value := BoxFloat64(in.Value)
+			value := BoxNumber(in.Value)
 			return func(fbr *fiber) (Value, *Exception) {
 				return value, returnSignal
 			}
@@ -891,7 +891,7 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 		if ret, isReturn := node.(ast.Return); isReturn {
 			// optimise: returning constants
 			if in, isInput := ret.Value.(ast.Input[float64]); isInput {
-				value := BoxFloat64(in.Value)
+				value := BoxNumber(in.Value)
 				return func(fbr *fiber) (Value, *Exception) {
 					return value, returnSignal
 				}
@@ -1007,7 +1007,7 @@ func (vm *Instance) emitNeg(node ast.Neg) instruction {
 		}
 
 		if float, ok := value.AsFloat64(); ok {
-			return BoxFloat64(-float), nil
+			return BoxNumber(-float), nil
 		}
 		return Value{}, RuntimeExceptionF("Cannot negate '%v'.", value)
 	}

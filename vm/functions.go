@@ -120,9 +120,9 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 			v.Kind()
 			switch v.Kind() {
 			case reflect.Int, reflect.Int32, reflect.Int64:
-				*fbr.stack[idx] = BoxFloat64(float64(v.Int()))
+				*fbr.stack[idx] = BoxNumber(float64(v.Int()))
 			case reflect.Float32, reflect.Float64:
-				*fbr.stack[idx] = BoxFloat64(v.Float())
+				*fbr.stack[idx] = BoxNumber(v.Float())
 			case reflect.String:
 				*fbr.stack[idx] = BoxString(v.String())
 			default:

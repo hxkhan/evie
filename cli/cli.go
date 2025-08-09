@@ -104,7 +104,7 @@ func main() {
 }
 
 func resolver(name string) vm.Package {
-	if constructor, exists := evie.StandardLibraryPackageConstructors[name]; exists {
+	if constructor, exists := evie.StandardLibraryConstructors[name]; exists {
 		return constructor()
 	}
 	panic(fmt.Errorf("constructor not found for '%v'", name))

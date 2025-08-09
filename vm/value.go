@@ -81,8 +81,8 @@ type SafeGoFunc interface {
 		func(Value, Value, Value, Value, Value, Value) (Value, *Exception)
 }
 
-// BoxFloat64 boxes a float64
-func BoxFloat64(f float64) Value {
+// BoxNumber boxes a float64
+func BoxNumber(f float64) Value {
 	return Value{scalar: math.Float64bits(f), pointer: f64Type}
 }
 
@@ -386,7 +386,7 @@ func (x Value) TypeOf() string {
 	case boolType:
 		return "bool"
 	case f64Type:
-		return "float"
+		return "number"
 	}
 
 	switch x.scalar {
@@ -414,7 +414,7 @@ func (x Value) TypeOf() string {
 
 func (x Value) TypeID() unsafe.Pointer {
 	if isKnown(x.pointer) {
-		return nil
+		return x.pointer
 	}
 
 	switch x.scalar {
@@ -426,9 +426,7 @@ func (x Value) TypeID() unsafe.Pointer {
 		return x.pointer
 	}
 
-	return nil
-
-	//panic("TypeID() -> cant figure it out")
+	panic("TypeID() -> cant figure it out...")
 }
 
 func (x Value) getField(f int) (field Value, ok bool) {

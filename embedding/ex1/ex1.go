@@ -11,7 +11,7 @@ import (
 func main() {
 	// universal-statics
 	statics := map[string]*vm.Value{
-		"pi":   vm.BoxFloat64(3.14159).Allocate(), // constant value
+		"pi":   vm.BoxNumber(3.14159).Allocate(),  // constant value
 		"time": time.Construct().Box().Allocate(), // already instantiated package
 	}
 
@@ -73,7 +73,7 @@ func main() {
 	}
 
 	// call it & check for errors
-	result, err = add.Call(vm.BoxFloat64(3), vm.BoxFloat64(2))
+	result, err = add.Call(vm.BoxNumber(3), vm.BoxNumber(2))
 	if err != nil {
 		panic(err)
 	}

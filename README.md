@@ -1,6 +1,6 @@
 # The Evie Programming Language
 
-Evie is a dynamically typed programming language written in Go. The goal is to provide Go developers with a blazingly fast embeddable scripting language that does *not* depend on CGO. 
+Evie is a dynamically typed programming language written in Go. The goal is to provide Go developers with a blazingly fast embeddable scripting language that does *not* depend on CGO. Preliminary micro-benchmarks show Evie to be faster than PUC [Lua 5.4.2](https://lua.org/)  and also Google's [V8 Ignition](https://v8.dev/docs/ignition) JavaScript interpreter. See [here](#benchmarks).
 
 #### Here is some example code from [examples/fib.ev](./examples/fib.ev)
 <a href="./examples/fib.ev">

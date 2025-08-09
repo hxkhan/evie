@@ -11,7 +11,7 @@ import (
 	"github.com/hxkhan/evie/vm"
 )
 
-var StandardLibraryPackageConstructors = map[string]func() vm.Package{
+var StandardLibraryConstructors = map[string]func() vm.Package{
 	"io":     io.Construct,
 	"fs":     fs.Construct,
 	"time":   time.Construct,
@@ -30,7 +30,7 @@ var Defaults = vm.Options{
 
 // StandardLibrary returns all of the standard library package contructors
 func StandardLibraryResolver(name string) vm.Package {
-	if constructor, exists := StandardLibraryPackageConstructors[name]; exists {
+	if constructor, exists := StandardLibraryConstructors[name]; exists {
 		return constructor()
 	}
 	panic(fmt.Errorf("constructor not found for '%v'", name))

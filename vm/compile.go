@@ -112,7 +112,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 	if vm.cp.pkg == nil {
 		vm.cp.pkg = &packageInstance{
 			name:    node.Name,
-			globals: map[int]Global{},
+			globals: map[fields.ID]Global{},
 		}
 		vm.rt.packages[node.Name] = vm.cp.pkg
 	}
@@ -154,7 +154,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 			z := hop(8)
 	*/
 
-	// 1. allocate all function
+	// 1. allocate (functions)
 	for _, node := range node.Code {
 		if fn, isFn := node.(ast.Fn); isFn {
 			index := fields.Get(fn.Name)
@@ -172,7 +172,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 		}
 	}
 
-	// 2. initialization (ident)
+	// 2. allocate & initialize (ident)
 	for _, node := range node.Code {
 		if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
 			// check if contains function calls
@@ -195,7 +195,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 		}
 	}
 
-	// 3. initialization (fn)
+	// 3. initialize (functions)
 	for _, node := range node.Code {
 		if fn, isFn := node.(ast.Fn); isFn {
 			global := this.globals[fields.Get(fn.Name)]

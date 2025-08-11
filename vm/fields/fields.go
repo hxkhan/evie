@@ -1,12 +1,14 @@
 package fields
 
-var registry = map[string]int{}
+type ID int
 
-func Get(name string) int {
+var registry = map[string]ID{}
+
+func Get(name string) ID {
 	index, exists := registry[name]
 	if !exists {
-		registry[name] = len(registry)
-		return len(registry) - 1
+		registry[name] = ID(len(registry))
+		return ID(len(registry) - 1)
 	}
 	return index
 }

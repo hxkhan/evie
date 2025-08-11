@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"unsafe"
+
+	"github.com/hxkhan/evie/vm/fields"
 )
 
 /*
@@ -429,7 +431,7 @@ func (x Value) TypeID() unsafe.Pointer {
 	panic("TypeID() -> cant figure it out...")
 }
 
-func (x Value) getField(f int) (field Value, ok bool) {
+func (x Value) getField(f fields.ID) (field Value, ok bool) {
 	if isKnown(x.pointer) {
 		return Value{}, false
 	}
@@ -465,7 +467,7 @@ func (x Value) getField(f int) (field Value, ok bool) {
 	return Value{}, false
 }
 
-func (x Value) dotAccess(f int) (field *Value) {
+func (x Value) dotAccess(f fields.ID) (field *Value) {
 	if isKnown(x.pointer) {
 		return nil
 	}
@@ -475,6 +477,13 @@ func (x Value) dotAccess(f int) (field *Value) {
 		return stringMethods[f]
 	case arrayType:
 		return arrayMethods[f]
+	case packageType:
+		pkg := (*packageInstance)(x.pointer)
+		value := pkg.globals[f]
+		if !value.IsPublic {
+			return nil
+		}
+		return value.Value
 	}
 
 	panic("add more types?")

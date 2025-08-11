@@ -1,6 +1,8 @@
 package vm
 
 import (
+	"fmt"
+
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/vm/fields"
 )
@@ -45,7 +47,7 @@ func (vm *Instance) evaluate(node ast.Node) any {
 	case ast.FieldAccess:
 		if lhs, ok := vm.evaluate(node.Lhs).(Value); ok {
 			if field, exists := lhs.getField(fields.Get(node.Rhs)); exists {
-				//fmt.Println(node, "->", field)
+				fmt.Println(node, "->", field)
 				return field
 			}
 		}
@@ -55,60 +57,34 @@ func (vm *Instance) evaluate(node ast.Node) any {
 			if rhs, ok := vm.evaluate(node.Rhs).(Value); ok {
 				switch node.Operator {
 				case ast.AddOp:
-					if a, ok := lhs.AsFloat64(); ok {
-						if b, ok := rhs.AsFloat64(); ok {
-							return BoxNumber(a + b)
-						}
+					if res, ok := lhs.Add(rhs); ok {
+						return res
 					}
-
-					if a, ok := lhs.AsString(); ok {
-						if b, ok := rhs.AsString(); ok {
-							return BoxString(a + b)
-						}
-					}
-
 				case ast.SubOp:
-					if a, ok := lhs.AsFloat64(); ok {
-						if b, ok := rhs.AsFloat64(); ok {
-							return BoxNumber(a - b)
-						}
+					if res, ok := lhs.Sub(rhs); ok {
+						return res
 					}
-
 				case ast.MulOp:
-					if a, ok := lhs.AsFloat64(); ok {
-						if b, ok := rhs.AsFloat64(); ok {
-							return BoxNumber(a * b)
-						}
+					if res, ok := lhs.Mul(rhs); ok {
+						return res
 					}
-
 				case ast.DivOp:
-					if a, ok := lhs.AsFloat64(); ok {
-						if b, ok := rhs.AsFloat64(); ok {
-							return BoxNumber(a / b)
-						}
+					if res, ok := lhs.Div(rhs); ok {
+						return res
 					}
 				case ast.ModOp:
-					if a, ok := lhs.AsFloat64(); ok {
-						if b, ok := rhs.AsFloat64(); ok {
-							return BoxNumber(float64(int64(a) % int64(b)))
-						}
+					if res, ok := lhs.Mod(rhs); ok {
+						return res
 					}
-
 				case ast.EqOp:
 					return BoxBool(lhs.Equals(rhs))
-
 				case ast.LtOp:
-					if a, ok := lhs.AsFloat64(); ok {
-						if b, ok := rhs.AsFloat64(); ok {
-							return BoxBool(a < b)
-						}
+					if res, ok := lhs.LessThan(rhs); ok {
+						return res
 					}
-
 				case ast.GtOp:
-					if a, ok := lhs.AsFloat64(); ok {
-						if b, ok := rhs.AsFloat64(); ok {
-							return BoxBool(a > b)
-						}
+					if res, ok := lhs.GreaterThan(rhs); ok {
+						return res
 					}
 				}
 			}

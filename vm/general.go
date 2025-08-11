@@ -55,8 +55,8 @@ type Global struct {
 }
 
 type packageInstance struct {
-	name    string         // name of the package
-	globals map[int]Global // all global symbols
+	name    string               // name of the package
+	globals map[fields.ID]Global // all global symbols
 }
 
 // PackageContructor returns a new instance of a host package

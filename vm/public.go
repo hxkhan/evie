@@ -1,9 +1,11 @@
 package vm
 
+import "github.com/hxkhan/evie/vm/fields"
+
 func NewHostPackage(name string) Package {
 	return &packageInstance{
 		name:    name,
-		globals: map[int]Global{},
+		globals: map[fields.ID]Global{},
 	}
 }
 

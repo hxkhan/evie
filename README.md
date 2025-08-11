@@ -2,6 +2,7 @@
 
 Evie is a dynamically typed programming language written in Go. The goal is to provide Go developers with a blazingly fast embeddable scripting language that does *not* depend on CGO. Preliminary micro-benchmarks show Evie to be faster than PUC [Lua 5.4.2](https://lua.org/)  and also Google's [V8 Ignition](https://v8.dev/docs/ignition) JavaScript interpreter. See [here](#benchmarks).
 
+## Showcase
 #### Here is some example code from [examples/fib.ev](./examples/fib.ev)
 <a href="./examples/fib.ev">
     <img src="./docs/images/fib.png" width="500" alt="A snippet of Evie code">
@@ -28,6 +29,9 @@ To test this exact program, run `go run ./cli -t ./examples/go.ev`. Then remove 
 - No CGO
 
 > This language is in an early state. I have been hard at work optimising and improving the core language. The standard library only contains some basic methods for testing purposes.
+
+## Docs
+- [Language Syntax](https://github.com/hxkhan/evie/tree/main/docs/syntax.md)
 
 ## Features checklist
 - Package management ⏳

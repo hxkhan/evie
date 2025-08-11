@@ -84,6 +84,11 @@ START:
 	case '<':
 		return lex.simple(lex.option('=', "<=", "<"))
 
+	case '|':
+		return lex.simple(lex.option('|', "||", "|"))
+	case '&':
+		return lex.simple(lex.option('&', "&&", "&"))
+
 	case ',':
 		return lex.simple(",")
 	case '.':

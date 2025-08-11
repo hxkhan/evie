@@ -19,6 +19,9 @@ const (
 	EqOp
 	LtOp
 	GtOp
+
+	OrOp
+	AndOp
 )
 
 type BinOp struct {

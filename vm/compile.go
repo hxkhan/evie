@@ -1097,6 +1097,21 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							}
 							return Value{}, operatorError(">", lhs, rhs)
 						}
+
+					case ast.OrOp:
+						return func(fbr *fiber) (Value, *Exception) {
+							if fbr.get(lhs).IsTruthy() {
+								return BoxBool(true), nil
+							} else if fbr.get(rhs).IsTruthy() {
+								return BoxBool(true), nil
+							}
+							return BoxBool(false), nil
+						}
+
+					case ast.AndOp:
+						return func(fbr *fiber) (Value, *Exception) {
+							return BoxBool(fbr.get(lhs).IsTruthy() && fbr.get(rhs).IsTruthy()), nil
+						}
 					}
 				}
 
@@ -1381,6 +1396,38 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 				return result, nil
 			}
 			return Value{}, operatorError(">", a, b)
+		}
+
+	case ast.OrOp:
+		return func(fbr *fiber) (Value, *Exception) {
+			a, err := lhs(fbr)
+			if err != nil {
+				return a, err
+			}
+			if a.IsTruthy() {
+				return BoxBool(true), nil
+			}
+			b, err := rhs(fbr)
+			if err != nil {
+				return a, err
+			}
+			return BoxBool(b.IsTruthy()), nil
+		}
+
+	case ast.AndOp:
+		return func(fbr *fiber) (Value, *Exception) {
+			a, err := lhs(fbr)
+			if err != nil {
+				return a, err
+			}
+			if !a.IsTruthy() {
+				return BoxBool(false), nil
+			}
+			b, err := rhs(fbr)
+			if err != nil {
+				return a, err
+			}
+			return BoxBool(b.IsTruthy()), nil
 		}
 	}
 

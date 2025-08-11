@@ -24,14 +24,17 @@ var operators = map[string]ast.Operator{
 	"+": ast.AddOp, "-": ast.SubOp, "*": ast.MulOp, "/": ast.DivOp, "%": ast.ModOp,
 	"+=": ast.AddOp, "-=": ast.SubOp, "*=": ast.MulOp, "/=": ast.DivOp,
 	"==": ast.EqOp, "<": ast.LtOp, ">": ast.GtOp,
+	"||": ast.OrOp, "&&": ast.AndOp,
 }
 
 var precedence = map[string]int{
-	"+": 1, "-": 1,
-	"*": 2, "/": 2, "%": 2,
-	"<": 0, ">": 0, "==": 0,
-	".": 3,
-	"(": 4,
+	"||": 0,
+	"&&": 1,
+	"<":  2, ">": 2, "==": 2,
+	"+": 3, "-": 3,
+	"*": 4, "/": 4, "%": 4,
+	".": 5,
+	"(": 6,
 }
 
 func Parse(input []byte) (node ast.Node, err error) {

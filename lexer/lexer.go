@@ -138,6 +138,34 @@ START:
 		lex.cursor++ // add 1 for the terminating quotation
 		return token.Token{Type: token.String, Literal: str, Line: lex.line}
 
+	case '`':
+		// get the starting position
+		startPos := lex.cursor
+
+		// get template literal length
+		for current, cs := lex.peek(); current != '`'; current, cs = lex.peek() {
+			switch current {
+			case iEOS:
+				// unterminated template literal
+				str := unsafe.String(&lex.src[startPos-1], lex.cursor-(startPos-1))
+				return token.Token{Type: token.Invalid, Literal: str, Line: lex.line}
+			case '\\':
+				// handle escaped backticks
+				if next, ns := lex.get(lex.cursor + cs); next == '`' {
+					lex.cursor += cs + ns
+					continue
+				}
+			case '\n':
+				lex.line++
+			}
+			lex.cursor += cs
+		}
+
+		// extract template literal
+		str := unsafe.String(&lex.src[startPos], lex.cursor-startPos)
+		lex.cursor++ // consume closing backtick
+		return token.Token{Type: token.TemplateString, Literal: str, Line: lex.line}
+
 	default:
 		// words
 		if unicode.IsLetter(current) || current == '_' {

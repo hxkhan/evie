@@ -2,140 +2,335 @@
 	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
 	"name": "Evie",
 	"patterns": [
-	  {
-		"include": "#keywords"
-	  },
-	  {
-		"include": "#strings"
-	  },
-	  {
-		"include": "#chars"
-	  },
-	  {
-		"include": "#comments"
-	  },
-	  {
-		"include": "#block_comment"
-	  },
-	  {
-		"include": "#numeric_literals"
-	  },
-	  {
-		"comment": "await and variants",
-		"name": "keyword.control.await.evie",
-		"match": "\\bawait(\\.(all|any))?\\b"
-	  },	
-	  {
-		"comment": "Boolean constant",
-		"name": "constant.language.boolean.evie",
-		"match": "\\b(true|false)\\b"
-	  },
-	  {
-		"comment": "Constant",
-		"name": "constant.language.evie",
-		"match": "\\b(nil)\\b"
-	  },
-	  {
-		"comment": "Built-in functions",
-		"match": "\\b(bool|number|str)\\b(?=\\()",
-		"name": "support.function.builtin.evie"
-	  },
-	  {
-		"comment": "Comparison operator",
-		"name": "keyword.operator.comparison.evie",
-		"match": "(&&|\\|\\||==|!=)"
-	  },
-	  {
-		"comment": "Assignment operator",
-		"name": "keyword.operator.assignment.evie",
-		"match": "(\\+=|-=|/=|\\*=|%=|\\^=|&=|&^=|\\|=|<<=|>>=|=|--|\\+\\+)"
-	  },
-	  {
-		"comment": "Arithmetic operator",
-		"name": "keyword.operator.arithmetic.evie",
-		"match": "(!|\\+|-|/|\\*|%|\\^|&|\\||<<|>>|&^)"
-	  },
-	  {
-		"comment": "Comparison operator (second group because of regex precedence)",
-		"name": "keyword.operator.comparison.evie",
-		"match": "(<=|>=|<|>)"
-	  },
-	  {
-		"comment": "Function call",
-		"match": "\\b([A-Za-z][A-Za-z0-9_]*|_[A-Za-z0-9_]+)\\s*\\(",
-		"captures": {
-		  "1": {
-			"name": "entity.name.function.evie"
-		  }
+		{
+			"include": "#keywords"
+		},
+		{
+			"include": "#types"
+		},
+		{
+			"include": "#functions"
+		},
+		{
+			"include": "#template_literals"
+		},
+		{
+			"include": "#strings"
+		},
+		{
+			"include": "#chars"
+		},
+		{
+			"include": "#comments"
+		},
+		{
+			"include": "#block_comment"
+		},
+		{
+			"include": "#numeric_literals"
+		},
+		{
+			"include": "#operators"
+		},
+		{
+			"include": "#constants"
+		},
+		{
+			"include": "#identifiers"
 		}
-	  },
-	  {
-		"comment": "Miscellaneous operator",
-		"name": "keyword.operator.misc.evie"
-	  }
 	],
 	"repository": {
-	  "keywords": {
-		"patterns": [
-		  {
-			"name": "keyword.control.evie",
-			"match": "\\b(package|pub|if|else|while|for|continue|break|var|return|fn|echo|go)\\b"
-		  }
-		]
-	  },
-	  "strings": {
-		"name": "string.quoted.double.evie",
-		"begin": "\"",
-		"end": "\"",
-		"patterns": [
-		  {
-			"name": "constant.character.escape.evie",
-			"match": "\\\\."
-		  }
-		]
-	  },
-	  "chars": {
-		"name": "string.quoted.simple.evie",
-		"begin": "'",
-		"end": "'",
-		"patterns": [
-		  {
-			"name": "constant.character.escape.evie",
-			"match": "\\\\."
-		  }
-		]
-	  },
-	  "comments": {
-		"name": "comment.line.evie",
-		"begin": "//",
-		"end": "\n"
-	  },
-	  "block_comment": {
-		"comment": "Block comment",
-		"name": "comment.block.evie",
-		"begin": "/\\*",
-		"end": "\\*/"
-	  },
-	  "numeric_literals": {
-		"patterns": [
-		  {
-			"comment": "Integer literal",
-			"name": "constant.numeric.integer.evie",
-			"match": "\\b\\d+\\b"
-		  },
-		  {
-			"comment": "Floating-point literal",
-			"name": "constant.numeric.float.evie",
-			"match": "\\b\\d+\\.\\d+([eE][-+]?\\d+)?\\b"
-		  },
-		  {
-			"comment": "Hexadecimal literal",
-			"name": "constant.numeric.hex.evie",
-			"match": "\\b0[xX][0-9a-fA-F]+\\b"
-		  }
-		]
-	  }
+		"keywords": {
+			"patterns": [
+				{
+					"comment": "Control flow keywords",
+					"name": "keyword.control.evie",
+					"match": "\\b(if|else|while|for|continue|break|return)\\b"
+				},
+				{
+					"comment": "Declaration keywords",
+					"name": "keyword.declaration.evie",
+					"match": "\\b(package|pub|var|fn|imports)\\b"
+				},
+				{
+					"comment": "Other keywords",
+					"name": "keyword.other.evie",
+					"match": "\\b(echo|go)\\b"
+				},
+				{
+					"comment": "Await and variants",
+					"name": "keyword.control.await.evie",
+					"match": "\\bawait(\\.(all|any))?\\b"
+				}
+			]
+		},
+		"types": {
+			"patterns": [
+				{
+					"comment": "Built-in type conversion functions",
+					"match": "\\b(bool|number|str)\\b(?=\\s*\\()",
+					"name": "support.function.builtin.cast.evie"
+				},
+				{
+					"comment": "Built-in types (when used as types, not functions)",
+					"match": "\\b(bool|number|str|int|float|string)\\b",
+					"name": "storage.type.evie"
+				}
+			]
+		},
+		"functions": {
+			"patterns": [
+				{
+					"comment": "Function definitions with parameters",
+					"match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(([^)]*)\\)",
+					"captures": {
+						"1": {
+							"name": "keyword.declaration.function.evie"
+						},
+						"2": {
+							"name": "entity.name.function.definition.evie"
+						},
+						"3": {
+							"patterns": [
+								{
+									"match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b",
+									"name": "variable.parameter.evie"
+								}
+							]
+						}
+					}
+				},
+				{
+					"comment": "Method calls (object.method)",
+					"match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+					"captures": {
+						"1": {
+							"name": "variable.other.object.evie"
+						},
+						"2": {
+							"name": "entity.name.function.method.evie"
+						}
+					}
+				},
+				{
+					"comment": "Function calls",
+					"match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+					"captures": {
+						"1": {
+							"name": "entity.name.function.call.evie"
+						}
+					}
+				}
+			]
+		},
+		"template_literals": {
+			"name": "string.template.evie",
+			"begin": "`",
+			"end": "`",
+			"patterns": [
+				{
+					"name": "meta.template.expression.evie",
+					"begin": "\\{",
+					"end": "\\}",
+					"patterns": [
+						{
+							"include": "#keywords"
+						},
+						{
+							"include": "#functions"
+						},
+						{
+							"include": "#operators"
+						},
+						{
+							"include": "#constants"
+						},
+						{
+							"include": "#numeric_literals"
+						},
+						{
+							"include": "#strings"
+						},
+						{
+							"name": "variable.other.evie",
+							"match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+						}
+					]
+				},
+				{
+					"name": "constant.character.escape.evie",
+					"match": "\\\\."
+				}
+			]
+		},
+		"operators": {
+			"patterns": [
+				{
+					"comment": "Logical operators",
+					"name": "keyword.operator.logical.evie",
+					"match": "(&&|\\|\\||!)"
+				},
+				{
+					"comment": "Comparison operators",
+					"name": "keyword.operator.comparison.evie",
+					"match": "(==|!=|<=|>=|<|>)"
+				},
+				{
+					"comment": "Assignment operators",
+					"name": "keyword.operator.assignment.evie",
+					"match": "(\\+=|-=|/=|\\*=|%=|\\^=|&=|&^=|\\|=|<<=|>>=|:=|=)"
+				},
+				{
+					"comment": "Increment/decrement operators",
+					"name": "keyword.operator.increment.evie",
+					"match": "(\\+\\+|--)"
+				},
+				{
+					"comment": "Arithmetic operators",
+					"name": "keyword.operator.arithmetic.evie",
+					"match": "(\\+|-|/|\\*|%|\\^)"
+				},
+				{
+					"comment": "Bitwise operators",
+					"name": "keyword.operator.bitwise.evie",
+					"match": "(&|\\||<<|>>|&^)"
+				}
+			]
+		},
+		"constants": {
+			"patterns": [
+				{
+					"comment": "Boolean constants",
+					"name": "constant.language.boolean.evie",
+					"match": "\\b(true|false)\\b"
+				},
+				{
+					"comment": "Nil constant",
+					"name": "constant.language.null.evie",
+					"match": "\\b(nil)\\b"
+				}
+			]
+		},
+		"identifiers": {
+			"patterns": [
+				{
+					"comment": "Variable identifiers",
+					"name": "variable.other.evie",
+					"match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+				}
+			]
+		},
+		"strings": {
+			"patterns": [
+				{
+					"comment": "Double-quoted strings",
+					"name": "string.quoted.double.evie",
+					"begin": "\"",
+					"end": "\"",
+					"patterns": [
+						{
+							"name": "constant.character.escape.evie",
+							"match": "\\\\([\"\\\\/bfnrt]|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|[0-7]{1,3})"
+						},
+						{
+							"name": "invalid.illegal.escape.evie",
+							"match": "\\\\."
+						}
+					]
+				}
+			]
+		},
+		"chars": {
+			"patterns": [
+				{
+					"comment": "Character literals",
+					"name": "string.quoted.single.evie",
+					"begin": "'",
+					"end": "'",
+					"patterns": [
+						{
+							"name": "constant.character.escape.evie",
+							"match": "\\\\(['\\\\/bfnrt]|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|[0-7]{1,3})"
+						},
+						{
+							"name": "invalid.illegal.escape.evie",
+							"match": "\\\\."
+						}
+					]
+				}
+			]
+		},
+		"comments": {
+			"patterns": [
+				{
+					"comment": "Line comments",
+					"name": "comment.line.double-slash.evie",
+					"begin": "//",
+					"end": "$",
+					"patterns": [
+						{
+							"name": "meta.toc-list.banner.evie",
+							"match": "\\b(TODO|FIXME|NOTE|BUG|HACK)\\b:?"
+						}
+					]
+				}
+			]
+		},
+		"block_comment": {
+			"patterns": [
+				{
+					"comment": "Block comments",
+					"name": "comment.block.evie",
+					"begin": "/\\*",
+					"end": "\\*/",
+					"patterns": [
+						{
+							"name": "meta.toc-list.banner.evie",
+							"match": "\\b(TODO|FIXME|NOTE|BUG|HACK)\\b:?"
+						}
+					]
+				}
+			]
+		},
+		"numeric_literals": {
+			"patterns": [
+				{
+					"comment": "Floating-point literals with exponent",
+					"name": "constant.numeric.float.evie",
+					"match": "\\b\\d+\\.\\d+([eE][-+]?\\d+)?[fF]?\\b"
+				},
+				{
+					"comment": "Floating-point literals without decimal",
+					"name": "constant.numeric.float.evie",
+					"match": "\\b\\d+[eE][-+]?\\d+[fF]?\\b"
+				},
+				{
+					"comment": "Floating-point literals with just decimal",
+					"name": "constant.numeric.float.evie",
+					"match": "\\b\\d+\\.[fF]?\\b"
+				},
+				{
+					"comment": "Binary literals",
+					"name": "constant.numeric.binary.evie",
+					"match": "\\b0[bB][01]+\\b"
+				},
+				{
+					"comment": "Hexadecimal literals",
+					"name": "constant.numeric.hex.evie",
+					"match": "\\b0[xX][0-9a-fA-F]+\\b"
+				},
+				{
+					"comment": "Octal literals",
+					"name": "constant.numeric.octal.evie",
+					"match": "\\b0[oO][0-7]+\\b"
+				},
+				{
+					"comment": "Integer literals",
+					"name": "constant.numeric.integer.evie",
+					"match": "\\b\\d+\\b"
+				}
+			]
+		}
 	},
 	"scopeName": "source.ev"
-  }
-  
+}

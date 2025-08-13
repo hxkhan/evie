@@ -100,6 +100,44 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			return Value{}, continueSignal
 		}
 
+	case ast.Unsynced:
+		action := vm.compile(node.Action)
+		return func(fbr *fiber) (Value, *Exception) {
+			// check if already unsynchronized
+			if fbr.unsynced {
+				res, err := action(fbr)
+				return res, err
+			}
+
+			// change mode
+			vm.rt.ReleaseGIL()
+			fbr.unsynced = true
+			res, err := action(fbr)
+			fbr.unsynced = false
+			vm.rt.AcquireGIL()
+
+			return res, err
+		}
+
+	case ast.Synced:
+		action := vm.compile(node.Action)
+		return func(fbr *fiber) (Value, *Exception) {
+			// check if already synced
+			if !fbr.unsynced {
+				res, err := action(fbr)
+				return res, err
+			}
+
+			// change mode
+			vm.rt.AcquireGIL()
+			fbr.unsynced = false
+			res, err := action(fbr)
+			fbr.unsynced = true
+			vm.rt.ReleaseGIL()
+
+			return res, err
+		}
+
 	case ast.Fn:
 		return vm.emitFn(node)
 
@@ -117,6 +155,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 	case ast.Await:
 		return vm.emitAwait(node)
+
+	case ast.AwaitAll:
+		return vm.emitAwaitAll(node)
 
 	case ast.Neg:
 		return vm.emitNeg(node)
@@ -746,27 +787,74 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 func (vm *Instance) emitGo(node ast.Go) instruction {
 	if node, isCall := node.Fn.(ast.Call); isCall {
-		call := vm.emitCall(node)
+		// compile arguments
+		arguments := make([]instruction, len(node.Args))
+		for i, arg := range node.Args {
+			arguments[i] = vm.compile(arg)
+		}
 
-		return func(fbr *fiber) (Value, *Exception) {
-			vm.rt.wg.Add(1)
+		// generic compilation
+		value := vm.compile(node.Fn)
+		return func(fbr *fiber) (result Value, exc *Exception) {
+			value, exc := value(fbr)
+			if exc != nil {
+				return value, exc
+			}
 
-			go func(fbr *fiber) {
-				vm.rt.gil.Lock()
-
-				result, err := call(fbr)
-				vm.rt.wg.Done()
-				vm.rt.gil.Unlock()
-
-				if err != nil {
-					panic(err)
+			// check if it is a user function
+			if fn, isUserFn := value.AsUserFn(); isUserFn {
+				if len(fn.args) != len(arguments) {
+					if fn.name != "λ" {
+						return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments))
+					}
+					return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments))
 				}
 
-				if result.IsTruthy() {
-					fmt.Println("result:", result)
+				// setup new fiber
+				newFiber := vm.newFiber()
+				newFiber.active = fn
+				newFiber.base = 0
+				newFiber.stack = newFiber.stack[:0]
+
+				// setup stack locals
+				for idx := range fn.capacity {
+					newFiber.stack = append(newFiber.stack, vm.newValue())
+
+					// evaluate arguments
+					if idx < len(arguments) {
+						arg, exc := arguments[idx](fbr)
+						if exc != nil {
+							return arg, exc
+						}
+
+						*(newFiber.stack[idx]) = arg
+					}
 				}
-			}(&fiber{active: fbr.active})
-			return Value{}, nil
+
+				vm.rt.wg.Add(1)
+				task := make(chan evaluation, 1)
+
+				go func(fbr *fiber) {
+					//vm.rt.AcquireGIL()
+					//defer vm.rt.ReleaseGIL()
+					defer vm.rt.wg.Done()
+
+					// run code
+					result, exc = fn.code(fbr)
+
+					// release non-escaping locals
+					for _, idx := range fn.recyclable {
+						vm.putValue(fbr.stack[idx])
+					}
+					fbr.popStack(fn.capacity)
+
+					task <- evaluation{result: result, err: exc}
+				}(newFiber)
+
+				return BoxTask(task), nil
+			}
+
+			return Value{}, CustomError("cannot call a non-function '%v'", value)
 		}
 	}
 	panic("go expected call, got something else")
@@ -823,9 +911,15 @@ func (vm *Instance) emitAwait(node ast.Await) instruction {
 		}
 
 		if task, isTask := value.AsTask(); isTask {
-			vm.rt.gil.Unlock()
+			if !fbr.unsynced {
+				vm.rt.ReleaseGIL()
+			}
+
 			response, ok := <-task
-			vm.rt.gil.Lock()
+
+			if !fbr.unsynced {
+				vm.rt.AcquireGIL()
+			}
 
 			if !ok {
 				return Value{}, CustomError("cannot await on a finished task")
@@ -834,6 +928,57 @@ func (vm *Instance) emitAwait(node ast.Await) instruction {
 			return response.result, response.err
 		}
 		return Value{}, CustomError("cannot await on a value of type '%s'", value.TypeOf())
+	}
+}
+
+func (vm *Instance) emitAwaitAll(node ast.AwaitAll) instruction {
+	tasks := make([]instruction, len(node.Tasks))
+	for i, task := range node.Tasks {
+		tasks[i] = vm.compile(task)
+	}
+
+	return func(fbr *fiber) (Value, *Exception) {
+		values := make([]<-chan evaluation, len(tasks))
+		for i, task := range tasks {
+			v, exc := task(fbr)
+			if exc != nil {
+				return v, exc
+
+			}
+
+			if task, ok := v.AsTask(); ok {
+				values[i] = task
+				continue
+			}
+
+			return Value{}, RuntimeExceptionF("cannot await on a value of type '%s'", v.TypeOf())
+		}
+
+		results := make([]Value, len(values))
+
+		if !fbr.unsynced {
+			vm.rt.ReleaseGIL()
+		}
+
+		for i, value := range values {
+			response, ok := <-value
+
+			if !ok {
+				return Value{}, CustomError("cannot await on a finished task")
+			}
+
+			if response.err != nil {
+				return response.result, response.err
+			}
+
+			results[i] = response.result
+		}
+
+		if !fbr.unsynced {
+			vm.rt.AcquireGIL()
+		}
+
+		return BoxArray(results), nil
 	}
 }
 
@@ -906,7 +1051,7 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 	defer vm.cp.closures.Last(0).scope.CloseBlock()
 
 	// optimise: statement extraction from block; saves an extra dispatch
-	if len(node.Code) == 1 && vm.cp.inline {
+	/* if len(node.Code) == 1 && vm.cp.inline {
 		node := node.Code[0]
 		// optimise: {return x}
 		if ret, isReturn := node.(ast.Return); isReturn {
@@ -950,7 +1095,7 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 
 		// generic
 		return vm.compile(node)
-	}
+	} */
 
 	block := make([]instruction, len(node.Code))
 	for i, statement := range node.Code {

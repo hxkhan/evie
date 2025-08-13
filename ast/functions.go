@@ -39,12 +39,12 @@ type Await struct {
 
 type AwaitAll struct {
 	token.Pos
-	Names []string
+	Tasks []Node
 }
 
 type AwaitAny struct {
 	token.Pos
-	Names []string
+	Tasks []Node
 }
 
 type FieldAccess struct {

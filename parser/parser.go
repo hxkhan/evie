@@ -181,6 +181,14 @@ func (ps *parser) handleWords(main token.Token, asExpr bool) ast.Node {
 			ret.Value = ast.Input[struct{}]{Pos: main.Line}
 		}
 		return ret
+
+	case "unsynced":
+		if !ps.consume("{") {
+			return ast.Unsynced{Pos: main.Line, Action: ps.parse(0, true)}
+		}
+
+		return ast.Unsynced{Pos: main.Line, Action: ps.parseBlock()}
+
 	case "var":
 		name := ps.NextToken()
 		if !ps.consume(":=") {
@@ -227,10 +235,10 @@ func (ps *parser) parseAwait(main token.Token) ast.Node {
 	}
 
 	if ps.consumeName("all") {
-		return ast.AwaitAll{Pos: main.Line, Names: ps.parseNamesList(ps.last)}
+		return ast.AwaitAll{Pos: main.Line, Tasks: ps.parseArgsList()}
 	}
 	if ps.consumeName("any") {
-		return ast.AwaitAny{Pos: main.Line, Names: ps.parseNamesList(ps.last)}
+		return ast.AwaitAny{Pos: main.Line, Tasks: ps.parseArgsList()}
 	}
 	return ast.Await{Task: ps.parse(0, true)}
 }
@@ -343,21 +351,30 @@ func (ps *parser) parseNamesList(main token.Token) []string {
 }
 
 func (ps *parser) parseArgsList() []ast.Node {
-	var args []ast.Node
-	if ps.consume(")") {
-		return args
+	if !ps.consume("(") {
+		panic(fmt.Errorf("'(' expected ')' on line %v, got '%v'", ps.PeekToken().Line, ps.PeekToken().Literal))
 	}
 
-	for {
-		args = append(args, ps.parse(0, true))
-		if ps.consume(")") {
-			break
-		}
-		if !ps.consume(",") {
-			panic(fmt.Errorf("expected ',' or ')' on line %v", ps.PeekToken().Line))
+	var args []ast.Node
+	if !ps.PeekToken().IsSimple(")") {
+		for {
+			arg := ps.parse(0, true)
+			args = append(args, arg)
+
+			if ps.PeekToken().IsSimple(",") {
+				ps.NextToken() // consume ','
+			} else {
+				break
+			}
 		}
 	}
+
+	if !ps.consume(")") {
+		panic(fmt.Errorf("'(' expected ')' on line %v, got '%v'", ps.PeekToken().Line, ps.PeekToken().Literal))
+	}
+
 	return args
+
 }
 
 func (ps *parser) parse(precedenceLevel int, asExpr bool) (node ast.Node) {

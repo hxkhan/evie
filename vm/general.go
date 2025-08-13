@@ -266,11 +266,23 @@ func (vm *Instance) newFiber() (obj *fiber) {
 	if vm.rt.fibers.IsEmpty() {
 		return new(fiber)
 	}
-	return vm.rt.fibers.Pop()
+	f := vm.rt.fibers.Pop()
+	f.unsynced = false
+	return f
 }
 
 func (vm *Instance) putFiber(obj *fiber) {
 	if vm.rt.fibers.Len() < vm.rt.fibers.Cap() {
 		vm.rt.fibers.Push(obj)
 	}
+}
+
+func (rt *runtime) AcquireGIL() {
+	//fmt.Println("Someone acquired the GIL")
+	rt.gil.Lock()
+}
+
+func (rt *runtime) ReleaseGIL() {
+	//fmt.Println("Someone released the GIL")
+	rt.gil.Unlock()
 }

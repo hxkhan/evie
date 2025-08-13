@@ -19,6 +19,16 @@ type While struct {
 	Action    Node // [required]
 }
 
+type Unsynced struct {
+	token.Pos
+	Action Node // [required]
+}
+
+type Synced struct {
+	token.Pos
+	Action Node // [required]
+}
+
 type Continue struct {
 	token.Pos
 }

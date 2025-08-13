@@ -47,8 +47,8 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 	}
 
 	vm := fn.vm
-	vm.rt.gil.Lock()
-	defer vm.rt.gil.Unlock()
+	vm.rt.AcquireGIL()
+	defer vm.rt.ReleaseGIL()
 
 	// fetch a fiber and reset it
 	fbr := vm.newFiber()
@@ -101,8 +101,8 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 
 	wrapper := reflect.MakeFunc(fun.Type(), func(in []reflect.Value) (out []reflect.Value) {
 		vm := fn.vm
-		vm.rt.gil.Lock()
-		defer vm.rt.gil.Unlock()
+		vm.rt.AcquireGIL()
+		defer vm.rt.ReleaseGIL()
 
 		// fetch a fiber and prepare it
 		fbr := vm.newFiber()

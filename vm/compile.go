@@ -835,8 +835,8 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 				task := make(chan evaluation, 1)
 
 				go func(fbr *fiber) {
-					//vm.rt.AcquireGIL()
-					//defer vm.rt.ReleaseGIL()
+					vm.rt.AcquireGIL()
+					defer vm.rt.ReleaseGIL()
 					defer vm.rt.wg.Done()
 
 					// run code

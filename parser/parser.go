@@ -327,7 +327,13 @@ func (ps *parser) parseFn(main token.Token, asExpr bool) ast.Node {
 			ps.panic(ps.last, "'{'")
 		}
 		fn.Action = ps.parseBlock()
-		fn.Unsynced = true
+		fn.SyncMode = ast.UnsyncedMode
+	} else if ps.consume("synced") {
+		if !ps.consume("{") {
+			ps.panic(ps.last, "'{'")
+		}
+		fn.Action = ps.parseBlock()
+		fn.SyncMode = ast.SyncedMode
 	} else {
 		ps.panic(main, "'{' or '=>'")
 	}

@@ -7,11 +7,19 @@ import (
 	"github.com/hxkhan/evie/token"
 )
 
+type SyncMode int
+
+const (
+	InheritMode SyncMode = iota
+	SyncedMode
+	UnsyncedMode
+)
+
 type Fn struct {
 	token.Pos
 	Name       string
 	Args       []string
-	Unsynced   bool
+	SyncMode   SyncMode
 	Action     Node
 	IsPublic   bool
 	UsedAsExpr bool

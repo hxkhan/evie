@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"reflect"
 	"unsafe"
+
+	"github.com/hxkhan/evie/ast"
 )
 
 type capture struct {
@@ -20,14 +22,14 @@ func (c capture) String() string {
 
 // funcInfoStatic holds static function information
 type funcInfoStatic struct {
-	name       string      // name of the function
-	args       []string    // argument names
-	unsynced   bool        // the action is unsynced or not
-	captures   []capture   // captured references
-	recyclable []int       // the locals that do not escape
-	capacity   int         // total required scope-capacity
-	code       instruction // the actual function code
-	vm         *Instance   // the corresponding vm
+	name       string       // name of the function
+	args       []string     // argument names
+	mode       ast.SyncMode // the sync mode of the action
+	captures   []capture    // captured references
+	recyclable []int        // the locals that do not escape
+	capacity   int          // total required scope-capacity
+	code       instruction  // the actual function code
+	vm         *Instance    // the corresponding vm
 }
 
 type UserFn struct {
@@ -59,7 +61,7 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 
 	// create space for all the locals
 	for range fn.capacity {
-		fbr.stack = append(fbr.stack, vm.newValue())
+		fbr.stack = append(fbr.stack, fbr.newValue())
 	}
 
 	// set arguments
@@ -73,7 +75,7 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 
 	// release non-escaping locals & fiber
 	for _, idx := range fn.recyclable {
-		vm.putValue(fbr.stack[idx])
+		fbr.putValue(fbr.stack[idx])
 	}
 	vm.putFiber(fbr)
 
@@ -113,7 +115,7 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 
 		// create space for all the locals
 		for range fn.capacity {
-			fbr.stack = append(fbr.stack, vm.newValue())
+			fbr.stack = append(fbr.stack, fbr.newValue())
 		}
 
 		// set arguments
@@ -136,7 +138,7 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 
 		// release non-escaping locals and fiber
 		for _, idx := range fn.recyclable {
-			vm.putValue(fbr.stack[idx])
+			fbr.putValue(fbr.stack[idx])
 		}
 		vm.putFiber(fbr)
 

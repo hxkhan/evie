@@ -1,6 +1,6 @@
-package main imports("time")
+package main
 
-fn inc(id, n) unsynced {
+fn dec(id, n) unsynced {
     echo `{id} started`
     while n > 0 {
         n -= 1
@@ -9,11 +9,11 @@ fn inc(id, n) unsynced {
 }
 
 fn main() {
-    go inc("a", 100000000)
-    go inc("b", 100000000)
-    go inc("c", 100000000)
-    go inc("d", 100000000)
-    go inc("e", 100000000)
+    go dec("a", 100000000)
+    go dec("b", 100000000)
+    go dec("c", 100000000)
+    go dec("d", 100000000)
+    go dec("e", 100000000)
 
     echo "all initiated"
 }

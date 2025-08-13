@@ -40,7 +40,6 @@ type compiler struct {
 
 type runtime struct {
 	packages map[string]*packageInstance // loaded packages
-	boxes    ds.Slice[*Value]            // pooled boxes for this vm
 	fibers   ds.Slice[*fiber]            // pooled fibers for this vm
 	trace    []string                    // call-stack trace
 	gil      sync.Mutex                  // global interpreter lock
@@ -82,8 +81,7 @@ func New(opts Options) *Instance {
 		},
 		runtime{
 			packages: make(map[string]*packageInstance),
-			boxes:    make(ds.Slice[*Value], 0, 48), // the capacity to store 48 boxed values
-			fibers:   make(ds.Slice[*fiber], 0, 3),  // the capacity to store 3 fibers
+			fibers:   make(ds.Slice[*fiber], 0, 3), // the capacity to store 3 fibers
 		},
 		&fiber{
 			active: &UserFn{funcInfoStatic: &funcInfoStatic{name: "global"}},
@@ -249,22 +247,11 @@ func (cp *compiler) addToCaptured(scroll int, index int) (idx int) {
 	return idx
 }
 
-func (vm *Instance) newValue() (obj *Value) {
-	if vm.rt.boxes.IsEmpty() {
-		return new(Value)
-	}
-	return vm.rt.boxes.Pop()
-}
-
-func (vm *Instance) putValue(obj *Value) {
-	if vm.rt.boxes.Len() < vm.rt.boxes.Cap() {
-		vm.rt.boxes.Push(obj)
-	}
-}
-
 func (vm *Instance) newFiber() (obj *fiber) {
 	if vm.rt.fibers.IsEmpty() {
-		return new(fiber)
+		fbr := new(fiber)
+		fbr.boxes = make(ds.Slice[*Value], 0, 48)
+		return fbr
 	}
 	f := vm.rt.fibers.Pop()
 	return f

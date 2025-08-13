@@ -56,7 +56,7 @@ To test this exact program, run `go run ./cli -t ./examples/go.ev`. Then remove 
 ## Benchmarks
 | Language | fib(35)  | Host Language |
 | :-       | :-       | :-            |
-| [**Evie**](https://github.com/hxkhan/evie) | `416ms` | Go |
+| [**Evie**](https://github.com/hxkhan/evie) | `432ms` | Go |
 | [Lua 5.4.2](https://lua.org/) | `536ms` | C | 
 | [JS - V8 Ignition](https://v8.dev/docs/ignition) | `665ms` | C++ | 
 | [JS - QuickJS](https://bellard.org/quickjs/) | `703ms` | C | 

@@ -1,23 +1,13 @@
 package vm
 
-/* IDEA:
+import "github.com/hxkhan/evie/ds"
 
 type fiber struct {
-	active *UserFn  // currently active user function
-	stack  []Value  // a flat shared stack for local variables in the current call stack
-	base   int      // where locals of the active function start at
-}
-
-functions only allocate non-escaping locals on the stack
-the rest go on the heap as free variables somehow
-
-*/
-
-type fiber struct {
-	unsynced bool     // run in synchronized mode or not
-	active   *UserFn  // currently active user function
-	stack    []*Value // flat shared stack for local variables in the current call stack
-	base     int      // where locals of the active function start at
+	unsynced bool             // run in synchronized mode or not
+	active   *UserFn          // currently active user function
+	stack    []*Value         // flat shared stack for local variables in the current call stack
+	base     int              // where locals of the active function start at
+	boxes    ds.Slice[*Value] // pooled boxes for this fiber
 }
 
 func (fbr *fiber) get(v local) Value {
@@ -65,4 +55,17 @@ func (fbr *fiber) swapActive(new *UserFn) (old *UserFn) {
 	old = fbr.active
 	fbr.active = new
 	return old
+}
+
+func (fbr *fiber) newValue() (obj *Value) {
+	if fbr.boxes.IsEmpty() {
+		return new(Value)
+	}
+	return fbr.boxes.Pop()
+}
+
+func (fbr *fiber) putValue(obj *Value) {
+	if fbr.boxes.Len() < fbr.boxes.Cap() {
+		fbr.boxes.Push(obj)
+	}
 }

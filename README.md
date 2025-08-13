@@ -10,7 +10,7 @@ Evie is a dynamically typed programming language written in Go. The goal is to p
 
 #### Here is a string interpolation example from [examples/input.ev](./examples/input.ev)
 <a href="./examples/input.ev">
-    <img src="./docs/images/interpolation.png" width="500" alt="A snippet of Evie code">
+    <img src="./docs/images/interpolation.png" width="600" alt="A snippet of Evie code">
 </a>
 
 #### Also a concurrency example from [examples/go.ev](./examples/go.ev)

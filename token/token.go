@@ -16,7 +16,6 @@ const (
 	Simple
 	Word
 	String
-	TemplateString
 	Number
 	Invalid
 )
@@ -82,8 +81,6 @@ func (t Type) String() string {
 		return "word"
 	case String:
 		return "string"
-	case TemplateString:
-		return "template"
 	case Number:
 		return "number"
 	case Invalid:

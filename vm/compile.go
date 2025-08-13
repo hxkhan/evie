@@ -38,6 +38,27 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			return Value{}, nil
 		}
 
+	case ast.StringTemplate:
+		args := make([]instruction, len(node.Args))
+		for i, arg := range node.Args {
+			args[i] = vm.compile(arg)
+		}
+
+		return func(fbr *fiber) (Value, *Exception) {
+			params := make([]any, len(args))
+
+			for i, param := range args {
+				res, err := param(fbr)
+				if err != nil {
+					return res, err
+				}
+
+				params[i] = res
+			}
+
+			return BoxString(fmt.Sprintf(node.Format, params...)), nil
+		}
+
 	case ast.Echo:
 		what := vm.compile(node.Value)
 

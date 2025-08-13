@@ -1,4 +1,4 @@
-package main imports("io", "list", "string")
+package main imports("io", "lists", "strings")
 
 /* fn main() {
     var n := 10000000
@@ -24,8 +24,8 @@ fn main() {
 
     message := "hello world"
     while n > 0 {
-        //parts := string.split(message, " ")
-        //whole := list.join(parts, "_")
+        //parts := strings.split(message, " ")
+        //whole := lists.join(parts, "_")
 
         parts := message.split(" ")
         whole := parts.join("_")

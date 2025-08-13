@@ -5,18 +5,18 @@ import (
 
 	"github.com/hxkhan/evie/std/fs"
 	"github.com/hxkhan/evie/std/io"
-	"github.com/hxkhan/evie/std/list"
-	str "github.com/hxkhan/evie/std/string"
+	"github.com/hxkhan/evie/std/lists"
+	"github.com/hxkhan/evie/std/strings"
 	"github.com/hxkhan/evie/std/time"
 	"github.com/hxkhan/evie/vm"
 )
 
 var StandardLibraryConstructors = map[string]func() vm.Package{
-	"io":     io.Construct,
-	"fs":     fs.Construct,
-	"time":   time.Construct,
-	"string": str.Construct,
-	"list":   list.Construct,
+	"io":      io.Construct,
+	"fs":      fs.Construct,
+	"time":    time.Construct,
+	"strings": strings.Construct,
+	"lists":   lists.Construct,
 }
 
 var Defaults = vm.Options{

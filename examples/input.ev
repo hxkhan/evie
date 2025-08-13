@@ -1,9 +1,9 @@
 package main imports("io")
 
 fn main() {
-    name := io.input("Please enter your name: ")
-    age := io.input("Please enter your age: ")
+    name := io.prompt("Please enter your name: ")
+    age := io.prompt("Please enter your age: ")
 
-    io.println("Hello " + name + "!")
-    io.println("You are " + str(age) + " years old!")
+    io.println(`Hello {name}!`)
+    io.println(`You are {age} years old!`)
 }

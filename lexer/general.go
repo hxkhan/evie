@@ -13,13 +13,13 @@ type Lexer struct {
 	cursor int       // current position in source
 	line   token.Pos // current line number
 
-	last token.Token // last token returned
-	next token.Token // next token to be returned
+	backlog []token.Token // backlog of tokens to return
+	bi      int           // backlog index
 }
 
 func New(input []byte) *Lexer {
 	lex := &Lexer{src: input, cursor: 0, line: 1}
-	lex.next = lex.compose()
+	lex.backlog = append(lex.backlog, lex.compose())
 	return lex
 }
 

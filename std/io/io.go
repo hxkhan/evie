@@ -10,7 +10,8 @@ func Construct() vm.Package {
 	pkg := vm.NewHostPackage("io")
 	pkg.SetSymbol("print", print)
 	pkg.SetSymbol("println", println)
-	pkg.SetSymbol("input", input)
+	pkg.SetSymbol("prompt", prompt)
+	pkg.SetSymbol("readln", readln)
 	pkg.SetSymbol("dec", dec)
 	return pkg
 }
@@ -25,6 +26,19 @@ var println = vm.BoxGoFunc(func(output vm.Value) (vm.Value, *vm.Exception) {
 	return vm.Value{}, nil
 })
 
+var prompt = vm.BoxGoFunc(func(output vm.Value) (vm.Value, *vm.Exception) {
+	fmt.Print(output)
+	var input string
+	fmt.Scanln(&input)
+	return vm.BoxString(input), nil
+})
+
+var readln = vm.BoxGoFunc(func() (vm.Value, *vm.Exception) {
+	var input string
+	fmt.Scanln(&input)
+	return vm.BoxString(input), nil
+})
+
 var dec = vm.BoxGoFunc(func(n vm.Value) (vm.Value, *vm.Exception) {
 	f64, ok := n.AsFloat64()
 	if !ok {
@@ -32,11 +46,4 @@ var dec = vm.BoxGoFunc(func(n vm.Value) (vm.Value, *vm.Exception) {
 	}
 
 	return vm.BoxNumber(f64 - 1), nil
-})
-
-var input = vm.BoxGoFunc(func(output vm.Value) (vm.Value, *vm.Exception) {
-	fmt.Print(output)
-	var input string
-	fmt.Scanln(&input)
-	return vm.BoxString(input), nil
 })

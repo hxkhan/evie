@@ -39,6 +39,21 @@ func (node Input[T]) String() string {
 	return fmt.Sprint(node.Value)
 }
 
+type StringTemplate struct {
+	token.Pos
+	Format string // e.g. 'Hello %s, how are you!'
+	Args   []Node
+}
+
+func (node StringTemplate) String() string {
+	args := make([]any, len(node.Args))
+	for i, a := range node.Args {
+		args[i] = fmt.Sprintf("{%v}", a)
+	}
+
+	return fmt.Sprintf(node.Format, args...)
+}
+
 type Block struct {
 	token.Pos
 	Code []Node

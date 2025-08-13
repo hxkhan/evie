@@ -226,9 +226,10 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 
 			// create a stub for now
 			fn := BoxUserFn(UserFn{funcInfoStatic: &funcInfoStatic{
-				name: fn.Name,
-				args: fn.Args,
-				vm:   vm,
+				name:     fn.Name,
+				args:     fn.Args,
+				unsynced: fn.Unsynced,
+				vm:       vm,
 			}})
 			this.globals[index] = Global{Value: &fn, IsStatic: true}
 		}
@@ -815,6 +816,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 				newFiber.active = fn
 				newFiber.base = 0
 				newFiber.stack = newFiber.stack[:0]
+				newFiber.unsynced = fn.unsynced
 
 				// setup stack locals
 				for idx := range fn.capacity {
@@ -835,8 +837,11 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 				task := make(chan evaluation, 1)
 
 				go func(fbr *fiber) {
-					vm.rt.AcquireGIL()
-					defer vm.rt.ReleaseGIL()
+					if !fbr.unsynced {
+						vm.rt.AcquireGIL()
+						defer vm.rt.ReleaseGIL()
+					}
+
 					defer vm.rt.wg.Done()
 
 					// run code
@@ -1051,7 +1056,7 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 	defer vm.cp.closures.Last(0).scope.CloseBlock()
 
 	// optimise: statement extraction from block; saves an extra dispatch
-	/* if len(node.Code) == 1 && vm.cp.inline {
+	if len(node.Code) == 1 && vm.cp.inline {
 		node := node.Code[0]
 		// optimise: {return x}
 		if ret, isReturn := node.(ast.Return); isReturn {
@@ -1095,7 +1100,7 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 
 		// generic
 		return vm.compile(node)
-	} */
+	}
 
 	block := make([]instruction, len(node.Code))
 	for i, statement := range node.Code {

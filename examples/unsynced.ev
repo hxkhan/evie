@@ -1,0 +1,19 @@
+package main imports("time")
+
+fn inc(id, n) unsynced {
+    echo `{id} started`
+    while n > 0 {
+        n -= 1
+    }
+    echo `{id} finished`
+}
+
+fn main() {
+    go inc("a", 100000000)
+    go inc("b", 100000000)
+    go inc("c", 100000000)
+    go inc("d", 100000000)
+    go inc("e", 100000000)
+
+    echo "all initiated"
+}

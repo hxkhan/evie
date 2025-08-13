@@ -186,8 +186,13 @@ func (ps *parser) handleWords(main token.Token, asExpr bool) ast.Node {
 		if !ps.consume("{") {
 			return ast.Unsynced{Pos: main.Line, Action: ps.parse(0, true)}
 		}
-
 		return ast.Unsynced{Pos: main.Line, Action: ps.parseBlock()}
+
+	case "synced":
+		if !ps.consume("{") {
+			return ast.Synced{Pos: main.Line, Action: ps.parse(0, true)}
+		}
+		return ast.Synced{Pos: main.Line, Action: ps.parseBlock()}
 
 	case "var":
 		name := ps.NextToken()
@@ -317,6 +322,12 @@ func (ps *parser) parseFn(main token.Token, asExpr bool) ast.Node {
 	} else if ps.consume("=>") {
 		// TODO: we should check so next already isn't a return
 		fn.Action = ast.Return{Pos: main.Line, Value: ps.parse(0, true)}
+	} else if ps.consume("unsynced") {
+		if !ps.consume("{") {
+			ps.panic(ps.last, "'{'")
+		}
+		fn.Action = ps.parseBlock()
+		fn.Unsynced = true
 	} else {
 		ps.panic(main, "'{' or '=>'")
 	}

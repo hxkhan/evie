@@ -22,6 +22,7 @@ func (c capture) String() string {
 type funcInfoStatic struct {
 	name       string      // name of the function
 	args       []string    // argument names
+	unsynced   bool        // the action is unsynced or not
 	captures   []capture   // captured references
 	recyclable []int       // the locals that do not escape
 	capacity   int         // total required scope-capacity

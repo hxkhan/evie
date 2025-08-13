@@ -267,7 +267,6 @@ func (vm *Instance) newFiber() (obj *fiber) {
 		return new(fiber)
 	}
 	f := vm.rt.fibers.Pop()
-	f.unsynced = false
 	return f
 }
 

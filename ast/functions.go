@@ -11,6 +11,7 @@ type Fn struct {
 	token.Pos
 	Name       string
 	Args       []string
+	Unsynced   bool
 	Action     Node
 	IsPublic   bool
 	UsedAsExpr bool

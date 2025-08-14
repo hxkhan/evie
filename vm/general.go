@@ -15,10 +15,9 @@ import (
 )
 
 type Instance struct {
-	cp   compiler
-	rt   runtime
-	main *fiber
-	log  logger
+	cp  compiler
+	rt  runtime
+	log logger
 }
 
 type closure struct {
@@ -82,12 +81,6 @@ func New(opts Options) (vm *Instance) {
 		runtime{
 			packages: make(map[string]*packageInstance),
 		},
-		&fiber{
-			active: &UserFn{funcInfoStatic: &funcInfoStatic{name: "global"}},
-			stack:  make([]*Value, 48),
-			boxes:  make(ds.Slice[*Value], 0, 18),
-			base:   0,
-		},
 		logger{
 			Logger:      *log.New(os.Stdout, "", 0),
 			logCaptures: opts.LogCaptures,
@@ -114,7 +107,13 @@ func (vm *Instance) EvalNode(node ast.Node) (result Value, err error) {
 		}
 		result = v
 	} else {
-		v, exc := vm.compile(node)(vm.main)
+		fbr := vm.rt.fibers.Get().(*fiber)
+		fbr.unsynchronized = false
+		fbr.active = &UserFn{funcInfoStatic: &funcInfoStatic{name: "anonymous"}}
+		fbr.base = 0
+		fbr.stack = fbr.stack[:0]
+
+		v, exc := vm.compile(node)(fbr)
 		if exc != nil {
 			err = exc
 		}

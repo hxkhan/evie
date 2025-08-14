@@ -238,7 +238,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 		}
 	}
 
-	// 2. allocate & initialize (ident)
+	// 2. allocate & initialize (bindings)
 	for _, node := range node.Code {
 		if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
 			// check if contains function calls
@@ -251,13 +251,17 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 				panic(fmt.Errorf("double declaration of %s", iDec.Name))
 			}
 
-			value := vm.compile(iDec.Value)
-			v, exc := value(vm.main)
-			if exc != nil {
-				return v, exc
+			var value Value
+			switch v := vm.evaluate(iDec.Value).(type) {
+			case Value:
+				value = v
+			case Global:
+				value = *v.Value
+			default:
+				panic("this cant be!!")
 			}
 			// store the value
-			this.globals[index] = Global{Value: v.Allocate(), IsStatic: iDec.IsStatic}
+			this.globals[index] = Global{Value: &value, IsStatic: iDec.IsStatic}
 		}
 	}
 
@@ -855,7 +859,6 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 	}
 }
 
-// DO NOT MODIFY WITHOUT CAUSE!
 func (vm *Instance) emitGo(node ast.Go) instruction {
 	if node, isCall := node.Fn.(ast.Call); isCall {
 		// compile arguments
@@ -1000,15 +1003,15 @@ func (vm *Instance) emitReturn(node ast.Return) instruction {
 }
 
 func (vm *Instance) emitAwait(node ast.Await) instruction {
-	task := vm.compile(node.Task)
+	value := vm.compile(node.Task)
 
 	return func(fbr *fiber) (Value, *Exception) {
-		value, err := task(fbr)
+		v, err := value(fbr)
 		if err != nil {
-			return value, err
+			return v, err
 		}
 
-		if task, isTask := value.AsTask(); isTask {
+		if task, ok := v.AsTask(); ok {
 			if fbr.synced() {
 				vm.rt.ReleaseGIL()
 			}
@@ -1025,53 +1028,60 @@ func (vm *Instance) emitAwait(node ast.Await) instruction {
 
 			return response.result, response.err
 		}
-		return Value{}, CustomError("cannot await on a value of type '%s'", value.TypeOf())
+		return Value{}, CustomError("cannot await on a value of type '%s'", v.TypeOf())
 	}
 }
 
 func (vm *Instance) emitAwaitAll(node ast.AwaitAll) instruction {
-	tasks := make([]instruction, len(node.Tasks))
+	values := make([]instruction, len(node.Tasks))
 	for i, task := range node.Tasks {
-		tasks[i] = vm.compile(task)
+		values[i] = vm.compile(task)
 	}
 
 	return func(fbr *fiber) (Value, *Exception) {
-		values := make([]<-chan evaluation, len(tasks))
-		for i, task := range tasks {
-			v, exc := task(fbr)
+		tasks := make([]<-chan evaluation, len(values))
+		for i, value := range values {
+			v, exc := value(fbr)
 			if exc != nil {
 				return v, exc
 
 			}
 
 			if task, ok := v.AsTask(); ok {
-				values[i] = task
+				tasks[i] = task
 				continue
 			}
 
 			return Value{}, RuntimeExceptionF("cannot await on a value of type '%s'", v.TypeOf())
 		}
 
-		results := make([]Value, len(values))
+		// release GIL if synced
+		if fbr.synced() {
+			vm.rt.ReleaseGIL()
+		}
 
-		for i, value := range values {
-			if fbr.synced() {
-				vm.rt.ReleaseGIL()
-			}
-			response, ok := <-value
-			if fbr.synced() {
-				vm.rt.AcquireGIL()
-			}
+		results := make([]Value, len(values))
+		for i, task := range tasks {
+			response, ok := <-task
 
 			if !ok {
 				return Value{}, CustomError("cannot await on a finished task")
 			}
 
 			if response.err != nil {
+				// acquire GIL if synced
+				if fbr.synced() {
+					vm.rt.AcquireGIL()
+				}
 				return response.result, response.err
 			}
 
 			results[i] = response.result
+		}
+
+		// acquire GIL if synced
+		if fbr.synced() {
+			vm.rt.AcquireGIL()
 		}
 
 		return BoxArray(results), nil

@@ -16,7 +16,7 @@ func (fbr *fiber) synced() bool {
 }
 
 func (fbr *fiber) unsynced() bool {
-	return !fbr.unsynchronized
+	return fbr.unsynchronized
 }
 
 /* func (fbr *fiber) transition(to ast.SyncMode) (old ast.SyncMode) {

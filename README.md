@@ -18,11 +18,18 @@ Evie is a dynamically typed programming language written in Go. The goal is to p
     <img src="./docs/images/go.png" width="500" alt="A snippet of Evie code">
 </a>
 
-To test this exact program, run `go run ./cli -t ./examples/go.ev`. Then remove all of the `go` keywords infront of the `print` calls and re-run to see the difference.
+To test this exact program, run `go run ./cli -t ./examples/go.ev`. Then remove all of the `go` keywords infront of the `print` calls and re-run to see the difference. This is still single threaded by the way. It is concurrent yes. But single threaded and safe. The `go` keyword just schedules it for execution, but they only run when `main` returns or yields via `await`. You can say Evie by default has a [GIL](https://en.wikipedia.org/wiki/Global_interpreter_lock) (Global Interpreter Lock).
 
 > The flag `-t` prints the execution time of just Evie, i.e. total time `-` the time it took to compile Evie itself. You could alternatively build Evie first by doing `go build ./cli`, as shown at the bottom of this page.
 
 > Also you need Go installed of course. But don't worry as it is probably the simplest language to setup. See [here](https://go.dev/doc/install).
+
+#### What about true parallelism?
+I did not want to make the same mistake as Python. That is, not providing a means to do true multi-threading by default. So here it is, [examples/unsynced.ev](./examples/unsynced.ev).
+
+<a href="./examples/unsynced.ev">
+    <img src="./docs/images/unsynced.png" width="500" alt="A snippet of Evie code">
+</a>
 
 ## Goals
 - Highly performant
@@ -48,7 +55,7 @@ To test this exact program, run `go run ./cli -t ./examples/go.ev`. Then remove 
 - Control flow (`for`) ❌
 - Control flow (`break` `continue`) ✅
 - Operators (`+` `-` `*` `/` `%` `==` `<` `>`) ✅
-- Concurrency (works but needs *polishing*) ⏳
+- Concurrency (basics work but needs *polishing*) ⏳
 - Scoping (global, function, block) ✅
 - Error handling (exceptions) ⏳
 - Interoperability (call into Go) ✅

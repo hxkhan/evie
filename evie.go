@@ -25,7 +25,7 @@ var Defaults = vm.Options{
 	DisableInlining: false,
 	Metrics:         false,
 	TopLevelLogic:   true,
-	ImportResolver:  StandardLibraryResolver,
+	ImportsResolver: StandardLibraryResolver,
 }
 
 // StandardLibrary returns all of the standard library package contructors

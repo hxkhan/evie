@@ -50,7 +50,7 @@ func main() {
 		DisableInlining: !(*inline),
 		Metrics:         *m,
 		//UniversalStatics: evie.ImplicitBuilitins(),
-		ImportResolver: resolver,
+		ImportsResolver: resolver,
 	})
 	_, err = evm.EvalScript(input)
 	if err != nil {

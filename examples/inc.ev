@@ -1,18 +1,18 @@
-package main imports("time")
+package main
 
 var x := 0
 
 fn inc(n) {
-    while (n > 0) {
+    while n > 0 {
         x += 1
         n -= 1
     }
 }
 
 fn main() {
-    go inc(10000)
-    go inc(10000)
+    a := go inc(10000000)
+    b := go inc(10000000)
 
-    await time.timer(10) // yield for 10ms
+    await.all (a, b)
     echo x
 }

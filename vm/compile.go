@@ -909,7 +909,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 				task := make(chan evaluation, 1)
 				vm.rt.wg.Go(func() {
 					// setup new fiber
-					fbr := vm.newFiber()
+					fbr := vm.rt.fibers.Get().(*fiber)
 					fbr.active = fn
 					fbr.base = 0
 					fbr.stack = fbr.stack[:0]
@@ -935,11 +935,12 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 						vm.rt.ReleaseGIL()
 					}
 
-					// release non-escaping locals
+					// cleanup fiber and release
 					for _, idx := range fn.recyclable {
 						fbr.putValue(fbr.stack[idx])
 					}
 					fbr.popStack(fn.capacity)
+					vm.rt.fibers.Put(fbr)
 
 					// return result but catch relevant signals
 					switch exc {
@@ -1912,6 +1913,82 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 				}
 			}
 		}
+
+		// optimise: lhs being a global
+		if lhs, ok := lhs.(Global); ok {
+			if lhs.IsStatic {
+				panic(fmt.Sprintf("Assignment to constant binding on line '%v'.", node.Line()))
+			}
+
+			lhs := lhs.Value
+			rhs := vm.compile(node.Rhs)
+			switch node.Operator {
+			case ast.AddOp:
+				return func(fbr *fiber) (Value, *Exception) {
+					rhs, err := rhs(fbr)
+					if err != nil {
+						return rhs, err
+					}
+					if result, ok := lhs.Add(rhs); ok {
+						*lhs = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError("+", *lhs, rhs)
+				}
+
+			case ast.SubOp:
+				return func(fbr *fiber) (Value, *Exception) {
+					rhs, err := rhs(fbr)
+					if err != nil {
+						return rhs, err
+					}
+					if result, ok := lhs.Sub(rhs); ok {
+						*lhs = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError("-", *lhs, rhs)
+				}
+
+			case ast.MulOp:
+				return func(fbr *fiber) (Value, *Exception) {
+					rhs, err := rhs(fbr)
+					if err != nil {
+						return rhs, err
+					}
+					if result, ok := lhs.Mul(rhs); ok {
+						*lhs = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError("*", *lhs, rhs)
+				}
+
+			case ast.DivOp:
+				return func(fbr *fiber) (Value, *Exception) {
+					rhs, err := rhs(fbr)
+					if err != nil {
+						return rhs, err
+					}
+					if result, ok := lhs.Div(rhs); ok {
+						*lhs = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError("/", *lhs, rhs)
+				}
+
+			case ast.ModOp:
+				return func(fbr *fiber) (Value, *Exception) {
+					rhs, err := rhs(fbr)
+					if err != nil {
+						return rhs, err
+					}
+					if result, ok := lhs.Mod(rhs); ok {
+						*lhs = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError("%", *lhs, rhs)
+				}
+			}
+		}
 	}
 
 	/* lhs := vm.compile(node.Lhs)
@@ -2000,5 +2077,5 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 		}
 	} */
 
-	panic(fmt.Errorf("implement Operator(%v)", node.Operator))
+	panic(fmt.Errorf("implement Operator(%v) in %v", node.Operator, node))
 }

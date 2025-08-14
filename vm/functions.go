@@ -54,7 +54,8 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 	defer vm.rt.ReleaseGIL()
 
 	// fetch a fiber and reset it
-	fbr := vm.newFiber()
+	fbr := vm.rt.fibers.Get().(*fiber)
+	fbr.unsynced = false
 	fbr.active = fn
 	fbr.base = 0
 	fbr.stack = fbr.stack[:0]
@@ -77,7 +78,7 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 	for _, idx := range fn.recyclable {
 		fbr.putValue(fbr.stack[idx])
 	}
-	vm.putFiber(fbr)
+	vm.rt.fibers.Put(fbr)
 
 	// don't implicitly return the return value of the last executed instruction
 	switch exc {
@@ -108,7 +109,7 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 		defer vm.rt.ReleaseGIL()
 
 		// fetch a fiber and prepare it
-		fbr := vm.newFiber()
+		fbr := vm.rt.fibers.Get().(*fiber)
 		fbr.active = fn
 		fbr.base = 0
 		fbr.stack = fbr.stack[:0]
@@ -140,7 +141,7 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 		for _, idx := range fn.recyclable {
 			fbr.putValue(fbr.stack[idx])
 		}
-		vm.putFiber(fbr)
+		vm.rt.fibers.Put(fbr)
 
 		out = make([]reflect.Value, 2)
 		// don't implicitly return the return value of the last executed instruction

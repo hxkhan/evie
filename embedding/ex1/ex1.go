@@ -28,7 +28,7 @@ func main() {
 	// create a vm with our options
 	evm := vm.New(vm.Options{
 		UniversalStatics: statics,
-		ImportResolver:   resolver,
+		ImportsResolver:  resolver,
 	})
 
 	// evaluate our script

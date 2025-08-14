@@ -40,7 +40,7 @@ type compiler struct {
 
 type runtime struct {
 	packages map[string]*packageInstance // loaded packages
-	fibers   ds.Slice[*fiber]            // pooled fibers for this vm
+	fibers   sync.Pool                   // pooled fibers for this vm
 	trace    []string                    // call-stack trace
 	gil      sync.Mutex                  // global interpreter lock
 	wg       sync.WaitGroup              // wait for all fibers to complete
@@ -68,25 +68,29 @@ type Options struct {
 	Metrics         bool // collect metrics (affects performance)
 	TopLevelLogic   bool // whether to only allow declarations at top level
 
-	ImportResolver   func(name string) Package // to instantiate host packages when user packages import them
+	ImportsResolver  func(name string) Package // to instantiate host packages when user packages import them
 	UniversalStatics map[string]*Value         // implicitly visible to all user packages
 }
 
 func New(opts Options) *Instance {
 	return &Instance{
 		compiler{
-			resolver: opts.ImportResolver,
+			resolver: opts.ImportsResolver,
 			statics:  opts.UniversalStatics,
 			inline:   !opts.DisableInlining,
 		},
 		runtime{
 			packages: make(map[string]*packageInstance),
-			fibers:   make(ds.Slice[*fiber], 0, 3), // the capacity to store 3 fibers
+			fibers: sync.Pool{
+				New: func() interface{} {
+					return &fiber{boxes: make(ds.Slice[*Value], 0, 48)}
+				},
+			},
 		},
 		&fiber{
 			active: &UserFn{funcInfoStatic: &funcInfoStatic{name: "global"}},
 			stack:  make([]*Value, 48),
-			boxes:  make(ds.Slice[*Value], 0, 48),
+			boxes:  make(ds.Slice[*Value], 0, 18),
 			base:   0,
 		},
 		logger{
@@ -246,22 +250,6 @@ func (cp *compiler) addToCaptured(scroll int, index int) (idx int) {
 		}
 	}
 	return idx
-}
-
-func (vm *Instance) newFiber() (obj *fiber) {
-	if vm.rt.fibers.IsEmpty() {
-		fbr := new(fiber)
-		fbr.boxes = make(ds.Slice[*Value], 0, 48)
-		return fbr
-	}
-	f := vm.rt.fibers.Pop()
-	return f
-}
-
-func (vm *Instance) putFiber(obj *fiber) {
-	if vm.rt.fibers.Len() < vm.rt.fibers.Cap() {
-		vm.rt.fibers.Push(obj)
-	}
 }
 
 func (rt *runtime) AcquireGIL() {

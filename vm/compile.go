@@ -855,11 +855,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 	}
 }
 
-/*
-DO NOT MODIFY WITHOUT CAUSE!
-I had to sacrifice 3 goats and a chicken in order to discover cache invalidation issues.
-Look at the `NOTE` below.
-*/
+// DO NOT MODIFY WITHOUT CAUSE!
 func (vm *Instance) emitGo(node ast.Go) instruction {
 	if node, isCall := node.Fn.(ast.Call); isCall {
 		// compile arguments
@@ -919,7 +915,6 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					for idx := range fn.capacity {
 						fbr.stack = append(fbr.stack, fbr.newValue())
 
-						// NOTE: len(params) INSTEAD OF len(arguments) OR YOU WILL LOSE HAIR
 						// assign arguments
 						if idx < len(params) {
 							*(fbr.stack[idx]) = params[idx]
@@ -951,6 +946,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 						panic(exc)
 					}
 					task <- evaluation{result: result, err: exc}
+					close(task)
 				})
 
 				return BoxTask(task), nil
@@ -1058,12 +1054,14 @@ func (vm *Instance) emitAwaitAll(node ast.AwaitAll) instruction {
 
 		results := make([]Value, len(values))
 
-		if fbr.synced() {
-			vm.rt.ReleaseGIL()
-		}
-
 		for i, value := range values {
+			if fbr.synced() {
+				vm.rt.ReleaseGIL()
+			}
 			response, ok := <-value
+			if fbr.synced() {
+				vm.rt.AcquireGIL()
+			}
 
 			if !ok {
 				return Value{}, CustomError("cannot await on a finished task")
@@ -1074,10 +1072,6 @@ func (vm *Instance) emitAwaitAll(node ast.AwaitAll) instruction {
 			}
 
 			results[i] = response.result
-		}
-
-		if fbr.synced() {
-			vm.rt.AcquireGIL()
 		}
 
 		return BoxArray(results), nil

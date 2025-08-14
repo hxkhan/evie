@@ -1,21 +1,17 @@
 package main
 
-fn fib(n) {
+fn fib(n) unsynced {
     if n < 2 {
         return n
     }
     return fib(n-1) + fib(n-2)
 }
 
-fn run(id) unsynced {
-    echo `run("{id}") => {fib(35)}`
-}
-
 // go run ./cli -t ./examples/unsynced.ev
 fn main() {
-    go run("a")
-    go run("b")
-    go run("c")
-    go run("d")
-    go run("e")
+    a := go fib(35)
+    b := go fib(35)
+    c := go fib(35)
+
+    echo await.all(a, b, c)
 }

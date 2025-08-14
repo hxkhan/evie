@@ -9,6 +9,7 @@ fn inc(n) {
     }
 }
 
+// go run ./cli -t ./examples/inc.ev
 fn main() {
     a := go inc(10000000)
     b := go inc(10000000)

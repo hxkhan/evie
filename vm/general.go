@@ -72,8 +72,8 @@ type Options struct {
 	UniversalStatics map[string]*Value         // implicitly visible to all user packages
 }
 
-func New(opts Options) *Instance {
-	return &Instance{
+func New(opts Options) (vm *Instance) {
+	vm = &Instance{
 		compiler{
 			resolver: opts.ImportsResolver,
 			statics:  opts.UniversalStatics,
@@ -81,11 +81,6 @@ func New(opts Options) *Instance {
 		},
 		runtime{
 			packages: make(map[string]*packageInstance),
-			fibers: sync.Pool{
-				New: func() interface{} {
-					return &fiber{boxes: make(ds.Slice[*Value], 0, 48)}
-				},
-			},
 		},
 		&fiber{
 			active: &UserFn{funcInfoStatic: &funcInfoStatic{name: "global"}},
@@ -98,6 +93,14 @@ func New(opts Options) *Instance {
 			logCaptures: opts.LogCaptures,
 		},
 	}
+
+	vm.rt.fibers = sync.Pool{
+		New: func() any {
+			return &fiber{vm: vm, boxes: make(ds.Slice[*Value], 0, 48)}
+		},
+	}
+
+	return vm
 }
 
 func (vm *Instance) EvalNode(node ast.Node) (result Value, err error) {

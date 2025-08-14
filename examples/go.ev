@@ -5,6 +5,7 @@ fn print(message, duration) {
     io.println(message)
 }
 
+// go run ./cli -t ./examples/go.ev
 fn main() {
     go print("one", 100)
     go print("two", 200)

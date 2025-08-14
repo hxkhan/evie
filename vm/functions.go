@@ -55,7 +55,7 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 
 	// fetch a fiber and reset it
 	fbr := vm.rt.fibers.Get().(*fiber)
-	fbr.unsynced = false
+	fbr.unsynchronized = false
 	fbr.active = fn
 	fbr.base = 0
 	fbr.stack = fbr.stack[:0]

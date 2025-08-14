@@ -86,6 +86,7 @@ func New(opts Options) *Instance {
 		&fiber{
 			active: &UserFn{funcInfoStatic: &funcInfoStatic{name: "global"}},
 			stack:  make([]*Value, 48),
+			boxes:  make(ds.Slice[*Value], 0, 48),
 			base:   0,
 		},
 		logger{
@@ -96,8 +97,8 @@ func New(opts Options) *Instance {
 }
 
 func (vm *Instance) EvalNode(node ast.Node) (result Value, err error) {
-	vm.rt.gil.Lock()
-	defer vm.rt.gil.Unlock()
+	vm.rt.AcquireGIL()
+	defer vm.rt.ReleaseGIL()
 
 	if pkg, isPackage := node.(ast.Package); isPackage {
 		v, exc := vm.runPackage(pkg)
@@ -264,11 +265,11 @@ func (vm *Instance) putFiber(obj *fiber) {
 }
 
 func (rt *runtime) AcquireGIL() {
-	//fmt.Println("Someone acquired the GIL")
 	rt.gil.Lock()
+	//fmt.Println("Someone acquired the GIL")
 }
 
 func (rt *runtime) ReleaseGIL() {
-	//fmt.Println("Someone released the GIL")
 	rt.gil.Unlock()
+	//fmt.Println("Someone released the GIL")
 }

@@ -855,6 +855,11 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 	}
 }
 
+/*
+DO NOT MODIFY WITHOUT CAUSE!
+I had to sacrifice 3 goats and a chicken in order to discover cache invalidation issues.
+Look at the `NOTE` below.
+*/
 func (vm *Instance) emitGo(node ast.Go) instruction {
 	if node, isCall := node.Fn.(ast.Call); isCall {
 		// compile arguments
@@ -880,49 +885,55 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments))
 				}
 
-				// setup new fiber
-				newFiber := vm.newFiber()
-				newFiber.active = fn
-				newFiber.base = 0
-				newFiber.stack = newFiber.stack[:0]
+				// evaluate arguments
+				params := make([]Value, len(arguments))
+				for i, argument := range arguments {
+					arg, exc := argument(fbr)
+					if exc != nil {
+						return arg, exc
+					}
+					params[i] = arg
+				}
 
+				// setup mode
+				var unsynced bool
 				switch fn.mode {
 				case ast.UnsyncedMode:
-					newFiber.unsynced = true
+					unsynced = true
 				case ast.SyncedMode:
-					newFiber.unsynced = false
+					unsynced = false
 				case ast.InheritMode:
-					newFiber.unsynced = fbr.unsynced
+					unsynced = fbr.unsynced
 				}
 
-				// setup stack locals
-				for idx := range fn.capacity {
-					newFiber.stack = append(newFiber.stack, newFiber.newValue())
-
-					// evaluate arguments
-					if idx < len(arguments) {
-						arg, exc := arguments[idx](fbr)
-						if exc != nil {
-							return arg, exc
-						}
-
-						*(newFiber.stack[idx]) = arg
-					}
-				}
-
-				vm.rt.wg.Add(1)
 				task := make(chan evaluation, 1)
+				vm.rt.wg.Go(func() {
+					// setup new fiber
+					fbr := vm.newFiber()
+					fbr.active = fn
+					fbr.base = 0
+					fbr.stack = fbr.stack[:0]
+					fbr.unsynced = unsynced
 
-				go func(fbr *fiber) {
-					if !fbr.unsynced {
-						vm.rt.AcquireGIL()
-						defer vm.rt.ReleaseGIL()
+					// setup stack locals
+					for idx := range fn.capacity {
+						fbr.stack = append(fbr.stack, fbr.newValue())
+
+						// NOTE: len(params) INSTEAD OF len(arguments) OR YOU WILL LOSE HAIR
+						// assign arguments
+						if idx < len(params) {
+							*(fbr.stack[idx]) = params[idx]
+						}
 					}
-
-					defer vm.rt.wg.Done()
 
 					// run code
-					result, exc = fn.code(fbr)
+					if fbr.unsynced {
+						result, exc = fn.code(fbr)
+					} else {
+						vm.rt.AcquireGIL()
+						result, exc = fn.code(fbr)
+						vm.rt.ReleaseGIL()
+					}
 
 					// release non-escaping locals
 					for _, idx := range fn.recyclable {
@@ -930,8 +941,16 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					}
 					fbr.popStack(fn.capacity)
 
+					// return result but catch relevant signals
+					switch exc {
+					case nil:
+					case returnSignal:
+						exc = nil
+					default:
+						panic(exc)
+					}
 					task <- evaluation{result: result, err: exc}
-				}(newFiber)
+				})
 
 				return BoxTask(task), nil
 			}

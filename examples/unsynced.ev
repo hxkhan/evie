@@ -1,19 +1,21 @@
 package main
 
-fn dec(id, n) unsynced {
-    echo `{id} started`
-    while n > 0 {
-        n -= 1
+fn fib(n) {
+    if n < 2 {
+        return n
     }
-    echo `{id} finished`
+    return fib(n-1) + fib(n-2)
 }
 
-fn main() {
-    go dec("a", 100000000)
-    go dec("b", 100000000)
-    go dec("c", 100000000)
-    go dec("d", 100000000)
-    go dec("e", 100000000)
+fn run(id) unsynced {
+    echo `run("{id}") => {fib(35)}`
+}
 
-    echo "all initiated"
+// go run ./cli -t ./examples/unsynced.ev
+fn main() {
+    go run("a")
+    go run("b")
+    go run("c")
+    go run("d")
+    go run("e")
 }

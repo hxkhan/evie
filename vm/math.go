@@ -56,3 +56,17 @@ func (x Value) GreaterThan(y Value) (z Value, ok bool) {
 	}
 	return Value{}, false
 }
+
+func (x Value) LessThanOrEqualTo(y Value) (z Value, ok bool) {
+	if x.pointer == f64Type && y.pointer == f64Type {
+		return BoxBool(math.Float64frombits(x.scalar) <= math.Float64frombits(y.scalar)), true
+	}
+	return Value{}, false
+}
+
+func (x Value) GreaterThanOrEqualTo(y Value) (z Value, ok bool) {
+	if x.pointer == f64Type && y.pointer == f64Type {
+		return BoxBool(math.Float64frombits(x.scalar) >= math.Float64frombits(y.scalar)), true
+	}
+	return Value{}, false
+}

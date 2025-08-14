@@ -6,7 +6,7 @@ fn main() {
         x -= 1
 
         if x == 5 {
-            echo "skip"
+            echo "continue"
             continue
         } else if x == 2 {
             echo "break"

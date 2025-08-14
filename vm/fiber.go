@@ -17,6 +17,13 @@ func (fbr *fiber) get(v local) Value {
 	return *(fbr.stack[fbr.base+v.index])
 }
 
+func (fbr *fiber) getByRef(v local) *Value {
+	if v.isCaptured {
+		return fbr.active.references[v.index]
+	}
+	return fbr.stack[fbr.base+v.index]
+}
+
 func (fbr *fiber) getLocal(index int) Value {
 	return *(fbr.stack[fbr.base+index])
 }

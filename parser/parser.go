@@ -24,14 +24,14 @@ var keywords = []string{"package", "nil", "true", "false", "fn", "return", "go",
 var operators = map[string]ast.Operator{
 	"+": ast.AddOp, "-": ast.SubOp, "*": ast.MulOp, "/": ast.DivOp, "%": ast.ModOp,
 	"+=": ast.AddOp, "-=": ast.SubOp, "*=": ast.MulOp, "/=": ast.DivOp,
-	"==": ast.EqOp, "<": ast.LtOp, ">": ast.GtOp,
+	"==": ast.EqOp, "<": ast.LtOp, ">": ast.GtOp, "<=": ast.LtEqOp, ">=": ast.GtEqOp,
 	"||": ast.OrOp, "&&": ast.AndOp,
 }
 
 var precedence = map[string]int{
 	"||": 0,
 	"&&": 1,
-	"<":  2, ">": 2, "==": 2,
+	"<":  2, ">": 2, "==": 2, "<=": 2, ">=": 2,
 	"+": 3, "-": 3,
 	"*": 4, "/": 4, "%": 4,
 	".": 5,
@@ -261,10 +261,7 @@ func (ps *parser) parseIdent(main token.Token) ast.Node {
 		return ast.Assign{Pos: main.Line, Lhs: left, Value: ps.parse(0, true)}
 	}
 	if ps.consume("+=") || ps.consume("-=") {
-		return ast.Assign{Pos: main.Line, Lhs: left, Value: ast.BinOp{
-			Pos: main.Line, Lhs: ast.Ident{Name: main.Literal},
-			Operator: operators[ps.last.Literal], Rhs: ps.parse(0, true),
-		}}
+		return ast.MutableBinOp{Pos: main.Line, Operator: operators[ps.last.Literal], Lhs: left, Rhs: ps.parse(0, true)}
 	}
 
 	return left

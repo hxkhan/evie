@@ -82,7 +82,7 @@ func (fbr *fiber) pop() (v *Value) {
 }
 
 func (fbr *fiber) push(amount int) {
-	if len(fbr.boxes)+amount < cap(fbr.boxes) {
+	if len(fbr.boxes)+amount <= cap(fbr.boxes) {
 		fbr.boxes = fbr.boxes[:len(fbr.boxes)+amount]
 	}
 }

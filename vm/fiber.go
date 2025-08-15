@@ -1,14 +1,12 @@
 package vm
 
-import "github.com/hxkhan/evie/ds"
-
 type fiber struct {
-	vm             *Instance        // the instance that spawned this fiber
-	unsynchronized bool             // run in unsynchronized mode or not
-	active         *UserFn          // currently active user function
-	stack          []*Value         // flat shared stack for local variables in the current call stack
-	base           int              // where locals of the active function start at
-	boxes          ds.Slice[*Value] // pooled boxes for this fiber
+	vm             *Instance // the instance that spawned this fiber
+	unsynchronized bool      // run in unsynchronized mode or not
+	active         *UserFn   // currently active user function
+	stack          []*Value  // flat shared stack for local variables in the current call stack
+	base           int       // where locals of the active function start at
+	boxes          []Value   // pooled boxes for this fiber
 }
 
 func (fbr *fiber) synced() bool {
@@ -18,27 +16,6 @@ func (fbr *fiber) synced() bool {
 func (fbr *fiber) unsynced() bool {
 	return fbr.unsynchronized
 }
-
-/* func (fbr *fiber) transition(to ast.SyncMode) (old ast.SyncMode) {
-	switch {
-	// synced -> unsynced
-	case fbr.synced() && to == ast.UnsyncedMode:
-		fbr.vm.rt.ReleaseGIL()
-		fbr.unsynchronized = true
-		return ast.SyncedMode
-
-	// unsynced -> synced
-	case fbr.unsynced() && to == ast.SyncedMode:
-		fbr.vm.rt.AcquireGIL()
-		fbr.unsynchronized = false
-		return ast.UnsyncedMode
-
-	// others
-	default:
-		// do nothing because the states are compatible
-		return to
-	}
-} */
 
 func (fbr *fiber) get(v local) Value {
 	if v.isCaptured {
@@ -94,15 +71,18 @@ func (fbr *fiber) swapActive(new *UserFn) (old *UserFn) {
 	return old
 }
 
-func (fbr *fiber) newValue() (obj *Value) {
-	if fbr.boxes.IsEmpty() {
+func (fbr *fiber) pop() (v *Value) {
+	if len(fbr.boxes) == 0 {
 		return new(Value)
 	}
-	return fbr.boxes.Pop()
+
+	v = &fbr.boxes[len(fbr.boxes)-1]
+	fbr.boxes = fbr.boxes[:len(fbr.boxes)-1]
+	return v
 }
 
-func (fbr *fiber) putValue(obj *Value) {
-	if fbr.boxes.Len() < fbr.boxes.Cap() {
-		fbr.boxes.Push(obj)
+func (fbr *fiber) push(amount int) {
+	if len(fbr.boxes)+amount < cap(fbr.boxes) {
+		fbr.boxes = fbr.boxes[:len(fbr.boxes)+amount]
 	}
 }

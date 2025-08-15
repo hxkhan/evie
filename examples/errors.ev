@@ -1,10 +1,30 @@
 package main
 
-errFileNotExist := error("the requested file does not exist") // creates an error value
+fn main() {
+    a := go fib(35)
+    b := go fib(35)
+    c := go fib(35)
 
-errFileNotExist2 := error(fn(f) => 'file {f} does not exist') // can be called to build an error value
+    results := await.all(a, b, c) // awaits will implicitly convert values to errors incase of error
+}
 
-return errFileNotExist // reciever could compared to errFileNotExist 
-return error("the requested file does not exist") // will not be comparable to anything
+fn example() {
+    a := 5 + "10" // crash the program
+    echo a        // we don't make it here
 
-return errFileNotExist2("file pacman.jpg does not exist") // comparable and custom message each time
+    b := catch => 5 + "10" // returns error
+    echo b                 // <error>
+
+    // handle the error
+    if b is error {
+        echo b.message() // cannot add a value of type `number` & `string`
+    }
+
+    // make errors
+    return error("this is my new error")
+    return error.wrap("failed to do something", b)
+
+    // throw errors
+    throw error("this is my new error")
+    throw error.wrap("failed to do something", b)
+}

@@ -25,6 +25,7 @@ type funcInfoStatic struct {
 	synced     bool        // the sync mode of the action
 	captures   []capture   // captured references
 	recyclable []int       // the locals that do not escape
+	escapes    []bool      // what locals escape
 	capacity   int         // total required scope-capacity
 	code       instruction // the actual function code
 	vm         *Instance   // the corresponding vm
@@ -59,8 +60,12 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 	fbr.stack = fbr.stack[:0]
 
 	// create space for all the locals
-	for range fn.capacity {
-		fbr.stack = append(fbr.stack, fbr.newValue())
+	for idx := range fn.capacity {
+		if !fn.escapes[idx] {
+			fbr.stack = append(fbr.stack, fbr.pop())
+		} else {
+			fbr.stack = append(fbr.stack, &Value{})
+		}
 	}
 
 	// set arguments
@@ -73,9 +78,7 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 	//fmt.Println(exc)
 
 	// release non-escaping locals & fiber
-	for _, idx := range fn.recyclable {
-		fbr.putValue(fbr.stack[idx])
-	}
+	fbr.push(len(fn.recyclable))
 	vm.rt.fibers.Put(fbr)
 
 	// don't implicitly return the return value of the last executed instruction
@@ -113,8 +116,12 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 		fbr.stack = fbr.stack[:0]
 
 		// create space for all the locals
-		for range fn.capacity {
-			fbr.stack = append(fbr.stack, fbr.newValue())
+		for idx := range fn.capacity {
+			if !fn.escapes[idx] {
+				fbr.stack = append(fbr.stack, fbr.pop())
+			} else {
+				fbr.stack = append(fbr.stack, &Value{})
+			}
 		}
 
 		// set arguments
@@ -136,9 +143,7 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 		result, err := fn.code(fbr)
 
 		// release non-escaping locals and fiber
-		for _, idx := range fn.recyclable {
-			fbr.putValue(fbr.stack[idx])
-		}
+		fbr.push(len(fn.recyclable))
 		vm.rt.fibers.Put(fbr)
 
 		out = make([]reflect.Value, 2)

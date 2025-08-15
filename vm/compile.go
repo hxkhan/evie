@@ -287,6 +287,12 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 			ufn.code = vm.compile(fn.Action)
 			closure := vm.cp.closures.Pop()
 			ufn.capacity = closure.scope.Capacity()
+			ufn.escapes = make([]bool, ufn.capacity)
+			for index := range ufn.capacity {
+				if closure.freeVars.Has(index) {
+					ufn.escapes[index] = true
+				}
+			}
 
 			// make list of non-escaping variables so they can be recycled after execution
 			ufn.recyclable = make([]int, 0, ufn.capacity-closure.freeVars.Len())
@@ -522,6 +528,13 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 		vm:         vm,
 	}
 
+	info.escapes = make([]bool, info.capacity)
+	for index := range info.capacity {
+		if closure.freeVars.Has(index) {
+			info.escapes[index] = true
+		}
+	}
+
 	for i, ref := range closure.captures {
 		vm.log.capturef("CT: closure => Capture(%v) -> %v\n", i, ref)
 	}
@@ -601,7 +614,11 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					// setup stack locals
 					base := len(fbr.stack)
 					for idx := range fn.capacity {
-						fbr.stack = append(fbr.stack, fbr.newValue())
+						if !fn.escapes[idx] {
+							fbr.stack = append(fbr.stack, fbr.pop())
+						} else {
+							fbr.stack = append(fbr.stack, &Value{})
+						}
 
 						// evaluate arguments
 						if idx < len(arguments) {
@@ -619,33 +636,29 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 					// correctly invoke ourselves (mode can still change)
 					switch {
-					// synced -> unsynced
-					case fbr.synced() && !fn.synced:
-						vm.rt.ReleaseGIL()
-						fbr.unsynchronized = true
+					// no transition
+					case fbr.synced() == fn.synced:
 						result, exc = fn.code(fbr)
-						fbr.unsynchronized = false
-						vm.rt.AcquireGIL()
 
-					// unsynced -> synced
-					case fbr.unsynced() && fn.synced:
+					// to synced
+					case fn.synced:
 						vm.rt.AcquireGIL()
 						fbr.unsynchronized = false
 						result, exc = fn.code(fbr)
 						fbr.unsynchronized = true
 						vm.rt.ReleaseGIL()
 
-					// compatible modes
+					// to unsynced
 					default:
+						vm.rt.ReleaseGIL()
+						fbr.unsynchronized = true
 						result, exc = fn.code(fbr)
-					}
-
-					// release non-escaping locals
-					for _, idx := range fn.recyclable {
-						fbr.putValue(fbr.stack[base+idx])
+						fbr.unsynchronized = false
+						vm.rt.AcquireGIL()
 					}
 
 					// restore old state
+					fbr.push(len(fn.recyclable))
 					fbr.popStack(fn.capacity)
 					fbr.swapBase(prevBase)
 
@@ -664,7 +677,11 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				// setup stack locals
 				base := len(fbr.stack)
 				for idx := range fn.capacity {
-					fbr.stack = append(fbr.stack, fbr.newValue())
+					if !fn.escapes[idx] {
+						fbr.stack = append(fbr.stack, fbr.pop())
+					} else {
+						fbr.stack = append(fbr.stack, &Value{})
+					}
 
 					// evaluate arguments
 					if idx < len(arguments) {
@@ -683,33 +700,29 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 				// correctly invoke the function
 				switch {
-				// synced -> unsynced
-				case fbr.synced() && !fn.synced:
-					vm.rt.ReleaseGIL()
-					fbr.unsynchronized = true
+				// no transition
+				case fbr.synced() == fn.synced:
 					result, exc = fn.code(fbr)
-					fbr.unsynchronized = false
-					vm.rt.AcquireGIL()
 
-				// unsynced -> synced
-				case fbr.unsynced() && fn.synced:
+				// to synced
+				case fn.synced:
 					vm.rt.AcquireGIL()
 					fbr.unsynchronized = false
 					result, exc = fn.code(fbr)
 					fbr.unsynchronized = true
 					vm.rt.ReleaseGIL()
 
-				// compatible modes
+				// to unsynced
 				default:
+					vm.rt.ReleaseGIL()
+					fbr.unsynchronized = true
 					result, exc = fn.code(fbr)
-				}
-
-				// release non-escaping locals
-				for _, idx := range fn.recyclable {
-					fbr.putValue(fbr.stack[base+idx])
+					fbr.unsynchronized = false
+					vm.rt.AcquireGIL()
 				}
 
 				// restore old state
+				fbr.push(len(fn.recyclable))
 				fbr.popStack(fn.capacity)
 				fbr.swapBase(prevBase)
 				fbr.swapActive(prevFn)
@@ -791,7 +804,11 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			// setup stack locals
 			base := len(fbr.stack)
 			for idx := range fn.capacity {
-				fbr.stack = append(fbr.stack, fbr.newValue())
+				if !fn.escapes[idx] {
+					fbr.stack = append(fbr.stack, fbr.pop())
+				} else {
+					fbr.stack = append(fbr.stack, &Value{})
+				}
 
 				// evaluate arguments
 				if idx < len(arguments) {
@@ -810,33 +827,29 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 			// correctly invoke the function
 			switch {
-			// synced -> unsynced
-			case fbr.synced() && !fn.synced:
-				vm.rt.ReleaseGIL()
-				fbr.unsynchronized = true
+			// no transition
+			case fbr.synced() == fn.synced:
 				result, exc = fn.code(fbr)
-				fbr.unsynchronized = false
-				vm.rt.AcquireGIL()
 
-			// unsynced -> synced
-			case fbr.unsynced() && fn.synced:
+			// to synced
+			case fn.synced:
 				vm.rt.AcquireGIL()
 				fbr.unsynchronized = false
 				result, exc = fn.code(fbr)
 				fbr.unsynchronized = true
 				vm.rt.ReleaseGIL()
 
-			// compatible modes
+			// to unsynced
 			default:
+				vm.rt.ReleaseGIL()
+				fbr.unsynchronized = true
 				result, exc = fn.code(fbr)
-			}
-
-			// release non-escaping locals
-			for _, idx := range fn.recyclable {
-				fbr.putValue(fbr.stack[base+idx])
+				fbr.unsynchronized = false
+				vm.rt.AcquireGIL()
 			}
 
 			// restore old state
+			fbr.push(len(fn.recyclable))
 			fbr.popStack(fn.capacity)
 			fbr.swapBase(prevBase)
 			fbr.swapActive(prevFn)
@@ -910,7 +923,11 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 
 					// setup stack locals
 					for idx := range fn.capacity {
-						fbr.stack = append(fbr.stack, fbr.newValue())
+						if fn.escapes[idx] {
+							fbr.stack = append(fbr.stack, &Value{})
+						} else {
+							fbr.stack = append(fbr.stack, fbr.pop())
+						}
 
 						// assign arguments
 						if idx < len(params) {
@@ -919,7 +936,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					}
 
 					// run code
-					if fbr.unsynchronized {
+					if fbr.unsynced() {
 						result, exc = fn.code(fbr)
 					} else {
 						vm.rt.AcquireGIL()
@@ -928,9 +945,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					}
 
 					// cleanup fiber and release
-					for _, idx := range fn.recyclable {
-						fbr.putValue(fbr.stack[idx])
-					}
+					fbr.push(len(fn.recyclable))
 					fbr.popStack(fn.capacity)
 					vm.rt.fibers.Put(fbr)
 

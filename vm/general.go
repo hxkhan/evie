@@ -89,7 +89,7 @@ func New(opts Options) (vm *Instance) {
 
 	vm.rt.fibers = sync.Pool{
 		New: func() any {
-			return &fiber{vm: vm, boxes: make(ds.Slice[*Value], 0, 48)}
+			return &fiber{vm: vm, boxes: make([]Value, 48)}
 		},
 	}
 

@@ -76,13 +76,15 @@ func (fbr *fiber) pop() (v *Value) {
 		return new(Value)
 	}
 
-	v = &fbr.boxes[len(fbr.boxes)-1]
-	fbr.boxes = fbr.boxes[:len(fbr.boxes)-1]
+	top := len(fbr.boxes) - 1
+	v = &fbr.boxes[top]
+	fbr.boxes = fbr.boxes[:top]
 	return v
 }
 
 func (fbr *fiber) push(amount int) {
-	if len(fbr.boxes)+amount <= cap(fbr.boxes) {
-		fbr.boxes = fbr.boxes[:len(fbr.boxes)+amount]
+	size := len(fbr.boxes) + amount
+	if size <= cap(fbr.boxes) {
+		fbr.boxes = fbr.boxes[:size]
 	}
 }

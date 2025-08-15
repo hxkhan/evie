@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"reflect"
 	"unsafe"
-
-	"github.com/hxkhan/evie/ast"
 )
 
 type capture struct {
@@ -22,14 +20,14 @@ func (c capture) String() string {
 
 // funcInfoStatic holds static function information
 type funcInfoStatic struct {
-	name       string       // name of the function
-	args       []string     // argument names
-	mode       ast.SyncMode // the sync mode of the action
-	captures   []capture    // captured references
-	recyclable []int        // the locals that do not escape
-	capacity   int          // total required scope-capacity
-	code       instruction  // the actual function code
-	vm         *Instance    // the corresponding vm
+	name       string      // name of the function
+	args       []string    // argument names
+	synced     bool        // the sync mode of the action
+	captures   []capture   // captured references
+	recyclable []int       // the locals that do not escape
+	capacity   int         // total required scope-capacity
+	code       instruction // the actual function code
+	vm         *Instance   // the corresponding vm
 }
 
 type UserFn struct {

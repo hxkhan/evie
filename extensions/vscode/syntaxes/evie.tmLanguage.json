@@ -45,7 +45,7 @@
 				{
 					"comment": "Control flow keywords",
 					"name": "keyword.control.evie",
-					"match": "\\b(if|else|while|for|continue|break|return|go|unsynced|synced)\\b"
+					"match": "\\b(if|else|while|for|continue|break|return|throw|is|catch|go|unsynced|synced)\\b"
 				},
 				{
 					"comment": "Declaration keywords",
@@ -67,14 +67,9 @@
 		"types": {
 			"patterns": [
 				{
-					"comment": "Built-in type conversion functions",
-					"match": "\\b(bool|number|string)\\b(?=\\s*\\()",
-					"name": "support.function.builtin.cast.evie"
-				},
-				{
-					"comment": "Built-in types (when used as types, not functions)",
-					"match": "\\b(bool|number|string)\\b",
-					"name": "storage.type.evie"
+					"comment": "Built-in types",
+					"match": "\\b(bool|number|string|error)\\b",
+					"name": "entity.name.type.evie"
 				}
 			]
 		},

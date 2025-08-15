@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"reflect"
 	"unsafe"
+
+	"github.com/hxkhan/evie/ast"
 )
 
 type capture struct {
@@ -20,20 +22,20 @@ func (c capture) String() string {
 
 // funcInfoStatic holds static function information
 type funcInfoStatic struct {
-	name       string      // name of the function
-	args       []string    // argument names
-	synced     bool        // the sync mode of the action
-	captures   []capture   // captured references
-	recyclable []int       // the locals that do not escape
-	escapes    []bool      // what locals escape
-	capacity   int         // total required scope-capacity
-	code       instruction // the actual function code
-	vm         *Instance   // the corresponding vm
+	name       string       // name of the function
+	args       []string     // argument names
+	locals     []bool       // all locals & true for those that escape
+	recyclable int          // number of non-escaping locals
+	captures   []capture    // captured references
+	mode       ast.SyncMode // the sync mode of the action
+	code       instruction  // the actual function code
+	vm         *Instance    // the corresponding vm
 }
 
 type UserFn struct {
 	*funcInfoStatic
 	references []*Value // captured variables
+	synced     bool
 }
 
 func (fn UserFn) String() string {
@@ -60,17 +62,17 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 	fbr.stack = fbr.stack[:0]
 
 	// create space for all the locals
-	for idx := range fn.capacity {
-		if !fn.escapes[idx] {
+	for idx, escapes := range fn.locals {
+		if !escapes {
 			fbr.stack = append(fbr.stack, fbr.pop())
 		} else {
 			fbr.stack = append(fbr.stack, &Value{})
 		}
-	}
 
-	// set arguments
-	for idx, arg := range args {
-		*fbr.stack[idx] = arg
+		// assign arguments
+		if idx < len(args) {
+			*fbr.stack[idx] = args[idx]
+		}
 	}
 
 	// prep for execution & save currently captured values
@@ -78,7 +80,7 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 	//fmt.Println(exc)
 
 	// release non-escaping locals & fiber
-	fbr.push(len(fn.recyclable))
+	fbr.push(fn.recyclable)
 	vm.rt.fibers.Put(fbr)
 
 	// don't implicitly return the return value of the last executed instruction
@@ -116,26 +118,26 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 		fbr.stack = fbr.stack[:0]
 
 		// create space for all the locals
-		for idx := range fn.capacity {
-			if !fn.escapes[idx] {
+		for idx, escapes := range fn.locals {
+			if !escapes {
 				fbr.stack = append(fbr.stack, fbr.pop())
 			} else {
 				fbr.stack = append(fbr.stack, &Value{})
 			}
-		}
 
-		// set arguments
-		for idx, v := range in {
-			v.Kind()
-			switch v.Kind() {
-			case reflect.Int, reflect.Int32, reflect.Int64:
-				*fbr.stack[idx] = BoxNumber(float64(v.Int()))
-			case reflect.Float32, reflect.Float64:
-				*fbr.stack[idx] = BoxNumber(v.Float())
-			case reflect.String:
-				*fbr.stack[idx] = BoxString(v.String())
-			default:
-				panic("Call: Unsuported types supplied!")
+			// assign arguments
+			if idx < len(in) {
+				v := in[idx]
+				switch v.Kind() {
+				case reflect.Int, reflect.Int32, reflect.Int64:
+					*fbr.stack[idx] = BoxNumber(float64(v.Int()))
+				case reflect.Float32, reflect.Float64:
+					*fbr.stack[idx] = BoxNumber(v.Float())
+				case reflect.String:
+					*fbr.stack[idx] = BoxString(v.String())
+				default:
+					panic("Call: Unsuported types supplied!")
+				}
 			}
 		}
 
@@ -143,7 +145,7 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 		result, err := fn.code(fbr)
 
 		// release non-escaping locals and fiber
-		fbr.push(len(fn.recyclable))
+		fbr.push(fn.recyclable)
 		vm.rt.fibers.Put(fbr)
 
 		out = make([]reflect.Value, 2)

@@ -9,6 +9,17 @@ import (
 
 type SyncMode int
 
+func (sm SyncMode) Decide(currently bool) (after bool) {
+	switch sm {
+	case SyncedMode:
+		return true
+	case UnsyncedMode:
+		return false
+	}
+	// must be InheritMode
+	return currently
+}
+
 const (
 	InheritMode SyncMode = iota
 	SyncedMode

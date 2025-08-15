@@ -12,7 +12,7 @@ fn test(x) {
 
 fn main() {
     a := 10
-    b := a
+    var b := a
 
     b += 1
 

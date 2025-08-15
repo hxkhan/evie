@@ -227,18 +227,16 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 				panic(fmt.Errorf("double declaration of %s", fn.Name))
 			}
 
-			synced := true
-			if fn.SyncMode == ast.UnsyncedMode {
-				synced = false
-			}
-
 			// create a stub for now
-			fn := BoxUserFn(UserFn{funcInfoStatic: &funcInfoStatic{
-				name:   fn.Name,
-				args:   fn.Args,
-				synced: synced,
-				vm:     vm,
-			}})
+			fn := BoxUserFn(UserFn{
+				funcInfoStatic: &funcInfoStatic{
+					name: fn.Name,
+					args: fn.Args,
+					mode: fn.SyncMode,
+					vm:   vm,
+				},
+				synced: fn.SyncMode.Decide(true),
+			})
 			this.globals[index] = Global{Value: &fn, IsStatic: true}
 		}
 	}
@@ -286,23 +284,20 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 
 			ufn.code = vm.compile(fn.Action)
 			closure := vm.cp.closures.Pop()
-			ufn.capacity = closure.scope.Capacity()
-			ufn.escapes = make([]bool, ufn.capacity)
-			for index := range ufn.capacity {
-				if closure.freeVars.Has(index) {
-					ufn.escapes[index] = true
-				}
-			}
+			capacity := closure.scope.Capacity()
+			ufn.locals = make([]bool, capacity)
 
-			// make list of non-escaping variables so they can be recycled after execution
-			ufn.recyclable = make([]int, 0, ufn.capacity-closure.freeVars.Len())
-			for index := range ufn.capacity {
+			// mark escapee variables
+			recyclable := 0
+			for index := range capacity {
 				if closure.freeVars.Has(index) {
+					ufn.locals[index] = true
 					vm.log.escapesf("CT: fn %v => Local(%v) escapes\n", fn.Name, index)
-					continue
+				} else {
+					recyclable++
 				}
-				ufn.recyclable = append(ufn.recyclable, index)
 			}
+			ufn.recyclable = recyclable
 		}
 	}
 	return Value{}, nil
@@ -508,31 +503,27 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 	closure := vm.cp.closures.Pop()
 	capacity := closure.scope.Capacity()
 
-	// make list of non-escaping variables so they can be recycled after execution
-	recyclable := make([]int, 0, capacity-closure.freeVars.Len())
+	// mark escapee variables
+	locals := make([]bool, capacity)
+	recyclable := 0
 	for index := range capacity {
 		if closure.freeVars.Has(index) {
-			vm.log.escapesf("CT: closure => Local(%v) escapes\n", index)
-			continue
+			locals[index] = true
+			vm.log.escapesf("CT: fn %v => Local(%v) escapes\n", node.Name, index)
+		} else {
+			recyclable++
 		}
-		recyclable = append(recyclable, index)
 	}
 
 	info := &funcInfoStatic{
 		name:       node.Name,
 		args:       node.Args,
-		captures:   closure.captures,
+		locals:     locals,
 		recyclable: recyclable,
-		capacity:   capacity,
+		captures:   closure.captures,
+		mode:       node.SyncMode,
 		code:       action,
 		vm:         vm,
-	}
-
-	info.escapes = make([]bool, info.capacity)
-	for index := range info.capacity {
-		if closure.freeVars.Has(index) {
-			info.escapes[index] = true
-		}
 	}
 
 	for i, ref := range closure.captures {
@@ -552,9 +543,11 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 				}
 				captured[i] = v
 			}
+
 			fn := UserFn{
 				funcInfoStatic: info,
 				references:     captured,
+				synced:         info.mode.Decide(fbr.synced()),
 			}
 			return BoxUserFn(fn), nil
 		}
@@ -581,9 +574,11 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 			}
 			captured[i] = v
 		}
+
 		fn := UserFn{
 			funcInfoStatic: info,
 			references:     captured,
+			synced:         info.mode.Decide(fbr.synced()),
 		}
 		fbr.storeLocal(index, BoxUserFn(fn))
 		return Value{}, nil
@@ -613,8 +608,8 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				return func(fbr *fiber) (result Value, exc *Exception) {
 					// setup stack locals
 					base := len(fbr.stack)
-					for idx := range fn.capacity {
-						if !fn.escapes[idx] {
+					for idx, escapes := range fn.locals {
+						if !escapes {
 							fbr.stack = append(fbr.stack, fbr.pop())
 						} else {
 							fbr.stack = append(fbr.stack, &Value{})
@@ -658,8 +653,8 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					}
 
 					// restore old state
-					fbr.push(len(fn.recyclable))
-					fbr.popStack(fn.capacity)
+					fbr.push(fn.recyclable)
+					fbr.popStack(len(fn.locals))
 					fbr.swapBase(prevBase)
 
 					// return result but catch relevant signals
@@ -676,8 +671,8 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			return func(fbr *fiber) (result Value, exc *Exception) {
 				// setup stack locals
 				base := len(fbr.stack)
-				for idx := range fn.capacity {
-					if !fn.escapes[idx] {
+				for idx, escapes := range fn.locals {
+					if !escapes {
 						fbr.stack = append(fbr.stack, fbr.pop())
 					} else {
 						fbr.stack = append(fbr.stack, &Value{})
@@ -722,8 +717,8 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				}
 
 				// restore old state
-				fbr.push(len(fn.recyclable))
-				fbr.popStack(fn.capacity)
+				fbr.push(fn.recyclable)
+				fbr.popStack(len(fn.locals))
 				fbr.swapBase(prevBase)
 				fbr.swapActive(prevFn)
 
@@ -803,8 +798,8 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 			// setup stack locals
 			base := len(fbr.stack)
-			for idx := range fn.capacity {
-				if !fn.escapes[idx] {
+			for idx, escapes := range fn.locals {
+				if !escapes {
 					fbr.stack = append(fbr.stack, fbr.pop())
 				} else {
 					fbr.stack = append(fbr.stack, &Value{})
@@ -849,8 +844,8 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			}
 
 			// restore old state
-			fbr.push(len(fn.recyclable))
-			fbr.popStack(fn.capacity)
+			fbr.push(fn.recyclable)
+			fbr.popStack(len(fn.locals))
 			fbr.swapBase(prevBase)
 			fbr.swapActive(prevFn)
 
@@ -922,11 +917,11 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					fbr.unsynchronized = !fn.synced
 
 					// setup stack locals
-					for idx := range fn.capacity {
-						if fn.escapes[idx] {
-							fbr.stack = append(fbr.stack, &Value{})
-						} else {
+					for idx, escapes := range fn.locals {
+						if !escapes {
 							fbr.stack = append(fbr.stack, fbr.pop())
+						} else {
+							fbr.stack = append(fbr.stack, &Value{})
 						}
 
 						// assign arguments
@@ -945,8 +940,8 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					}
 
 					// cleanup fiber and release
-					fbr.push(len(fn.recyclable))
-					fbr.popStack(fn.capacity)
+					fbr.push(fn.recyclable)
+					fbr.popStack(len(fn.locals))
 					vm.rt.fibers.Put(fbr)
 
 					// return result but catch relevant signals

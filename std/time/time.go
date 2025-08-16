@@ -3,13 +3,12 @@ package time
 import (
 	"time"
 
-	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/vm"
 )
 
 func Construct() vm.Package {
 	pkg := vm.NewHostPackage("io")
-	pkg.SetSymbol("wait", vm.BoxGoFunc(wait, ast.UnsyncedMode))
+	pkg.SetSymbol("wait", vm.BoxGoFuncUnsynced(wait))
 	return pkg
 }
 

@@ -3,13 +3,12 @@ package json
 import (
 	"encoding/json"
 
-	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/vm"
 )
 
 func Construct() vm.Package {
 	pkg := vm.NewHostPackage("json")
-	pkg.SetSymbol("decode", vm.BoxGoFunc(decode, ast.UndefinedMode))
+	pkg.SetSymbol("decode", vm.BoxGoFunc(decode))
 	return pkg
 }
 

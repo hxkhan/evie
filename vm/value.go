@@ -107,12 +107,32 @@ func BoxUserFn(fn UserFn) Value {
 	return Value{scalar: userFnType, pointer: unsafe.Pointer(&fn)}
 }
 
-// BoxGoFunc boxes a golang function
-func BoxGoFunc[T SafeGoFunc](fn T, mode ast.SyncMode) Value {
+// BoxGoFunc boxes a general Go function
+func BoxGoFunc[T SafeGoFunc](fn T) Value {
 	ptr := unsafe.Pointer(&GoFunc{
 		nargs: reflect.TypeOf(fn).NumIn(),
 		ptr:   unsafe.Pointer(&fn),
-		mode:  mode,
+		mode:  ast.UndefinedMode,
+	})
+	return Value{scalar: goFuncType, pointer: ptr}
+}
+
+// BoxGoFunc boxes a synced Go function always assuming the safety of the GIL
+func BoxGoFuncSynced[T SafeGoFunc](fn T) Value {
+	ptr := unsafe.Pointer(&GoFunc{
+		nargs: reflect.TypeOf(fn).NumIn(),
+		ptr:   unsafe.Pointer(&fn),
+		mode:  ast.SyncedMode,
+	})
+	return Value{scalar: goFuncType, pointer: ptr}
+}
+
+// BoxGoFunc boxes an unsynced Go function that yields on all calls
+func BoxGoFuncUnsynced[T SafeGoFunc](fn T) Value {
+	ptr := unsafe.Pointer(&GoFunc{
+		nargs: reflect.TypeOf(fn).NumIn(),
+		ptr:   unsafe.Pointer(&fn),
+		mode:  ast.UnsyncedMode,
 	})
 	return Value{scalar: goFuncType, pointer: ptr}
 }

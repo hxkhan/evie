@@ -195,22 +195,22 @@ func (m Method) call(fbr *fiber, arguments []instruction) (result Value, exc *Ex
 		return Value{}, CustomError("method requires %v argument(s), %v provided", fn.nargs-1, len(arguments))
 	}
 
-	if fn.mode != ast.UndefinedMode {
-		synced := fn.mode == ast.SyncedMode
+	if fn.HasSyncMode() {
+		synced := fn.Synced()
 		switch {
 		// no transition
 		case fbr.synced() == synced:
 			break
 
-		// to synced
-		case synced:
-			fbr.vm.rt.AcquireGIL()
-			defer fbr.vm.rt.ReleaseGIL()
-
 		// to unsynced
-		default:
+		case !synced:
 			fbr.vm.rt.ReleaseGIL()
 			defer fbr.vm.rt.AcquireGIL()
+
+		// to synced
+		default:
+			fbr.vm.rt.AcquireGIL()
+			defer fbr.vm.rt.ReleaseGIL()
 		}
 	}
 
@@ -240,27 +240,35 @@ type GoFunc struct {
 	mode  ast.SyncMode
 }
 
+func (fn GoFunc) HasSyncMode() bool {
+	return fn.mode != ast.UndefinedMode
+}
+
+func (fn GoFunc) Synced() bool {
+	return fn.mode == ast.SyncedMode
+}
+
 func (fn *GoFunc) call(fbr *fiber, arguments []instruction) (result Value, exc *Exception) {
 	if fn.nargs != len(arguments) {
 		return Value{}, CustomError("function requires %v argument(s), %v provided", fn.nargs, len(arguments))
 	}
 
-	if fn.mode != ast.UndefinedMode {
-		synced := fn.mode == ast.SyncedMode
+	if fn.HasSyncMode() {
+		synced := fn.Synced()
 		switch {
 		// no transition
 		case fbr.synced() == synced:
 			break
 
-		// to synced
-		case synced:
-			fbr.vm.rt.AcquireGIL()
-			defer fbr.vm.rt.ReleaseGIL()
-
 		// to unsynced
-		default:
+		case !synced:
 			fbr.vm.rt.ReleaseGIL()
 			defer fbr.vm.rt.AcquireGIL()
+
+		// to synced
+		default:
+			fbr.vm.rt.AcquireGIL()
+			defer fbr.vm.rt.ReleaseGIL()
 		}
 	}
 

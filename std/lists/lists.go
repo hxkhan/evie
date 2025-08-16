@@ -3,13 +3,12 @@ package lists
 import (
 	"strings"
 
-	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/vm"
 )
 
 func Construct() vm.Package {
 	pkg := vm.NewHostPackage("list")
-	pkg.SetSymbol("join", vm.BoxGoFunc(join, ast.UndefinedMode))
+	pkg.SetSymbol("join", vm.BoxGoFunc(join))
 	return pkg
 }
 

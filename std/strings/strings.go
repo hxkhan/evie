@@ -3,13 +3,12 @@ package strings
 import (
 	"strings"
 
-	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/vm"
 )
 
 func Construct() vm.Package {
 	pkg := vm.NewHostPackage("string")
-	pkg.SetSymbol("split", vm.BoxGoFunc(split, ast.UndefinedMode))
+	pkg.SetSymbol("split", vm.BoxGoFunc(split))
 	return pkg
 }
 

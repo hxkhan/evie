@@ -3,7 +3,6 @@ package vm
 import (
 	"strings"
 
-	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/vm/fields"
 )
 
@@ -21,7 +20,7 @@ var stringMethods = map[fields.ID]*Value{
 			}
 		}
 		return Value{}, ErrTypes
-	}, ast.UndefinedMode).Allocate(),
+	}).Allocate(),
 }
 
 var arrayMethods = map[fields.ID]*Value{
@@ -42,5 +41,5 @@ var arrayMethods = map[fields.ID]*Value{
 			}
 		}
 		return Value{}, ErrTypes
-	}, ast.UndefinedMode).Allocate(),
+	}).Allocate(),
 }

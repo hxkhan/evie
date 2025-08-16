@@ -3,13 +3,12 @@ package fs
 import (
 	"os"
 
-	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/vm"
 )
 
 func Construct() vm.Package {
 	pkg := vm.NewHostPackage("fs")
-	pkg.SetSymbol("readFile", vm.BoxGoFunc(readFile, ast.UnsyncedMode))
+	pkg.SetSymbol("readFile", vm.BoxGoFuncUnsynced(readFile))
 	return pkg
 }
 

@@ -195,6 +195,25 @@ func (m Method) call(fbr *fiber, arguments []instruction) (result Value, exc *Ex
 		return Value{}, CustomError("method requires %v argument(s), %v provided", fn.nargs-1, len(arguments))
 	}
 
+	if fn.mode != ast.UndefinedMode {
+		synced := fn.mode == ast.SyncedMode
+		switch {
+		// no transition
+		case fbr.synced() == synced:
+			break
+
+		// to synced
+		case synced:
+			fbr.vm.rt.AcquireGIL()
+			defer fbr.vm.rt.ReleaseGIL()
+
+		// to unsynced
+		default:
+			fbr.vm.rt.ReleaseGIL()
+			defer fbr.vm.rt.AcquireGIL()
+		}
+	}
+
 	switch fn.nargs {
 	case -1:
 		panic("variadic functions not supported yet")
@@ -218,11 +237,31 @@ func (m Method) call(fbr *fiber, arguments []instruction) (result Value, exc *Ex
 type GoFunc struct {
 	nargs int
 	ptr   unsafe.Pointer
+	mode  ast.SyncMode
 }
 
 func (fn *GoFunc) call(fbr *fiber, arguments []instruction) (result Value, exc *Exception) {
 	if fn.nargs != len(arguments) {
 		return Value{}, CustomError("function requires %v argument(s), %v provided", fn.nargs, len(arguments))
+	}
+
+	if fn.mode != ast.UndefinedMode {
+		synced := fn.mode == ast.SyncedMode
+		switch {
+		// no transition
+		case fbr.synced() == synced:
+			break
+
+		// to synced
+		case synced:
+			fbr.vm.rt.AcquireGIL()
+			defer fbr.vm.rt.ReleaseGIL()
+
+		// to unsynced
+		default:
+			fbr.vm.rt.ReleaseGIL()
+			defer fbr.vm.rt.AcquireGIL()
+		}
 	}
 
 	switch fn.nargs {

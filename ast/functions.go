@@ -9,6 +9,7 @@ import (
 
 type SyncMode int
 
+// Decide will decide if to make user fn synced or unsynced based on the sync mode of the environment
 func (sm SyncMode) Decide(currently bool) (after bool) {
 	switch sm {
 	case SyncedMode:
@@ -16,12 +17,11 @@ func (sm SyncMode) Decide(currently bool) (after bool) {
 	case UnsyncedMode:
 		return false
 	}
-	// must be InheritMode
 	return currently
 }
 
 const (
-	InheritMode SyncMode = iota
+	UndefinedMode SyncMode = iota
 	SyncedMode
 	UnsyncedMode
 )

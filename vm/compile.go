@@ -1069,6 +1069,10 @@ func (vm *Instance) emitAwaitAll(node ast.AwaitAll) instruction {
 			response, ok := <-task
 
 			if !ok {
+				// acquire GIL if synced
+				if fbr.synced() {
+					vm.rt.AcquireGIL()
+				}
 				return Value{}, CustomError("cannot await on a finished task")
 			}
 

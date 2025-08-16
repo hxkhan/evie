@@ -45,7 +45,7 @@
 				{
 					"comment": "Control flow keywords",
 					"name": "keyword.control.evie",
-					"match": "\\b(if|else|while|for|continue|break|return|throw|is|catch|go|unsynced|synced)\\b"
+					"match": "\\b(if|else|while|for|continue|break|return|switch|case|default|throw|is|catch|go|unsynced|synced)\\b"
 				},
 				{
 					"comment": "Declaration keywords",

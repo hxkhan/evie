@@ -1,9 +1,4 @@
-package main imports("io", "time")
-
-fn print(message, duration) {
-    await time.timer(duration)
-    io.println(message)
-}
+package main imports("time")
 
 // go run ./cli -t ./examples/go.ev
 fn main() {
@@ -17,4 +12,9 @@ fn main() {
     go print("eight", 800)
     go print("nine", 900)
     go print("ten", 1000)
+}
+
+fn print(message, duration) {
+    time.wait(duration)
+    echo message
 }

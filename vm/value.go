@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unsafe"
 
+	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/vm/fields"
 )
 
@@ -107,8 +108,12 @@ func BoxUserFn(fn UserFn) Value {
 }
 
 // BoxGoFunc boxes a golang function
-func BoxGoFunc[T SafeGoFunc](fn T) Value {
-	ptr := unsafe.Pointer(&GoFunc{nargs: reflect.TypeOf(fn).NumIn(), ptr: unsafe.Pointer(&fn)})
+func BoxGoFunc[T SafeGoFunc](fn T, mode ast.SyncMode) Value {
+	ptr := unsafe.Pointer(&GoFunc{
+		nargs: reflect.TypeOf(fn).NumIn(),
+		ptr:   unsafe.Pointer(&fn),
+		mode:  mode,
+	})
 	return Value{scalar: goFuncType, pointer: ptr}
 }
 

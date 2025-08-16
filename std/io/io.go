@@ -3,6 +3,7 @@ package io
 import (
 	"fmt"
 
+	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/vm"
 )
 
@@ -19,25 +20,25 @@ func Construct() vm.Package {
 var print = vm.BoxGoFunc(func(output vm.Value) (vm.Value, *vm.Exception) {
 	fmt.Print(output)
 	return vm.Value{}, nil
-})
+}, ast.UndefinedMode)
 
 var println = vm.BoxGoFunc(func(output vm.Value) (vm.Value, *vm.Exception) {
 	fmt.Println(output)
 	return vm.Value{}, nil
-})
+}, ast.UndefinedMode)
 
 var prompt = vm.BoxGoFunc(func(output vm.Value) (vm.Value, *vm.Exception) {
 	fmt.Print(output)
 	var input string
 	fmt.Scanln(&input)
 	return vm.BoxString(input), nil
-})
+}, ast.UnsyncedMode)
 
 var readln = vm.BoxGoFunc(func() (vm.Value, *vm.Exception) {
 	var input string
 	fmt.Scanln(&input)
 	return vm.BoxString(input), nil
-})
+}, ast.UnsyncedMode)
 
 var dec = vm.BoxGoFunc(func(n vm.Value) (vm.Value, *vm.Exception) {
 	f64, ok := n.AsFloat64()
@@ -46,4 +47,4 @@ var dec = vm.BoxGoFunc(func(n vm.Value) (vm.Value, *vm.Exception) {
 	}
 
 	return vm.BoxNumber(f64 - 1), nil
-})
+}, ast.UndefinedMode)

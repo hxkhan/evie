@@ -9,17 +9,6 @@ import (
 
 type SyncMode int
 
-// Decide will decide if to make user fn synced or unsynced based on the sync mode of the environment
-func (sm SyncMode) Decide(currently bool) (after bool) {
-	switch sm {
-	case SyncedMode:
-		return true
-	case UnsyncedMode:
-		return false
-	}
-	return currently
-}
-
 const (
 	UndefinedMode SyncMode = iota
 	SyncedMode

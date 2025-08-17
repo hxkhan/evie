@@ -25,17 +25,16 @@ type funcInfoStatic struct {
 	name       string       // name of the function
 	args       []string     // argument names
 	locals     []bool       // all locals & true for those that escape
-	recyclable int          // number of non-escaping locals
 	captures   []capture    // captured references
-	mode       ast.SyncMode // the sync mode of the action
+	recyclable int          // number of non-escaping locals
 	code       instruction  // the actual function code
+	mode       ast.SyncMode // the sync mode of the action
 	vm         *Instance    // the corresponding vm
 }
 
 type UserFn struct {
 	*funcInfoStatic
 	references []*Value // captured variables
-	synced     bool
 }
 
 func (fn UserFn) String() string {
@@ -272,6 +271,37 @@ func (fn *GoFunc) call(fbr *fiber, arguments []instruction) (result Value, exc *
 		}
 	}
 
+	switch fn.nargs {
+	case -1:
+		panic("variadic functions not supported yet")
+	case 0:
+		function := *(*func() (Value, *Exception))(fn.ptr)
+		return function()
+	case 1:
+		function := *(*func(Value) (Value, *Exception))(fn.ptr)
+		arg0, err := arguments[0](fbr)
+		if err != nil {
+			return arg0, err
+		}
+		return function(arg0)
+	case 2:
+		function := *(*func(Value, Value) (Value, *Exception))(fn.ptr)
+		arg0, err := arguments[0](fbr)
+		if err != nil {
+			return arg0, err
+		}
+
+		arg1, err := arguments[1](fbr)
+		if err != nil {
+			return arg0, err
+		}
+		return function(arg0, arg1)
+	}
+
+	panic("unsuported call")
+}
+
+func (fn *GoFunc) jcall(fbr *fiber, arguments []instruction) (result Value, exc *Exception) {
 	switch fn.nargs {
 	case -1:
 		panic("variadic functions not supported yet")

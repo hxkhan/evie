@@ -1,11 +1,23 @@
 package main imports("fs")
 
+// go run ./cli -t ./examples/files.ev
 fn main() {
-    mario := go fs.readFile("mario.jpg")
-    pacman := go fs.readFile("pacman.jpg")
+    version1()
+}
 
-    echo mario
+fn version1() {
+    mario := go fs.readFile("./examples/mario.jpg")
+    pacman := go fs.readFile("./examples/pacman.jpg")
+
+    echo await mario
+    echo await pacman
+}
+
+// slightly more `efficient`
+fn version2() {
+    mario := go fs.readFile("./examples/mario.jpg")
+    pacman := fs.readFile("./examples/pacman.jpg")
+
+    echo await mario
     echo pacman
-
-    echo await.all(mario, pacman)
 }

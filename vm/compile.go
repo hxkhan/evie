@@ -235,7 +235,6 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 					mode: fn.SyncMode,
 					vm:   vm,
 				},
-				synced: fn.SyncMode.Decide(true),
 			})
 			this.globals[index] = Global{Value: &fn, IsStatic: true}
 		}
@@ -547,7 +546,6 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 			fn := UserFn{
 				funcInfoStatic: info,
 				references:     captured,
-				synced:         info.mode.Decide(fbr.synced()),
 			}
 			return BoxUserFn(fn), nil
 		}
@@ -578,7 +576,6 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 		fn := UserFn{
 			funcInfoStatic: info,
 			references:     captured,
-			synced:         info.mode.Decide(fbr.synced()),
 		}
 		fbr.storeLocal(index, BoxUserFn(fn))
 		return Value{}, nil
@@ -630,13 +627,14 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					prevBase := fbr.swapBase(base)
 
 					// correctly invoke ourselves (mode can still change)
+					synced := fn.mode == ast.SyncedMode
 					switch {
 					// no transition
-					case fbr.synced() == fn.synced:
+					case fn.mode == ast.UndefinedMode || fbr.synced() == synced:
 						result, exc = fn.code(fbr)
 
 					// to synced
-					case fn.synced:
+					case synced:
 						vm.rt.AcquireGIL()
 						fbr.unsynchronized = false
 						result, exc = fn.code(fbr)
@@ -694,13 +692,14 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				prevFn := fbr.swapActive(fn)
 
 				// correctly invoke the function
+				synced := fn.mode == ast.SyncedMode
 				switch {
 				// no transition
-				case fbr.synced() == fn.synced:
+				case fn.mode == ast.UndefinedMode || fbr.synced() == synced:
 					result, exc = fn.code(fbr)
 
 				// to synced
-				case fn.synced:
+				case synced:
 					vm.rt.AcquireGIL()
 					fbr.unsynchronized = false
 					result, exc = fn.code(fbr)
@@ -821,13 +820,14 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			prevFn := fbr.swapActive(fn)
 
 			// correctly invoke the function
+			synced := fn.mode == ast.SyncedMode
 			switch {
 			// no transition
-			case fbr.synced() == fn.synced:
+			case fn.mode == ast.UndefinedMode || fbr.synced() == synced:
 				result, exc = fn.code(fbr)
 
 			// to synced
-			case fn.synced:
+			case synced:
 				vm.rt.AcquireGIL()
 				fbr.unsynchronized = false
 				result, exc = fn.code(fbr)
@@ -907,6 +907,14 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					params[i] = arg
 				}
 
+				unsynchronized := fbr.unsynchronized
+				switch fn.mode {
+				case ast.SyncedMode:
+					unsynchronized = false
+				case ast.UnsyncedMode:
+					unsynchronized = true
+				}
+
 				task := make(chan evaluation, 1)
 				vm.rt.wg.Go(func() {
 					// setup new fiber
@@ -914,7 +922,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					fbr.active = fn
 					fbr.base = 0
 					fbr.stack = fbr.stack[:0]
-					fbr.unsynchronized = !fn.synced
+					fbr.unsynchronized = unsynchronized
 
 					// setup stack locals
 					for idx, escapes := range fn.locals {
@@ -952,6 +960,38 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					default:
 						panic(exc)
 					}
+					task <- evaluation{result: result, err: exc}
+					close(task)
+				})
+
+				return BoxTask(task), nil
+			}
+
+			// try go func
+			if fn, isGoFunc := value.AsGoFunc(); isGoFunc {
+				if fn.nargs != len(arguments) {
+					return Value{}, CustomError("function requires %v argument(s), %v provided", fn.nargs, len(arguments))
+				}
+
+				task := make(chan evaluation, 1)
+				vm.rt.wg.Go(func() {
+					unsynced := fbr.unsynchronized
+					if fn.HasSyncMode() {
+						unsynced = !fn.Synced()
+					}
+
+					var result Value
+					var exc *Exception
+
+					// run code
+					if unsynced {
+						result, exc = fn.jcall(fbr, arguments)
+					} else {
+						vm.rt.AcquireGIL()
+						result, exc = fn.jcall(fbr, arguments)
+						vm.rt.ReleaseGIL()
+					}
+
 					task <- evaluation{result: result, err: exc}
 					close(task)
 				})

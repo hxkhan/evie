@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"fmt"
 	"math"
 	"reflect"
 	"strconv"
@@ -382,22 +383,7 @@ func (x Value) String() string {
 	case methodType:
 		return "<method>"
 	case bufferType:
-		array := *(*[]byte)(x.pointer)
-		builder := strings.Builder{}
-		builder.WriteByte('[')
-
-		for i, v := range array {
-			builder.WriteByte('\'')
-			builder.WriteString(strconv.FormatInt(int64(v), 10))
-			builder.WriteByte('\'')
-
-			if i != len(array)-1 {
-				builder.WriteString(", ")
-			}
-		}
-
-		builder.WriteByte(']')
-		return builder.String()
+		return fmt.Sprintf("<buffer: %v>", x.pointer)
 	case customType:
 		cv := (*(*CustomValue)(x.pointer))
 		return cv.String()

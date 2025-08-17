@@ -14,14 +14,12 @@ func Construct() vm.Package {
 
 func readFile(fileName vm.Value) (vm.Value, *vm.Exception) {
 	if fileName, ok := fileName.AsString(); ok {
-		return vm.NewTask(func() (vm.Value, *vm.Exception) {
-			bytes, err := os.ReadFile(fileName)
-			if err != nil {
-				return vm.Value{}, vm.CustomError(err.Error())
-			}
+		bytes, err := os.ReadFile(fileName)
+		if err != nil {
+			return vm.Value{}, vm.CustomError(err.Error())
+		}
 
-			return vm.BoxBuffer(bytes), nil
-		}), nil
+		return vm.BoxBuffer(bytes), nil
 	}
 	return vm.Value{}, vm.ErrTypes
 }

@@ -17,34 +17,31 @@ func (fbr *fiber) unsynced() bool {
 	return fbr.unsynchronized
 }
 
-func (fbr *fiber) get(v local) Value {
-	if v.isCaptured {
-		return *(fbr.active.references[v.index])
+func (fbr *fiber) get(binding local) *Value {
+	if !binding.isCaptured {
+		return fbr.stack[fbr.base+int(binding.index)]
 	}
-	return *(fbr.stack[fbr.base+v.index])
+	return fbr.active.references[binding.index]
 }
 
-func (fbr *fiber) getByRef(v local) *Value {
-	if v.isCaptured {
-		return fbr.active.references[v.index]
+func (fbr *fiber) set(binding local, value Value) {
+	if !binding.isCaptured {
+		*(fbr.stack[fbr.base+int(binding.index)]) = value
+	} else {
+		*(fbr.active.references[int(binding.index)]) = value
 	}
-	return fbr.stack[fbr.base+v.index]
 }
 
-func (fbr *fiber) getLocal(index int) Value {
-	return *(fbr.stack[fbr.base+index])
+func (fbr *fiber) getLocal(index int16) Value {
+	return *(fbr.stack[fbr.base+int(index)])
 }
 
-func (fbr *fiber) storeLocal(index int, value Value) {
+func (fbr *fiber) setLocal(index int, value Value) {
 	*(fbr.stack[fbr.base+index]) = value
 }
 
-func (fbr *fiber) getCaptured(index int) Value {
+func (fbr *fiber) getCaptured(index int16) Value {
 	return *(fbr.active.references[index])
-}
-
-func (fbr *fiber) storeCaptured(index int, value Value) {
-	*(fbr.active.references[index]) = value
 }
 
 func (fbr *fiber) getLocalByRef(index int) *Value {

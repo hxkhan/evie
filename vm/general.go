@@ -187,7 +187,7 @@ func (vm *Instance) WaitForNoActivity() {
 }
 
 type local struct {
-	index      int
+	index      int16
 	isCaptured bool
 	isStatic   bool
 }
@@ -200,11 +200,11 @@ func (cp *compiler) reach(name string) (v any, err error) {
 		if binding, success := closure.scope.Reach(name); success {
 			// check if it is a local
 			if scroll == 0 {
-				return local{index: binding.Index, isCaptured: false, isStatic: binding.IsStatic}, nil
+				return local{index: int16(binding.Index), isCaptured: false, isStatic: binding.IsStatic}, nil
 			}
 
 			// otherwise capture it & return the index
-			return local{index: cp.addToCaptured(scroll, binding.Index), isCaptured: true, isStatic: binding.IsStatic}, nil
+			return local{index: int16(cp.addToCaptured(scroll, binding.Index)), isCaptured: true, isStatic: binding.IsStatic}, nil
 		}
 	}
 

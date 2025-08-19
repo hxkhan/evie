@@ -31,8 +31,9 @@ type compiler struct {
 	inline  bool              // use dispatch inlining (combining instructions into one)
 	statics map[string]*Value // implicitly available to all user packages
 
-	pkg      *packageInstance   // the package being compiled right now
-	closures ds.Slice[*closure] // currently open closures
+	pkg      *packageInstance       // the package being compiled right now
+	closures ds.Slice[*closure]     // currently open closures
+	modes    ds.Slice[ast.SyncMode] // sync mode stack
 
 	resolver func(name string) Package
 }
@@ -77,6 +78,8 @@ func New(opts Options) (vm *Instance) {
 			resolver: opts.ImportsResolver,
 			statics:  opts.UniversalStatics,
 			inline:   !opts.DisableInlining,
+			modes:    make(ds.Slice[ast.SyncMode], 0, 6),
+			closures: make(ds.Slice[*closure], 0, 6),
 		},
 		runtime{
 			packages: make(map[string]*packageInstance),

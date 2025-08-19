@@ -101,7 +101,10 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		}
 
 	case ast.Unsynced:
+		vm.cp.modes.Push(ast.UnsyncedMode)
 		action := vm.compile(node.Action)
+		vm.cp.modes.Pop()
+
 		return func(fbr *fiber) (Value, *Exception) {
 			// check if already unsynchronized
 			if fbr.unsynced() {
@@ -120,7 +123,10 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		}
 
 	case ast.Synced:
+		vm.cp.modes.Push(ast.SyncedMode)
 		action := vm.compile(node.Action)
+		vm.cp.modes.Pop()
+
 		return func(fbr *fiber) (Value, *Exception) {
 			// check if already synced
 			if fbr.synced() {
@@ -279,6 +285,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 			global := this.globals[fields.Get(fn.Name)]
 			ufn := (*UserFn)(global.pointer)
 
+			vm.cp.modes.Push(ufn.mode)
 			vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: ufn.funcInfoStatic})
 			vm.cp.closures.Last(0).scope.OpenBlock()
 
@@ -289,6 +296,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 
 			ufn.code = vm.compile(fn.Action)
 			closure := vm.cp.closures.Pop()
+			vm.cp.modes.Pop()
 			capacity := closure.scope.Capacity()
 			ufn.locals = make([]bool, capacity)
 
@@ -481,10 +489,11 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 
 func (vm *Instance) emitFn(node ast.Fn) instruction {
 	mode := node.SyncMode
-	// inherit from parent
+	// inherit from parent (if not specified)
 	if mode == ast.UndefinedMode {
-		mode = vm.cp.closures.Last(0).info.mode
+		mode = vm.cp.modes.Last(0)
 	}
+	vm.cp.modes.Push(mode)
 
 	// create static info object
 	info := &funcInfoStatic{
@@ -504,6 +513,7 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 
 	info.code = vm.compile(node.Action)
 	closure := vm.cp.closures.Pop()
+	vm.cp.modes.Pop()
 	info.captures = closure.captures
 	capacity := closure.scope.Capacity()
 

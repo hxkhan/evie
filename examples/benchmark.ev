@@ -10,11 +10,14 @@ fn main() {
     while n > 0 {
         n = io.dec(n)
         //n = test.dec(n)
+        //n = dec(n)
     }
 
     echo "done"
 }
 
+
+fn dec(n) => n-1
 
 /* fn main() {
     var n := 1000000

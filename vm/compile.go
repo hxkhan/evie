@@ -986,10 +986,10 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 
 					// run code
 					if unsynced {
-						result, exc = fn.jcall(fbr, arguments)
+						result, exc = fn.invoke(fbr, arguments)
 					} else {
 						vm.rt.AcquireGIL()
-						result, exc = fn.jcall(fbr, arguments)
+						result, exc = fn.invoke(fbr, arguments)
 						vm.rt.ReleaseGIL()
 					}
 

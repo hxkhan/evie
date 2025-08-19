@@ -248,104 +248,36 @@ func (fn GoFunc) Synced() bool {
 }
 
 func (fn *GoFunc) call(fbr *fiber, arguments []instruction) (result Value, exc *Exception) {
-	/* switch fn.mode {
-	case ast.AgnosticMode:
-		// much faster, try benchmark.ev
-		return callAgnostic(fn, fbr, arguments)
-	default:
-		panic("unsuported call")
-	} */
-
 	if fn.nargs != len(arguments) {
 		return Value{}, CustomError("function requires %v argument(s), %v provided", fn.nargs, len(arguments))
 	}
 
-	if fn.mode != ast.AgnosticMode {
-		synced := fn.Synced()
-		switch {
-		// no transition
-		case fbr.synced() == synced:
-			break
-
-		// to unsynced
-		case !synced:
-			fbr.vm.rt.ReleaseGIL()
-			defer fbr.vm.rt.AcquireGIL()
-
-		// to synced
-		default:
-			fbr.vm.rt.AcquireGIL()
-			defer fbr.vm.rt.ReleaseGIL()
-		}
+	// no sync mode transition needed
+	if fn.mode == ast.AgnosticMode {
+		return fn.invoke(fbr, arguments)
+	} else if fn.Synced() == fbr.synced() {
+		return fn.invoke(fbr, arguments)
 	}
 
-	switch fn.nargs {
-	case -1:
-		panic("variadic functions not supported yet")
-	case 0:
-		function := *(*func() (Value, *Exception))(fn.ptr)
-		return function()
-	case 1:
-		function := *(*func(Value) (Value, *Exception))(fn.ptr)
-		arg0, err := arguments[0](fbr)
-		if err != nil {
-			return arg0, err
-		}
-		return function(arg0)
-	case 2:
-		function := *(*func(Value, Value) (Value, *Exception))(fn.ptr)
-		arg0, err := arguments[0](fbr)
-		if err != nil {
-			return arg0, err
-		}
-
-		arg1, err := arguments[1](fbr)
-		if err != nil {
-			return arg0, err
-		}
-		return function(arg0, arg1)
-	}
-
-	panic("unsuported call")
+	return fn.callTransition(fbr, arguments)
 }
 
-func callAgnostic(fn *GoFunc, fbr *fiber, arguments []instruction) (result Value, exc *Exception) {
-	if fn.nargs != len(arguments) {
-		return Value{}, CustomError("function requires %v argument(s), %v provided", fn.nargs, len(arguments))
+func (fn *GoFunc) callTransition(fbr *fiber, arguments []instruction) (result Value, exc *Exception) {
+	if fn.mode == ast.UnsyncedMode {
+		fbr.vm.rt.ReleaseGIL()
+		result, exc = fn.invoke(fbr, arguments)
+		fbr.vm.rt.AcquireGIL()
+		return
 	}
 
-	switch fn.nargs {
-	case -1:
-		panic("variadic functions not supported yet")
-	case 0:
-		function := *(*func() (Value, *Exception))(fn.ptr)
-		return function()
-	case 1:
-		function := *(*func(Value) (Value, *Exception))(fn.ptr)
-		arg0, err := arguments[0](fbr)
-		if err != nil {
-			return arg0, err
-		}
-		return function(arg0)
-	case 2:
-		function := *(*func(Value, Value) (Value, *Exception))(fn.ptr)
-		arg0, err := arguments[0](fbr)
-		if err != nil {
-			return arg0, err
-		}
-
-		arg1, err := arguments[1](fbr)
-		if err != nil {
-			return arg0, err
-		}
-		return function(arg0, arg1)
-	}
-
-	panic("unsuported call")
+	fbr.vm.rt.AcquireGIL()
+	result, exc = fn.invoke(fbr, arguments)
+	fbr.vm.rt.ReleaseGIL()
+	return
 }
 
 // just call; no args check; no GIL consideration
-func (fn *GoFunc) jcall(fbr *fiber, arguments []instruction) (result Value, exc *Exception) {
+func (fn *GoFunc) invoke(fbr *fiber, arguments []instruction) (result Value, exc *Exception) {
 	switch fn.nargs {
 	case -1:
 		panic("variadic functions not supported yet")

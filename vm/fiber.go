@@ -27,9 +27,9 @@ func (fbr *fiber) get(binding local) *Value {
 func (fbr *fiber) set(binding local, value Value) {
 	if !binding.isCaptured {
 		*(fbr.stack[fbr.base+int(binding.index)]) = value
-	} else {
-		*(fbr.active.references[int(binding.index)]) = value
+		return
 	}
+	*(fbr.active.references[int(binding.index)]) = value
 }
 
 func (fbr *fiber) getLocal(index int16) Value {

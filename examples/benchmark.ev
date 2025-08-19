@@ -1,37 +1,37 @@
 package main imports("io", "lists", "strings")
 
-/* fn main() {
+fn main() {
     var n := 10000000
     // for n = 10000000
-    // direct static call to io.dec:   ~76ms
-    // via local variable as test.dec: ~115ms
+    // direct static call to io.dec:   ~96ms
+    // via local variable as test.dec: ~140ms
 
     test := io
     while n > 0 {
-        //n = io.dec(n)
-        n = test.dec(n)
+        n = io.dec(n)
+        //n = test.dec(n)
     }
 
     echo "done"
-} */
+}
 
 
-fn main() {
+/* fn main() {
     var n := 1000000
     // for n = 1000000
-    // direct static call to string.split & list.join: ~175ms
-    // dynamic dispatch to message.split & parts.join: ~185ms
+    // direct static call to string.split & list.join: ~157ms
+    // dynamic dispatch to message.split & parts.join: ~166ms
 
     message := "hello world"
     while n > 0 {
-        //parts := strings.split(message, " ")
-        //whole := lists.join(parts, "_")
+        parts := strings.split(message, " ")
+        whole := lists.join(parts, "_")
 
-        parts := message.split(" ")
-        whole := parts.join("_")
+        //parts := message.split(" ")
+        //whole := parts.join("_")
 
         n -= 1
     }
 
     echo "done"
-}
+} */

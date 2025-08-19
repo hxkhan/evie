@@ -4,6 +4,6 @@ fn main() {
     pi := 3.14159
 
     echo "before"
-    await time.timer(pi * 1000)
+    time.wait(pi * 1000)
     echo "after"
 }

@@ -6,7 +6,7 @@ fn main() {
     whole := parts.join("_")
 
     // hello world -> ["hello", "world"] -> hello_world
-    echo message + " -> " + str(parts) + " -> " +  whole
+    echo message + " -> " + string(parts) + " -> " +  whole
 
     // hello world -> hello|world
     echo message + " -> " + message.split(" ").join("|")

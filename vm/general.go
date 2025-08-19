@@ -24,7 +24,7 @@ type closure struct {
 	captures ds.Slice[capture]
 	freeVars ds.Set[int]
 	scope    ds.Scope
-	this     *Value
+	info     *funcInfoStatic
 }
 
 type compiler struct {

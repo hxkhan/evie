@@ -37,6 +37,10 @@ type UserFn struct {
 	references []*Value // captured variables
 }
 
+func (fn UserFn) Synced() bool {
+	return fn.mode == ast.SyncedMode
+}
+
 func (fn UserFn) String() string {
 	return "<function>"
 }
@@ -194,23 +198,21 @@ func (m Method) call(fbr *fiber, arguments []instruction) (result Value, exc *Ex
 		return Value{}, CustomError("method requires %v argument(s), %v provided", fn.nargs-1, len(arguments))
 	}
 
-	if fn.HasSyncMode() {
-		synced := fn.Synced()
-		switch {
-		// no transition
-		case fbr.synced() == synced:
-			break
+	synced := fn.Synced()
+	switch {
+	// no transition
+	case fn.mode == ast.AgnosticMode || fbr.synced() == synced:
+		break
 
-		// to unsynced
-		case !synced:
-			fbr.vm.rt.ReleaseGIL()
-			defer fbr.vm.rt.AcquireGIL()
+	// to unsynced
+	case !synced:
+		fbr.vm.rt.ReleaseGIL()
+		defer fbr.vm.rt.AcquireGIL()
 
-		// to synced
-		default:
-			fbr.vm.rt.AcquireGIL()
-			defer fbr.vm.rt.ReleaseGIL()
-		}
+	// to synced
+	default:
+		fbr.vm.rt.AcquireGIL()
+		defer fbr.vm.rt.ReleaseGIL()
 	}
 
 	switch fn.nargs {
@@ -239,10 +241,6 @@ type GoFunc struct {
 	mode  ast.SyncMode
 }
 
-func (fn GoFunc) HasSyncMode() bool {
-	return fn.mode != ast.UndefinedMode
-}
-
 func (fn GoFunc) Synced() bool {
 	return fn.mode == ast.SyncedMode
 }
@@ -252,23 +250,21 @@ func (fn *GoFunc) call(fbr *fiber, arguments []instruction) (result Value, exc *
 		return Value{}, CustomError("function requires %v argument(s), %v provided", fn.nargs, len(arguments))
 	}
 
-	if fn.HasSyncMode() {
-		synced := fn.Synced()
-		switch {
-		// no transition
-		case fbr.synced() == synced:
-			break
+	synced := fn.Synced()
+	switch {
+	// no transition
+	case fn.mode == ast.AgnosticMode || fbr.synced() == synced:
+		break
 
-		// to unsynced
-		case !synced:
-			fbr.vm.rt.ReleaseGIL()
-			defer fbr.vm.rt.AcquireGIL()
+	// to unsynced
+	case !synced:
+		fbr.vm.rt.ReleaseGIL()
+		defer fbr.vm.rt.AcquireGIL()
 
-		// to synced
-		default:
-			fbr.vm.rt.AcquireGIL()
-			defer fbr.vm.rt.ReleaseGIL()
-		}
+	// to synced
+	default:
+		fbr.vm.rt.AcquireGIL()
+		defer fbr.vm.rt.ReleaseGIL()
 	}
 
 	switch fn.nargs {

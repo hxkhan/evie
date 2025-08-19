@@ -63,8 +63,9 @@ I did not want to make the same mistake as Python. That is, not providing a mean
 ## Benchmarks
 | Language | fib(35)  | Host Language |
 | :-       | :-       | :-            |
-| [**Evie**](https://github.com/hxkhan/evie) | `396ms` | Go |
-| [Lua 5.4.2](https://lua.org/) | `536ms` | C | 
+| [Luau](https://luau.org/) | `381ms` | C++ |
+| [**Evie**](https://github.com/hxkhan/evie) | `384ms` | Go |
+| [PUC Lua 5.4.2](https://lua.org/) | `507ms` | C | 
 | [JS - V8 Ignition](https://v8.dev/docs/ignition) | `665ms` | C++ | 
 | [JS - QuickJS](https://bellard.org/quickjs/) | `703ms` | C | 
 | [Python 3.13](https://python.org/) | `826ms` | C |

@@ -108,12 +108,12 @@ func BoxUserFn(fn UserFn) Value {
 	return Value{scalar: userFnType, pointer: unsafe.Pointer(&fn)}
 }
 
-// BoxGoFunc boxes a general Go function
+// BoxGoFunc boxes a sync-agnostic Go function
 func BoxGoFunc[T SafeGoFunc](fn T) Value {
 	ptr := unsafe.Pointer(&GoFunc{
 		nargs: reflect.TypeOf(fn).NumIn(),
 		ptr:   unsafe.Pointer(&fn),
-		mode:  ast.UndefinedMode,
+		mode:  ast.AgnosticMode,
 	})
 	return Value{scalar: goFuncType, pointer: ptr}
 }

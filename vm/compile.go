@@ -227,12 +227,18 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 				panic(fmt.Errorf("double declaration of %s", fn.Name))
 			}
 
+			mode := fn.SyncMode
+			// effectively inherits from global which is synced
+			if mode == ast.UndefinedMode {
+				mode = ast.SyncedMode
+			}
+
 			// create a stub for now
 			fn := BoxUserFn(UserFn{
 				funcInfoStatic: &funcInfoStatic{
 					name: fn.Name,
 					args: fn.Args,
-					mode: fn.SyncMode,
+					mode: mode,
 					vm:   vm,
 				},
 			})
@@ -273,7 +279,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 			global := this.globals[fields.Get(fn.Name)]
 			ufn := (*UserFn)(global.pointer)
 
-			vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, this: global.Value})
+			vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: ufn.funcInfoStatic})
 			vm.cp.closures.Last(0).scope.OpenBlock()
 
 			// declare the fn arguments and only then compile the code
@@ -474,7 +480,21 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 }
 
 func (vm *Instance) emitFn(node ast.Fn) instruction {
-	vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}})
+	mode := node.SyncMode
+	// inherit from parent
+	if mode == ast.UndefinedMode {
+		mode = vm.cp.closures.Last(0).info.mode
+	}
+
+	// create static info object
+	info := &funcInfoStatic{
+		name: node.Name,
+		args: node.Args,
+		mode: mode,
+		vm:   vm,
+	}
+
+	vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: info})
 	vm.cp.closures.Last(0).scope.OpenBlock()
 
 	// declare the fn arguments and only then compile the code
@@ -482,31 +502,21 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 		vm.cp.closures.Last(0).scope.Declare(arg, false)
 	}
 
-	action := vm.compile(node.Action)
+	info.code = vm.compile(node.Action)
 	closure := vm.cp.closures.Pop()
+	info.captures = closure.captures
 	capacity := closure.scope.Capacity()
 
 	// mark escapee variables
-	locals := make([]bool, capacity)
-	recyclable := 0
+	info.locals = make([]bool, capacity)
+	info.recyclable = 0
 	for index := range capacity {
 		if closure.freeVars.Has(index) {
-			locals[index] = true
+			info.locals[index] = true
 			vm.log.escapesf("CT: fn %v => Local(%v) escapes\n", node.Name, index)
 		} else {
-			recyclable++
+			info.recyclable++
 		}
-	}
-
-	info := &funcInfoStatic{
-		name:       node.Name,
-		args:       node.Args,
-		locals:     locals,
-		recyclable: recyclable,
-		captures:   closure.captures,
-		mode:       node.SyncMode,
-		code:       action,
-		vm:         vm,
 	}
 
 	for i, ref := range closure.captures {
@@ -585,7 +595,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			}
 
 			// optimise: call to ourselves (recursion)
-			if vm.cp.closures.Len() > 0 && value == *(vm.cp.closures.Last(0).this) {
+			if vm.cp.closures.Len() > 0 && fn.funcInfoStatic == vm.cp.closures.Last(0).info {
 				return func(fbr *fiber) (result Value, exc *Exception) {
 					// setup stack locals
 					base := len(fbr.stack)
@@ -607,14 +617,14 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 						}
 					}
 
-					// save currently captured values
+					// save current state
 					prevBase := fbr.swapBase(base)
 
 					// correctly invoke ourselves (mode can still change)
-					synced := fn.mode == ast.SyncedMode
+					synced := fn.Synced()
 					switch {
 					// no transition
-					case fn.mode == ast.UndefinedMode || fbr.synced() == synced:
+					case fbr.synced() == synced || fn.mode == ast.AgnosticMode:
 						result, exc = fn.code(fbr)
 
 					// to synced
@@ -671,15 +681,15 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					}
 				}
 
-				// save currently captured values
+				// save current state
 				prevBase := fbr.swapBase(base)
 				prevFn := fbr.swapActive(fn)
 
 				// correctly invoke the function
-				synced := fn.mode == ast.SyncedMode
+				synced := fn.Synced()
 				switch {
 				// no transition
-				case fn.mode == ast.UndefinedMode || fbr.synced() == synced:
+				case fbr.synced() == synced || fn.mode == ast.AgnosticMode:
 					result, exc = fn.code(fbr)
 
 				// to synced
@@ -799,15 +809,15 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				}
 			}
 
-			// save currently captured values
+			// save current state
 			prevBase := fbr.swapBase(base)
 			prevFn := fbr.swapActive(fn)
 
 			// correctly invoke the function
-			synced := fn.mode == ast.SyncedMode
+			synced := fn.Synced()
 			switch {
 			// no transition
-			case fn.mode == ast.UndefinedMode || fbr.synced() == synced:
+			case fbr.synced() == synced || fn.mode == ast.AgnosticMode:
 				result, exc = fn.code(fbr)
 
 			// to synced
@@ -891,12 +901,14 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					params[i] = arg
 				}
 
-				unsynchronized := fbr.unsynchronized
+				// decide sync mode
+				unsynced := fbr.unsynchronized
+				// overide if explicitly specified
 				switch fn.mode {
-				case ast.SyncedMode:
-					unsynchronized = false
 				case ast.UnsyncedMode:
-					unsynchronized = true
+					unsynced = true
+				case ast.SyncedMode:
+					unsynced = false
 				}
 
 				task := make(chan evaluation, 1)
@@ -906,7 +918,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					fbr.active = fn
 					fbr.base = 0
 					fbr.stack = fbr.stack[:0]
-					fbr.unsynchronized = unsynchronized
+					fbr.unsynchronized = unsynced
 
 					// setup stack locals
 					for idx, escapes := range fn.locals {
@@ -957,13 +969,18 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					return Value{}, CustomError("function requires %v argument(s), %v provided", fn.nargs, len(arguments))
 				}
 
+				// decide sync mode
+				unsynced := fbr.unsynchronized
+				// overide if explicitly specified
+				switch fn.mode {
+				case ast.UnsyncedMode:
+					unsynced = true
+				case ast.SyncedMode:
+					unsynced = false
+				}
+
 				task := make(chan evaluation, 1)
 				vm.rt.wg.Go(func() {
-					unsynced := fbr.unsynchronized
-					if fn.HasSyncMode() {
-						unsynced = !fn.Synced()
-					}
-
 					var result Value
 					var exc *Exception
 

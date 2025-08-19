@@ -10,9 +10,14 @@ import (
 type SyncMode int
 
 const (
+	// Undefined mode inherits from lexical parent
 	UndefinedMode SyncMode = iota
-	SyncedMode
+	// Synced mode assumes GIL
+	SyncedMode SyncMode = iota + 1
+	// Unsynced mode assumes no GIL
 	UnsyncedMode
+	// Agnostic mode inherits from caller
+	AgnosticMode
 )
 
 type Fn struct {

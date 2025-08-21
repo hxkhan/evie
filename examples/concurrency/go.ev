@@ -1,6 +1,13 @@
 package main imports("time")
 
-// go run ./cli -t ./examples/go.ev
+/*
+    This program blocks in 10 different places at the same time,
+    but absolutely no parallelism takes place. All the evie code you see here,
+    runs under the protection of the GIL. Hint: `time.wait` is an unsynced function.
+
+    In simple words, the runtime releases the GIL when we go into unsynced functions.
+*/
+
 fn main() {
     go print("one", 100)
     go print("two", 200)

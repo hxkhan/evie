@@ -1,0 +1,16 @@
+package main
+
+fn main() {
+    a := go fib(35)
+    b := go fib(35)
+    c := go fib(35)
+
+    echo await.all(a, b, c)
+}
+
+fn fib(n) unsynced {
+    if n < 2 {
+        return n
+    }
+    return fib(n-1) + fib(n-2)
+}

@@ -42,7 +42,7 @@ I did not want to make the same mistake as Python. That is, not providing a mean
 > This language is in an early state. I have been hard at work optimising and improving the core language. The standard library only contains some basic methods for testing purposes.
 
 ## Docs
-- [Language Syntax](https://github.com/hxkhan/evie/tree/main/docs/syntax.md)
+- [Language Syntax](./docs/syntax.md)
 
 ## Features checklist
 - Package management ⏳

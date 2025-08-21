@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hxkhan/evie/token"
+	"hxkhan.dev/evie/token"
 )
 
 type Node interface {

@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hxkhan/evie/ast"
-	"github.com/hxkhan/evie/lexer"
-	"github.com/hxkhan/evie/token"
+	"hxkhan.dev/evie/ast"
+	"hxkhan.dev/evie/lexer"
+	"hxkhan.dev/evie/token"
 )
 
 var errEOS = errors.New("EOS")

@@ -1,3 +1,3 @@
-module github.com/hxkhan/evie
+module hxkhan.dev/evie
 
 go 1.25

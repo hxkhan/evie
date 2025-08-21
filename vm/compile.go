@@ -3,9 +3,9 @@ package vm
 import (
 	"fmt"
 
-	"github.com/hxkhan/evie/ast"
-	"github.com/hxkhan/evie/ds"
-	"github.com/hxkhan/evie/vm/fields"
+	"hxkhan.dev/evie/ast"
+	"hxkhan.dev/evie/ds"
+	"hxkhan.dev/evie/vm/fields"
 )
 
 type instruction func(fbr *fiber) (Value, *Exception)

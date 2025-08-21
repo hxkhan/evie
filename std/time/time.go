@@ -3,7 +3,7 @@ package time
 import (
 	"time"
 
-	"github.com/hxkhan/evie/vm"
+	"hxkhan.dev/evie/vm"
 )
 
 func Construct() vm.Package {

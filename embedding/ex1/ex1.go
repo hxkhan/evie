@@ -3,9 +3,9 @@ package main
 import (
 	"fmt"
 
-	"github.com/hxkhan/evie/std/io"
-	"github.com/hxkhan/evie/std/time"
-	"github.com/hxkhan/evie/vm"
+	"hxkhan.dev/evie/std/io"
+	"hxkhan.dev/evie/std/time"
+	"hxkhan.dev/evie/vm"
 )
 
 func main() {
@@ -39,7 +39,7 @@ func main() {
             io.println("add called in the evie world")
 
 			io.println("about to start awaiting PI seconds")
-            await time.timer(pi * 1000) // wait 3.14 seconds
+            time.wait(pi * 1000) // wait 3.14 seconds
             return a + b
 		}`,
 	))

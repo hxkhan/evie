@@ -4,7 +4,7 @@ import (
 	"unicode"
 	"unsafe"
 
-	"github.com/hxkhan/evie/token"
+	"hxkhan.dev/evie/token"
 )
 
 // NextToken returns next token and advances the lexer

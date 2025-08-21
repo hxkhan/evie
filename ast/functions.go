@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hxkhan/evie/token"
+	"hxkhan.dev/evie/token"
 )
 
 type SyncMode int

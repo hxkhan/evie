@@ -3,7 +3,7 @@ package ast
 import (
 	"fmt"
 
-	"github.com/hxkhan/evie/token"
+	"hxkhan.dev/evie/token"
 )
 
 type Decl struct {

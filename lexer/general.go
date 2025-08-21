@@ -3,7 +3,7 @@ package lexer
 import (
 	"unicode/utf8"
 
-	"github.com/hxkhan/evie/token"
+	"hxkhan.dev/evie/token"
 )
 
 const iEOS rune = 0x03 // 0x03 = End of Source

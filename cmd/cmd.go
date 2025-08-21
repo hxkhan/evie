@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"flag"
@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hxkhan/evie"
-	"github.com/hxkhan/evie/vm"
+	"hxkhan.dev/evie/std"
+	"hxkhan.dev/evie/vm"
 )
 
-func main() {
+func Run() {
 	/* f, err := os.Create("cpu.prof")
 	if err != nil {
 		log.Fatal("could not create CPU profile: ", err)
@@ -104,7 +104,7 @@ func main() {
 }
 
 func resolver(name string) vm.Package {
-	if constructor, exists := evie.StandardLibraryConstructors[name]; exists {
+	if constructor, exists := std.Constructors[name]; exists {
 		return constructor()
 	}
 	panic(fmt.Errorf("constructor not found for '%v'", name))

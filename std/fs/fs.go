@@ -3,7 +3,7 @@ package fs
 import (
 	"os"
 
-	"github.com/hxkhan/evie/vm"
+	"hxkhan.dev/evie/vm"
 )
 
 func Construct() vm.Package {

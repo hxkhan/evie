@@ -3,7 +3,7 @@ package vm
 import (
 	"strings"
 
-	"github.com/hxkhan/evie/vm/fields"
+	"hxkhan.dev/evie/vm/fields"
 )
 
 var stringMethods = map[fields.ID]*Value{

@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"unsafe"
 
-	"github.com/hxkhan/evie/ast"
+	"hxkhan.dev/evie/ast"
 )
 
 type capture struct {

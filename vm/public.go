@@ -1,6 +1,6 @@
 package vm
 
-import "github.com/hxkhan/evie/vm/fields"
+import "hxkhan.dev/evie/vm/fields"
 
 func NewHostPackage(name string) Package {
 	return &packageInstance{

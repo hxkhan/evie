@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/hxkhan/evie/token"
+	"hxkhan.dev/evie/token"
 )
 
 type Operator int

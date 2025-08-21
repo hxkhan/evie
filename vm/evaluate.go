@@ -1,8 +1,8 @@
 package vm
 
 import (
-	"github.com/hxkhan/evie/ast"
-	"github.com/hxkhan/evie/vm/fields"
+	"hxkhan.dev/evie/ast"
+	"hxkhan.dev/evie/vm/fields"
 )
 
 // evaluate can return values of type (Value, Global, local) or nil

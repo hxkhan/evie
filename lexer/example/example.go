@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/hxkhan/evie/lexer"
+	"hxkhan.dev/evie/lexer"
 )
 
 func main() {

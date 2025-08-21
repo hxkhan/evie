@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/hxkhan/evie/parser"
+	"hxkhan.dev/evie/parser"
 )
 
 func main() {

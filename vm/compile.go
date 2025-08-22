@@ -661,6 +661,8 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 					// return result but catch relevant signals
 					switch exc {
+					case nil:
+						return Value{}, nil
 					case returnSignal:
 						return result, nil
 					default:
@@ -727,6 +729,8 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 				// return result but catch relevant signals
 				switch exc {
+				case nil:
+					return Value{}, nil
 				case returnSignal:
 					return result, nil
 				default:
@@ -855,6 +859,8 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 			// return result but catch relevant signals
 			switch exc {
+			case nil:
+				return Value{}, nil
 			case returnSignal:
 				return result, nil
 			default:

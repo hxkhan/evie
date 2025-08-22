@@ -19,7 +19,17 @@ type parser struct {
 	last token.Token
 }
 
-var keywords = []string{"package", "nil", "true", "false", "fn", "return", "go", "await", "echo", "if", "else"}
+var keywords = []string{
+	"package", "imports",
+	"nil", "true", "false",
+	"var", "fn",
+	"echo",
+	"return",
+	"if",
+	"else",
+	"await", "go",
+	"synced", "unsynced", "agnostic",
+}
 
 var operators = map[string]ast.Operator{
 	"+": ast.AddOp, "-": ast.SubOp, "*": ast.MulOp, "/": ast.DivOp, "%": ast.ModOp,
@@ -102,7 +112,7 @@ func (ps *parser) parsePackage() ast.Package {
 	}
 
 	pack := ast.Package{Pos: line, Name: ps.NextToken().Literal}
-	if ps.consumeName("imports") && ps.consume("(") && !ps.consume(")") {
+	if ps.consume("imports") && ps.consume("(") && !ps.consume(")") {
 		pack.Imports = ps.parseStringList()
 	}
 	return pack
@@ -314,23 +324,20 @@ func (ps *parser) parseFn(main token.Token, asExpr bool) ast.Node {
 	}
 	fn.Args = ps.parseNamesList(main)
 
+	// sync mode
+	switch {
+	case ps.consume("agnostic"):
+		fn.SyncMode = ast.AgnosticMode
+	case ps.consume("synced"):
+		fn.SyncMode = ast.SyncedMode
+	case ps.consume("unsynced"):
+		fn.SyncMode = ast.UnsyncedMode
+	}
+
 	if ps.consume("{") {
 		fn.Action = ps.parseBlock()
 	} else if ps.consume("=>") {
-		// TODO: we should check so next already isn't a return
 		fn.Action = ast.Return{Pos: main.Line, Value: ps.parse(0, true)}
-	} else if ps.consume("unsynced") {
-		if !ps.consume("{") {
-			ps.panic(ps.last, "'{'")
-		}
-		fn.Action = ps.parseBlock()
-		fn.SyncMode = ast.UnsyncedMode
-	} else if ps.consume("synced") {
-		if !ps.consume("{") {
-			ps.panic(ps.last, "'{'")
-		}
-		fn.Action = ps.parseBlock()
-		fn.SyncMode = ast.SyncedMode
 	} else {
 		ps.panic(main, "'{' or '=>'")
 	}

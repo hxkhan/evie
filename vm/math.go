@@ -38,7 +38,7 @@ func (x Value) Mod(y Value) (z Value, ok bool) {
 	if x.pointer == f64Type && y.pointer == f64Type {
 		x := math.Float64frombits(x.scalar)
 		y := math.Float64frombits(y.scalar)
-		return BoxNumber(float64(int64(x) % int64(y))), true
+		return BoxNumber(math.Mod(x, y)), true
 	}
 	return Value{}, false
 }

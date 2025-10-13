@@ -13,7 +13,7 @@ const (
 	// Undefined mode inherits from lexical parent
 	UndefinedMode SyncMode = iota
 	// Synced mode assumes GIL
-	SyncedMode SyncMode = iota + 1
+	SyncedMode
 	// Unsynced mode assumes no GIL
 	UnsyncedMode
 	// Agnostic mode inherits from caller

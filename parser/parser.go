@@ -28,7 +28,7 @@ var keywords = []string{
 	"if",
 	"else",
 	"await", "go",
-	"synced", "unsynced", "agnostic",
+	"synced", "unsynced", "agnostic", "catch",
 }
 
 var operators = map[string]ast.Operator{
@@ -203,6 +203,18 @@ func (ps *parser) handleWords(main token.Token, asExpr bool) ast.Node {
 			return ast.Synced{Pos: main.Line, Action: ps.parse(0, true)}
 		}
 		return ast.Synced{Pos: main.Line, Action: ps.parseBlock()}
+
+	case "catch":
+		if ps.consume("{") {
+			return ast.Catch{Pos: main.Line, Action: ps.parseBlock()}
+		} else if ps.consume("(") {
+			e := ps.parse(0, true)
+			if !ps.consume(")") {
+				panic(fmt.Errorf("'catch' expected ')' on line %v, got '%v'", ps.PeekToken().Line, ps.PeekToken().Literal))
+			}
+			return ast.Catch{Pos: main.Line, Action: e}
+		}
+		panic(fmt.Errorf("'catch' expected '(' on line %v, got '%v'", ps.PeekToken().Line, ps.PeekToken().Literal))
 
 	case "var":
 		name := ps.NextToken()

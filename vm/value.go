@@ -31,7 +31,8 @@ RULES:
 	7.  array:   the pointer has to be none of (f64Type, boolType); the scalar has to be arrayType
 	8.  task:    the pointer has to be none of (f64Type, boolType); the scalar has to be taskType
 	9.  buffer:  the pointer has to be none of (f64Type, boolType); the scalar has to be bufferType
-	10. custom:  the pointer has to be none of (f64Type, boolType); the scalar has to be customType
+	10. error:   the pointer has to be none of (f64Type, boolType); the scalar has to be errorType
+	11. custom:  the pointer has to be none of (f64Type, boolType); the scalar has to be customType
 
 Another alternative to these two is using this exact same Value struct with different rules.
 The scalar would use nan-tagging and would either be a valid float64 or a NaN and contain meta data that
@@ -55,6 +56,7 @@ const (
 	taskType
 	packageType
 	bufferType
+	errorType
 	customType
 )
 
@@ -62,7 +64,7 @@ const (
 var f64Type = unsafe.Pointer(new(byte))
 var boolType = unsafe.Pointer(new(byte))
 
-// scalar types
+// type ids
 var strTypeID = unsafe.Pointer(new(byte))
 var arrayTypeID = unsafe.Pointer(new(byte))
 
@@ -167,6 +169,11 @@ func BoxBuffer(bytes []byte) Value {
 	return Value{scalar: bufferType, pointer: unsafe.Pointer(&bytes)}
 }
 
+// BoxException boxes an evie Exception
+func BoxException(e *Exception) Value {
+	return Value{scalar: errorType, pointer: unsafe.Pointer(e)}
+}
+
 // BoxCustom boxes a value of a custom type
 func BoxCustom(cv CustomValue) Value {
 	return Value{scalar: customType, pointer: unsafe.Pointer(&cv)}
@@ -252,6 +259,13 @@ func (x Value) AsBuffer() (buffer []byte, ok bool) {
 	return *(*[]byte)(x.pointer), true
 }
 
+func (x Value) AsException() (e *Exception, ok bool) {
+	if x.scalar != errorType || isKnown(x.pointer) {
+		return nil, false
+	}
+	return (*Exception)(x.pointer), true
+}
+
 func (x Value) AsCustom() (cv CustomValue, ok bool) {
 	if x.scalar != customType || isKnown(x.pointer) {
 		return nil, false
@@ -297,6 +311,9 @@ func (x Value) IsTruthy() bool {
 	case bufferType:
 		array := *(*[]Value)(x.pointer)
 		return len(array) != 0
+	case errorType:
+		exc := (*Exception)(x.pointer)
+		return exc != nil
 	case customType:
 		cv := *(*CustomValue)(x.pointer)
 		return cv.IsTruthy()
@@ -384,6 +401,9 @@ func (x Value) String() string {
 		return "<method>"
 	case bufferType:
 		return fmt.Sprintf("<buffer: %v>", x.pointer)
+	case errorType:
+		exc := (*Exception)(x.pointer)
+		return fmt.Sprintf("<error: %v>", exc.message)
 	case customType:
 		cv := (*(*CustomValue)(x.pointer))
 		return cv.String()
@@ -417,6 +437,8 @@ func (x Value) TypeOf() string {
 		return "method"
 	case bufferType:
 		return "buffer"
+	case errorType:
+		return "error"
 	case customType:
 		cv := (*(*CustomValue)(x.pointer))
 		return cv.TypeOf()

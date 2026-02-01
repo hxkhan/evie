@@ -7,7 +7,7 @@ import (
 )
 
 func Construct() vm.Package {
-	pkg := vm.NewHostPackage("io")
+	pkg := vm.NewHostPackage()
 	pkg.SetSymbol("wait", vm.BoxGoFuncUnsynced(wait))
 	return pkg
 }

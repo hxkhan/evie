@@ -7,7 +7,7 @@ import (
 )
 
 func Construct() vm.Package {
-	pkg := vm.NewHostPackage("json")
+	pkg := vm.NewHostPackage()
 	pkg.SetSymbol("decode", vm.BoxGoFunc(decode))
 	return pkg
 }

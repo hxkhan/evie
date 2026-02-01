@@ -144,6 +144,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			return res, err
 		}
 
+	case ast.Catch:
+		return vm.emitCatch(node)
+
 	case ast.Fn:
 		return vm.emitFn(node)
 
@@ -194,6 +197,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 		pkg := vm.rt.packages[name]
 		if pkg == nil {
 			pkg = vm.cp.resolver(name).(*packageInstance)
+			pkg.name = name
 
 			// save as loaded package
 			vm.rt.packages[name] = pkg
@@ -1347,6 +1351,25 @@ func (vm *Instance) emitNeg(node ast.Neg) instruction {
 			return BoxNumber(-float), nil
 		}
 		return Value{}, RuntimeExceptionF("Cannot negate '%v'.", value)
+	}
+}
+
+func (vm *Instance) emitCatch(node ast.Catch) instruction {
+	action := vm.compile(node.Action)
+
+	return func(fbr *fiber) (Value, *Exception) {
+		v, err := action(fbr)
+		if err != nil {
+			if err != returnSignal && err != continueSignal && err != breakSignal {
+				// convert exception to error-as-value and return
+				return BoxException(err), nil
+			}
+
+			// propagate as normal
+			return v, err
+		}
+
+		return v, nil
 	}
 }
 

@@ -29,6 +29,11 @@ type Synced struct {
 	Action Node // [required]
 }
 
+type Catch struct {
+	token.Pos
+	Action Node // [required]
+}
+
 type Continue struct {
 	token.Pos
 }

@@ -7,7 +7,7 @@ import (
 )
 
 func Construct() vm.Package {
-	pkg := vm.NewHostPackage("list")
+	pkg := vm.NewHostPackage()
 	pkg.SetSymbol("join", vm.BoxGoFunc(join))
 	return pkg
 }

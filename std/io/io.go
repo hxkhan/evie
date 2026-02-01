@@ -7,7 +7,7 @@ import (
 )
 
 func Construct() vm.Package {
-	pkg := vm.NewHostPackage("io")
+	pkg := vm.NewHostPackage()
 	pkg.SetSymbol("print", print)
 	pkg.SetSymbol("println", println)
 	pkg.SetSymbol("prompt", prompt)

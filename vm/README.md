@@ -8,21 +8,21 @@ Understanding this is crucial to knowing how variables are resolved.
 {
     // universal-statics.
     // visible to all packages implicitly (no `imports` needed).
-    // cannot be reassigned.
+    // cannot be reassigned by the user.
 
     {
         // package-statics.
         // visible only to the current package.
         // e.g. `package xyz imports("time")`.
         // will make `time` available in the current `xyz` package.
-        // cannot be reassigned.
+        // cannot be reassigned by the user.
 
         {
             // package-globals.
             // visible only to the current package.
             // e.g. `isWorldFlat := false`.
             // will make `isWorldFlat` visible in the current package.
-            // can be reassigned.
+            // can be reassigned if prefixed with `var`.
 
             {
                 // package-closures.

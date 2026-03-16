@@ -1,5 +1,19 @@
 package main
 
+fn error(a) {
+    
+}
+
+fn error.wrap(a) {
+    
+}
+
+type person(name, age) {
+    fn toString() {
+        
+    }
+}
+
 fn main() {
     //echo "Hello World"
     example()
@@ -13,12 +27,12 @@ fn example() {
     echo b
 
     // handle the error
-    /* if b is error {
+    if b is error {
         echo b.message() // cannot add a value of type `number` & `string`
     }
 
     // make errors
-    return error("this is my new error")
+    /* return error("this is my new error")
     return error.wrap("failed to do something", b)
 
     // throw errors

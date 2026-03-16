@@ -36,12 +36,13 @@ var operators = map[string]ast.Operator{
 	"+=": ast.AddOp, "-=": ast.SubOp, "*=": ast.MulOp, "/=": ast.DivOp,
 	"==": ast.EqOp, "<": ast.LtOp, ">": ast.GtOp, "<=": ast.LtEqOp, ">=": ast.GtEqOp,
 	"||": ast.OrOp, "&&": ast.AndOp,
+	"is": ast.IsOp,
 }
 
 var precedence = map[string]int{
 	"||": 0,
 	"&&": 1,
-	"<":  2, ">": 2, "==": 2, "<=": 2, ">=": 2,
+	"<":  2, ">": 2, "==": 2, "<=": 2, ">=": 2, "is": 2,
 	"+": 3, "-": 3,
 	"*": 4, "/": 4, "%": 4,
 	".": 5,

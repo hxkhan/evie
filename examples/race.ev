@@ -1,0 +1,19 @@
+package main imports("io")
+
+var count := 0
+
+fn main() {
+    t1 := go incrementer(5000)
+    t2 := go incrementer(5000)
+
+    await.all(t1, t2)
+    io.println(count) // are we expecting 10000?
+}
+
+// play with removing the unsynced keyword
+fn incrementer(times) unsynced {
+    while times > 0 {
+        count += 1
+        times -= 1
+    }
+}

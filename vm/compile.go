@@ -144,6 +144,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			return res, err
 		}
 
+	case ast.Catch:
+		return vm.emitCatch(node)
+
 	case ast.Fn:
 		return vm.emitFn(node)
 
@@ -173,6 +176,68 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 	case ast.MutableBinOp:
 		return vm.emitMutableBinOp(node)
+
+	case ast.Object:
+		items := make(map[fields.ID]instruction, len(node.Fields))
+		for _, f := range node.Fields {
+			items[fields.Get(f.Key)] = vm.compile(f.Value)
+		}
+
+		return func(fbr *fiber) (Value, *Exception) {
+			obj := make(map[fields.ID]Value, len(items))
+			for k, v := range items {
+				value, err := v(fbr)
+				if err != nil {
+					return value, err
+				}
+
+				obj[k] = value
+			}
+			return BoxObject(obj), nil
+		}
+
+	case ast.Exists:
+		if fa, isFieldAccess := node.Value.(ast.FieldAccess); isFieldAccess {
+			value := vm.compile(fa.Lhs)
+			index := fields.Get(fa.Rhs)
+
+			return func(fbr *fiber) (Value, *Exception) {
+				lhs, err := value(fbr)
+				if err != nil {
+					return lhs, err
+				}
+
+				if obj, ok := lhs.AsObject(); ok {
+					_, exists := obj[index]
+					return BoxBool(exists), nil
+				}
+
+				panic("not an object")
+			}
+		}
+
+		if sc, isSubscript := node.Value.(ast.Subscript); isSubscript {
+			value := vm.compile(sc.Lhs)
+			if key, isString := sc.Key.(ast.Input[string]); isString {
+				index := fields.Get(key.Value)
+				return func(fbr *fiber) (Value, *Exception) {
+					lhs, err := value(fbr)
+					if err != nil {
+						return lhs, err
+					}
+
+					if obj, ok := lhs.AsObject(); ok {
+						_, exists := obj[index]
+						return BoxBool(exists), nil
+					}
+
+					panic("not an object")
+				}
+			}
+
+			panic("implement non-string key exists")
+
+		}
 	}
 
 	panic(fmt.Errorf("implement %T", node))
@@ -194,6 +259,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 		pkg := vm.rt.packages[name]
 		if pkg == nil {
 			pkg = vm.cp.resolver(name).(*packageInstance)
+			pkg.name = name
 
 			// save as loaded package
 			vm.rt.packages[name] = pkg
@@ -428,6 +494,25 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 			}
 
 			switch lhs := variable.(type) {
+			case local:
+				// compile new value & return setter
+				value := vm.compile(node.Value)
+				index := fields.Get(fa.Rhs)
+				return func(fbr *fiber) (Value, *Exception) {
+					lhs := fbr.get(lhs)
+
+					if obj, ok := lhs.AsObject(); ok {
+						value, err := value(fbr)
+						if err != nil {
+							return value, err
+						}
+
+						obj[index] = value
+						return Value{}, nil
+					}
+					panic("not an object")
+				}
+
 			case Global:
 				if lhs.IsStatic {
 					if pkg, ok := lhs.asPackage(); ok {
@@ -1347,6 +1432,25 @@ func (vm *Instance) emitNeg(node ast.Neg) instruction {
 			return BoxNumber(-float), nil
 		}
 		return Value{}, RuntimeExceptionF("Cannot negate '%v'.", value)
+	}
+}
+
+func (vm *Instance) emitCatch(node ast.Catch) instruction {
+	action := vm.compile(node.Action)
+
+	return func(fbr *fiber) (Value, *Exception) {
+		v, err := action(fbr)
+		if err != nil {
+			if err != returnSignal && err != continueSignal && err != breakSignal {
+				// convert exception to error-as-value and return
+				return BoxException(err), nil
+			}
+
+			// propagate as normal
+			return v, err
+		}
+
+		return v, nil
 	}
 }
 

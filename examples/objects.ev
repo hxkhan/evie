@@ -1,0 +1,12 @@
+package main imports("io")
+
+fn main() {
+    obj := {name: "John", age: 22}
+
+    io.println(obj)
+    io.println(obj.email?) // false
+
+    obj.email = "john03@gmail.com"
+    io.println(obj)
+    io.println(obj.email?) // true
+}

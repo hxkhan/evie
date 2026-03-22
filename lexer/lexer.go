@@ -100,8 +100,13 @@ START:
 			}
 			goto START
 		}
-
 		return lex.simple(lex.option('=', "/=", "/"))
+
+	case '?':
+		return lex.simple("?")
+	case '!':
+		return lex.simple("!")
+
 	case '>':
 		return lex.simple(lex.option('=', ">=", ">"))
 	case '<':

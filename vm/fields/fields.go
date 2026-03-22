@@ -2,13 +2,20 @@ package fields
 
 type ID int
 
-var registry = map[string]ID{}
+var registryA = map[string]ID{}
+var registryB = map[ID]string{}
 
 func Get(name string) ID {
-	index, exists := registry[name]
+	index, exists := registryA[name]
 	if !exists {
-		registry[name] = ID(len(registry))
-		return ID(len(registry) - 1)
+		id := ID(len(registryA))
+		registryA[name] = id
+		registryB[id] = name
+		return id
 	}
 	return index
+}
+
+func Lookup(id ID) string {
+	return registryB[id]
 }

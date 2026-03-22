@@ -1,4 +1,4 @@
-package main
+package main imports("io")
 
 fn fib(n) unsynced {
     if n < 2 {
@@ -7,11 +7,10 @@ fn fib(n) unsynced {
     return fib(n-1) + fib(n-2)
 }
 
-// go run ./cli -t ./examples/unsynced.ev
 fn main() {
     a := go fib(35)
     b := go fib(35)
     c := go fib(35)
 
-    echo await.all(a, b, c)
+    io.println(await.all(a, b, c))
 }

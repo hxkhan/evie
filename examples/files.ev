@@ -1,6 +1,5 @@
 package main imports("fs")
 
-// go run ./cli -t ./examples/files.ev
 fn main() {
     version1()
 }

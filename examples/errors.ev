@@ -1,32 +1,28 @@
 package main
 
 fn main() {
-    a := go fib(35)
-    b := go fib(35)
-    c := go fib(35)
-
-    results := await.all(a, b, c) // awaits will implicitly convert values to errors incase of error
+    //echo "Hello World"
+    example()
 }
 
 fn example() {
-    a := 5 + "10" // crash the program
-    echo a        // we don't make it here
+    //a := 5 + "10" // crash the program
+    //echo a        // we don't make it here
 
-    b := catch => 5 + "10" // returns error
-    echo b                 // <error>
+    b := catch(5 + "10")
 
     // handle the error
     if b is error {
-        echo b.message() // cannot add a value of type `number` & `string`
+        echo b.message // cannot add a value of type `number` & `string`
     }
 
     // make errors
-    return error("this is my new error")
+    /* return error("this is my new error")
     return error.wrap("failed to do something", b)
 
     // throw errors
     throw error("this is my new error")
-    throw error.wrap("failed to do something", b)
+    throw error.wrap("failed to do something", b) */
 }
 
 /* timeout := go time.wait(30)

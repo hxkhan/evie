@@ -18,9 +18,9 @@ Evie is a dynamically typed programming language written in Go. The goal is to p
     <img src="./docs/images/go.png" width="500" alt="A snippet of Evie code">
 </a>
 
-To test this exact program, run `go run ./cli -t ./examples/go.ev`. Then remove all of the `go` keywords infront of the `print` calls and re-run to see the difference. This is still single threaded by the way. It is concurrent yes. But single threaded and safe. The `go` keyword just schedules it for execution, but they only run when `main` returns or yields via `await`. You can say Evie by default has a [GIL](https://en.wikipedia.org/wiki/Global_interpreter_lock) (Global Interpreter Lock).
+To test this exact program, run `go run ./evie -t ./examples/go.ev`. Then remove all of the `go` keywords infront of the `print` calls and re-run to see the difference. This is still single threaded by the way. It is concurrent yes. But single threaded and safe. The `go` keyword just schedules it for execution, but they only run when `main` returns or yields via `await`. You can say Evie by default has a [GIL](https://en.wikipedia.org/wiki/Global_interpreter_lock) (Global Interpreter Lock).
 
-> The flag `-t` prints the execution time of just Evie, i.e. total time `-` the time it took to compile Evie itself. You could alternatively build Evie first by doing `go build ./cli`, as shown at the bottom of this page.
+> The flag `-t` prints the execution time of just Evie, i.e. total time `-` the time it took to compile Evie itself. You could alternatively build Evie first by doing `go build ./evie`, as shown at the bottom of this page.
 
 > Also you need Go installed of course. But don't worry as it is probably the simplest language to setup. See [here](https://go.dev/doc/install).
 
@@ -49,12 +49,11 @@ I did not want to make the same mistake as Python. That is, not providing a mean
 - Variables ✅
 - Functions ✅
 - Primative types (`number` `bool` `nil`) ✅
-- Reference types (`string` `function`) ✅
-- Control flow (`if` `else`) ✅
-- Control flow (`switch` `while`) ✅
-- Control flow (`for`) ❌
-- Control flow (`break` `continue`) ✅
-- Operators (`+` `-` `*` `/` `%` `==` `<` `>`) ✅
+- Reference types (`string` `function` `object`) ✅
+- Control flow (`if` `else` `while` `break` `continue`) ✅
+- Control flow (`for` `switch`) ❌
+- Operators (`+` `-` `*` `/` `%` `==` `<` `>`, `?`) ✅
+- Operators (`!`, `&&`, `||`) ❌
 - Concurrency (basics work but needs *polishing*) ⏳
 - Scoping (global, function, block) ✅
 - Error handling (exceptions) ⏳
@@ -80,16 +79,16 @@ Why `fib(35)`? Because Evie barely has a standard library so micro-benchmarks is
 - Conditional logic
 
 # Setup
-All of these exist in the [examples](./examples) directory. To build the evie cli you can do:
+All of these exist in the [examples](./examples) directory. To build evie you can do:
 1. First install go from [here](https://go.dev/doc/install)
 2. Then git clone this repo
-3. Build the standalone cli
+3. Build evie
 4. Use it like any other language
 ```
 git clone https://github.com/hxkhan/evie.git
 cd evie
-go build ./cli
-time ./cli ./examples/fib.ev
+go build ./evie
+time ./evie ./examples/fib.ev
 ```
 
 To benchmark the other languages, you can grab your own versions from their respective websites. For example; if you have python installed then just do `time python ./examples/fib.py`, you might have to change `python` for `python3`.

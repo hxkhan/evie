@@ -31,7 +31,8 @@ RULES:
 	7.  array:   the pointer has to be none of (f64Type, boolType); the scalar has to be arrayType
 	8.  task:    the pointer has to be none of (f64Type, boolType); the scalar has to be taskType
 	9.  buffer:  the pointer has to be none of (f64Type, boolType); the scalar has to be bufferType
-	10. custom:  the pointer has to be none of (f64Type, boolType); the scalar has to be customType
+	10. error:   the pointer has to be none of (f64Type, boolType); the scalar has to be errorType
+	11. custom:  the pointer has to be none of (f64Type, boolType); the scalar has to be customType
 
 Another alternative to these two is using this exact same Value struct with different rules.
 The scalar would use nan-tagging and would either be a valid float64 or a NaN and contain meta data that
@@ -55,6 +56,8 @@ const (
 	taskType
 	packageType
 	bufferType
+	errorType
+	objectType
 	customType
 )
 
@@ -62,7 +65,7 @@ const (
 var f64Type = unsafe.Pointer(new(byte))
 var boolType = unsafe.Pointer(new(byte))
 
-// scalar types
+// type ids
 var strTypeID = unsafe.Pointer(new(byte))
 var arrayTypeID = unsafe.Pointer(new(byte))
 
@@ -143,6 +146,11 @@ func BoxArray(array []Value) Value {
 	return Value{scalar: arrayType, pointer: unsafe.Pointer(&array)}
 }
 
+// BoxObject boxes an evie object
+func BoxObject(obj map[fields.ID]Value) Value {
+	return Value{scalar: objectType, pointer: unsafe.Pointer(&obj)}
+}
+
 // BoxTask boxes an evie task
 func BoxTask(task chan evaluation) Value {
 	return Value{scalar: taskType, pointer: unsafe.Pointer(&task)}
@@ -165,6 +173,11 @@ func boxMethod(m Method) Value {
 // BoxBuffer boxes a Golang byte slice
 func BoxBuffer(bytes []byte) Value {
 	return Value{scalar: bufferType, pointer: unsafe.Pointer(&bytes)}
+}
+
+// BoxException boxes an evie Exception
+func BoxException(e *Exception) Value {
+	return Value{scalar: errorType, pointer: unsafe.Pointer(e)}
 }
 
 // BoxCustom boxes a value of a custom type
@@ -217,6 +230,13 @@ func (x Value) AsArray() (array []Value, ok bool) {
 	return *(*[]Value)(x.pointer), true
 }
 
+func (x Value) AsObject() (obj map[fields.ID]Value, ok bool) {
+	if x.scalar != objectType || isKnown(x.pointer) {
+		return nil, false
+	}
+	return *(*map[fields.ID]Value)(x.pointer), true
+}
+
 func (x Value) AsTask() (task <-chan evaluation, ok bool) {
 	if x.scalar != taskType || isKnown(x.pointer) {
 		return nil, false
@@ -250,6 +270,13 @@ func (x Value) AsBuffer() (buffer []byte, ok bool) {
 		return nil, false
 	}
 	return *(*[]byte)(x.pointer), true
+}
+
+func (x Value) AsException() (e *Exception, ok bool) {
+	if x.scalar != errorType || isKnown(x.pointer) {
+		return nil, false
+	}
+	return (*Exception)(x.pointer), true
 }
 
 func (x Value) AsCustom() (cv CustomValue, ok bool) {
@@ -291,12 +318,18 @@ func (x Value) IsTruthy() bool {
 	case arrayType:
 		array := *(*[]Value)(x.pointer)
 		return len(array) != 0
+	case objectType:
+		obj := *(*map[fields.ID]Value)(x.pointer)
+		return len(obj) != 0
 	case taskType:
 		task := *(*chan evaluation)(x.pointer)
 		return len(task) != 0
 	case bufferType:
 		array := *(*[]Value)(x.pointer)
 		return len(array) != 0
+	case errorType:
+		exc := (*Exception)(x.pointer)
+		return exc != nil
 	case customType:
 		cv := *(*CustomValue)(x.pointer)
 		return cv.IsTruthy()
@@ -376,6 +409,36 @@ func (x Value) String() string {
 		builder.WriteByte(']')
 		return builder.String()
 
+	case objectType:
+		obj := *(*map[fields.ID]Value)(x.pointer)
+
+		builder := strings.Builder{}
+		builder.WriteByte('{')
+
+		iter := 0
+		for i, v := range obj {
+			builder.WriteString(fields.Lookup(i))
+			builder.WriteByte(':')
+			builder.WriteByte(' ')
+
+			if str, ok := v.AsString(); ok {
+				builder.WriteByte('"')
+				builder.WriteString(str)
+				builder.WriteByte('"')
+			} else {
+				builder.WriteString(v.String())
+			}
+
+			if iter != len(obj)-1 {
+				builder.WriteString(", ")
+			}
+
+			iter += 1
+		}
+
+		builder.WriteByte('}')
+		return builder.String()
+
 	case taskType:
 		return "<task>"
 	case packageType:
@@ -384,6 +447,9 @@ func (x Value) String() string {
 		return "<method>"
 	case bufferType:
 		return fmt.Sprintf("<buffer: %v>", x.pointer)
+	case errorType:
+		exc := (*Exception)(x.pointer)
+		return fmt.Sprintf("<error: %v>", exc.message)
 	case customType:
 		cv := (*(*CustomValue)(x.pointer))
 		return cv.String()
@@ -409,6 +475,8 @@ func (x Value) TypeOf() string {
 		return "function"
 	case arrayType:
 		return "array"
+	case objectType:
+		return "object"
 	case taskType:
 		return "task"
 	case packageType:
@@ -417,6 +485,8 @@ func (x Value) TypeOf() string {
 		return "method"
 	case bufferType:
 		return "buffer"
+	case errorType:
+		return "error"
 	case customType:
 		cv := (*(*CustomValue)(x.pointer))
 		return cv.TypeOf()
@@ -465,6 +535,16 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 
 		m := Method{this: x, fn: *value}
 		return boxMethod(m), true
+
+	case objectType:
+		obj := *(*map[fields.ID]Value)(x.pointer)
+
+		value, exists := obj[f]
+		if !exists {
+			return Value{}, false
+		}
+
+		return value, true
 
 	case packageType:
 		pkg := (*packageInstance)(x.pointer)

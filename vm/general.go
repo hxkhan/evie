@@ -163,7 +163,7 @@ func (vm *Instance) GetPackage(name string) (pkg Package) {
 	return pkg
 }
 
-func (pkg *packageInstance) SetSymbol(name string, value Value) (overridden bool) {
+func (pkg *packageInstance) SetSymbol(name string, value Value) (existed bool) {
 	index := fields.Get(name)
 	ref, exists := pkg.globals[index]
 	if exists {

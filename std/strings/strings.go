@@ -7,7 +7,7 @@ import (
 )
 
 func Construct() vm.Package {
-	pkg := vm.NewHostPackage("string")
+	pkg := vm.NewHostPackage()
 	pkg.SetSymbol("split", vm.BoxGoFunc(split))
 	return pkg
 }

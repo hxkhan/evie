@@ -28,7 +28,7 @@ var keywords = []string{
 	"if",
 	"else",
 	"await", "go",
-	"synced", "unsynced", "agnostic",
+	"synced", "unsynced", "agnostic", "catch",
 }
 
 var operators = map[string]ast.Operator{
@@ -36,12 +36,13 @@ var operators = map[string]ast.Operator{
 	"+=": ast.AddOp, "-=": ast.SubOp, "*=": ast.MulOp, "/=": ast.DivOp,
 	"==": ast.EqOp, "<": ast.LtOp, ">": ast.GtOp, "<=": ast.LtEqOp, ">=": ast.GtEqOp,
 	"||": ast.OrOp, "&&": ast.AndOp,
+	"is": ast.IsOp,
 }
 
 var precedence = map[string]int{
 	"||": 0,
 	"&&": 1,
-	"<":  2, ">": 2, "==": 2, "<=": 2, ">=": 2,
+	"<":  2, ">": 2, "==": 2, "<=": 2, ">=": 2, "is": 2,
 	"+": 3, "-": 3,
 	"*": 4, "/": 4, "%": 4,
 	".": 5,
@@ -203,6 +204,18 @@ func (ps *parser) handleWords(main token.Token, asExpr bool) ast.Node {
 			return ast.Synced{Pos: main.Line, Action: ps.parse(0, true)}
 		}
 		return ast.Synced{Pos: main.Line, Action: ps.parseBlock()}
+
+	case "catch":
+		if ps.consume("{") {
+			return ast.Catch{Pos: main.Line, Action: ps.parseBlock()}
+		} else if ps.consume("(") {
+			e := ps.parse(0, true)
+			if !ps.consume(")") {
+				panic(fmt.Errorf("'catch' expected ')' on line %v, got '%v'", ps.PeekToken().Line, ps.PeekToken().Literal))
+			}
+			return ast.Catch{Pos: main.Line, Action: e}
+		}
+		panic(fmt.Errorf("'catch' expected '(' on line %v, got '%v'", ps.PeekToken().Line, ps.PeekToken().Literal))
 
 	case "var":
 		name := ps.NextToken()
@@ -398,6 +411,38 @@ func (ps *parser) parseArgsList() []ast.Node {
 
 }
 
+func (ps *parser) parseObject(main token.Token) ast.Node {
+	obj := ast.Object{Pos: main.Line}
+
+	// empty object {}
+	if ps.consume("}") {
+		return obj
+	}
+
+	for {
+		keyTok := ps.NextToken()
+		if keyTok.Type != token.Word {
+			panic(fmt.Errorf("object expected field name on line %v, got '%v'", main.Line, keyTok.Literal))
+		}
+
+		if !ps.consume(":") {
+			panic(fmt.Errorf("object expected ':' after key '%v' on line %v, got '%v'", keyTok.Literal, main.Line, ps.PeekToken().Literal))
+		}
+
+		value := ps.parse(0, true)
+		obj.Fields = append(obj.Fields, ast.ObjectField{Key: keyTok.Literal, Value: value})
+
+		if ps.consume("}") {
+			break
+		}
+		if !ps.consume(",") {
+			panic(fmt.Errorf("object expected ',' or '}' on line %v, got '%v'", main.Line, ps.PeekToken().Literal))
+		}
+	}
+
+	return obj
+}
+
 func (ps *parser) parse(precedenceLevel int, asExpr bool) (node ast.Node) {
 	// handle parentheses explicitly
 	if ps.consume("(") {
@@ -425,6 +470,9 @@ func (ps *parser) parse(precedenceLevel int, asExpr bool) (node ast.Node) {
 
 	case main.Type == token.Word:
 		return ps.handleWords(ps.NextToken(), asExpr)
+
+	case main.IsSimple("{"):
+		node = ps.parseObject(ps.NextToken())
 
 	case main.IsSimple("-"):
 		ps.NextToken()
@@ -456,6 +504,24 @@ func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) ast.N
 			}
 			left = ast.FieldAccess{Pos: next.Line, Lhs: left, Rhs: ps.NextToken().Literal}
 			continue
+		}
+
+		// subscript access
+		if next.IsSimple("[") {
+			ps.NextToken() // consume '['
+			key := ps.parse(0, true)
+			if !ps.consume("]") {
+				panic(fmt.Errorf("'[' expected ']' on line %v, got '%v'", next.Line, ps.PeekToken().Literal))
+			}
+			left = ast.Subscript{Pos: next.Line, Lhs: left, Key: key}
+			continue
+		}
+
+		// existence check
+		if next.IsSimple("?") {
+			ps.NextToken() // consume '?'
+			left = ast.Exists{Pos: next.Line, Value: left}
+			break // ? is always the end of an expression
 		}
 
 		// function call

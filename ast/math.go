@@ -57,6 +57,8 @@ const (
 
 	OrOp
 	AndOp
+
+	IsOp
 )
 
 type BinOp struct {
@@ -95,6 +97,9 @@ func (node BinOp) String() string {
 		return fmt.Sprintf("%v || %v", node.Lhs, node.Rhs)
 	case AndOp:
 		return fmt.Sprintf("%v && %v", node.Lhs, node.Rhs)
+
+	case IsOp:
+		return fmt.Sprintf("%v is %v", node.Lhs, node.Rhs)
 	}
 
 	return "unknown"

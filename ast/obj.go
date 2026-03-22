@@ -45,3 +45,13 @@ type Exists struct {
 func (node Exists) String() string {
 	return fmt.Sprintf("%v?", node.Value)
 }
+
+type Subscript struct {
+	token.Pos
+	Lhs Node
+	Key Node
+}
+
+func (node Subscript) String() string {
+	return fmt.Sprintf("%v[%v]?", node.Lhs, node.Key)
+}

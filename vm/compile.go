@@ -215,6 +215,29 @@ func (vm *Instance) compile(node ast.Node) instruction {
 				panic("not an object")
 			}
 		}
+
+		if sc, isSubscript := node.Value.(ast.Subscript); isSubscript {
+			value := vm.compile(sc.Lhs)
+			if key, isString := sc.Key.(ast.Input[string]); isString {
+				index := fields.Get(key.Value)
+				return func(fbr *fiber) (Value, *Exception) {
+					lhs, err := value(fbr)
+					if err != nil {
+						return lhs, err
+					}
+
+					if obj, ok := lhs.AsObject(); ok {
+						_, exists := obj[index]
+						return BoxBool(exists), nil
+					}
+
+					panic("not an object")
+				}
+			}
+
+			panic("implement non-string key exists")
+
+		}
 	}
 
 	panic(fmt.Errorf("implement %T", node))

@@ -506,6 +506,18 @@ func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) ast.N
 			continue
 		}
 
+		// subscript access
+		if next.IsSimple("[") {
+			ps.NextToken() // consume '['
+			key := ps.parse(0, true)
+			if !ps.consume("]") {
+				panic(fmt.Errorf("'[' expected ']' on line %v, got '%v'", next.Line, ps.PeekToken().Literal))
+			}
+			left = ast.Subscript{Pos: next.Line, Lhs: left, Key: key}
+			continue
+		}
+
+		// existence check
 		if next.IsSimple("?") {
 			ps.NextToken() // consume '?'
 			left = ast.Exists{Pos: next.Line, Value: left}

@@ -1,4 +1,4 @@
-package main imports("time")
+package main imports("io", "time")
 
 fn main() {
     go print("one", 100)
@@ -15,5 +15,5 @@ fn main() {
 
 fn print(message, duration) {
     time.wait(duration)
-    echo message
+    io.println(message)
 }

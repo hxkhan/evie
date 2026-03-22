@@ -7,7 +7,6 @@ fn fib(n) unsynced {
     return fib(n-1) + fib(n-2)
 }
 
-// go run ./cli -t ./examples/unsynced.ev
 fn main() {
     a := go fib(35)
     b := go fib(35)

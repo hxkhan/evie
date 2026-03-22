@@ -1,0 +1,7 @@
+package main imports("io")
+
+fn main() {
+    obj := {name:"Hassan", age: 22}
+
+    io.println(obj)
+}

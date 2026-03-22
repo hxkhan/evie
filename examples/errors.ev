@@ -1,15 +1,7 @@
 package main
 
-fn error(a) {
-    
-}
-
-fn error.wrap(a) {
-    
-}
-
-type person(name, age) {
-    fn toString() {
+record error(kind, message) {
+    fn wrap(a) {
         
     }
 }
@@ -24,11 +16,10 @@ fn example() {
     //echo a        // we don't make it here
 
     b := catch(5 + "10")
-    echo b
 
     // handle the error
     if b is error {
-        echo b.message() // cannot add a value of type `number` & `string`
+        echo b.message // cannot add a value of type `number` & `string`
     }
 
     // make errors

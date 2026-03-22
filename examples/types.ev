@@ -1,0 +1,22 @@
+package main
+
+record error(kind, message) {
+    fn wrap(a) {
+        
+    }
+}
+
+record person(name, age) {
+    fn doSomething() {
+
+    }
+}
+
+fn main() {
+    custom := error {
+        kind: "NetworkError",
+        message: "TCP connection could not be established",
+        // more meta-deta can be optionally added like
+        something: 10 
+    }
+}

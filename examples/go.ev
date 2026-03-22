@@ -1,6 +1,5 @@
 package main imports("time")
 
-// go run ./cli -t ./examples/go.ev
 fn main() {
     go print("one", 100)
     go print("two", 200)

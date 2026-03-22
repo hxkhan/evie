@@ -506,6 +506,12 @@ func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) ast.N
 			continue
 		}
 
+		if next.IsSimple("?") {
+			ps.NextToken() // consume '?'
+			left = ast.Exists{Pos: next.Line, Value: left}
+			break // ? is always the end of an expression
+		}
+
 		// function call
 		if next.IsSimple("(") {
 			line := next.Line

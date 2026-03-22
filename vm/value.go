@@ -230,6 +230,13 @@ func (x Value) AsArray() (array []Value, ok bool) {
 	return *(*[]Value)(x.pointer), true
 }
 
+func (x Value) AsObject() (obj map[fields.ID]Value, ok bool) {
+	if x.scalar != objectType || isKnown(x.pointer) {
+		return nil, false
+	}
+	return *(*map[fields.ID]Value)(x.pointer), true
+}
+
 func (x Value) AsTask() (task <-chan evaluation, ok bool) {
 	if x.scalar != taskType || isKnown(x.pointer) {
 		return nil, false

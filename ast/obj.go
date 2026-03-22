@@ -36,3 +36,12 @@ func (node Object) String() string {
 
 	return out.String()
 }
+
+type Exists struct {
+	token.Pos
+	Value Node
+}
+
+func (node Exists) String() string {
+	return fmt.Sprintf("%v?", node.Value)
+}

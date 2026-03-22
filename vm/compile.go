@@ -195,6 +195,26 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			}
 			return BoxObject(obj), nil
 		}
+
+	case ast.Exists:
+		if fa, isFieldAccess := node.Value.(ast.FieldAccess); isFieldAccess {
+			value := vm.compile(fa.Lhs)
+			index := fields.Get(fa.Rhs)
+
+			return func(fbr *fiber) (Value, *Exception) {
+				lhs, err := value(fbr)
+				if err != nil {
+					return lhs, err
+				}
+
+				if obj, ok := lhs.AsObject(); ok {
+					_, exists := obj[index]
+					return BoxBool(exists), nil
+				}
+
+				panic("not an object")
+			}
+		}
 	}
 
 	panic(fmt.Errorf("implement %T", node))
@@ -451,6 +471,25 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 			}
 
 			switch lhs := variable.(type) {
+			case local:
+				// compile new value & return setter
+				value := vm.compile(node.Value)
+				index := fields.Get(fa.Rhs)
+				return func(fbr *fiber) (Value, *Exception) {
+					lhs := fbr.get(lhs)
+
+					if obj, ok := lhs.AsObject(); ok {
+						value, err := value(fbr)
+						if err != nil {
+							return value, err
+						}
+
+						obj[index] = value
+						return Value{}, nil
+					}
+					panic("not an object")
+				}
+
 			case Global:
 				if lhs.IsStatic {
 					if pkg, ok := lhs.asPackage(); ok {

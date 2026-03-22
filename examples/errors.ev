@@ -1,11 +1,5 @@
 package main
 
-record error(kind, message) {
-    fn wrap(a) {
-        
-    }
-}
-
 fn main() {
     //echo "Hello World"
     example()

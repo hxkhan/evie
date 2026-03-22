@@ -176,6 +176,25 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 	case ast.MutableBinOp:
 		return vm.emitMutableBinOp(node)
+
+	case ast.Object:
+		items := make(map[fields.ID]instruction, len(node.Fields))
+		for _, f := range node.Fields {
+			items[fields.Get(f.Key)] = vm.compile(f.Value)
+		}
+
+		return func(fbr *fiber) (Value, *Exception) {
+			obj := make(map[fields.ID]Value, len(items))
+			for k, v := range items {
+				value, err := v(fbr)
+				if err != nil {
+					return value, err
+				}
+
+				obj[k] = value
+			}
+			return BoxObject(obj), nil
+		}
 	}
 
 	panic(fmt.Errorf("implement %T", node))

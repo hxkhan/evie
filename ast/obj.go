@@ -1,0 +1,38 @@
+package ast
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/hxkhan/evie/token"
+)
+
+type ObjectField struct {
+	Key   string
+	Value Node
+}
+
+func (node ObjectField) String() string {
+	return fmt.Sprintf("%s: %v", node.Key, node.Value)
+}
+
+type Object struct {
+	token.Pos
+	Fields []ObjectField
+}
+
+func (node Object) String() string {
+	var out strings.Builder
+
+	out.WriteString("{")
+
+	fields := []string{}
+	for _, field := range node.Fields {
+		fields = append(fields, field.String())
+	}
+
+	out.WriteString(strings.Join(fields, ", "))
+	out.WriteString("}")
+
+	return out.String()
+}

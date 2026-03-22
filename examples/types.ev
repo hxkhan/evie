@@ -6,17 +6,31 @@ record error(kind, message) {
     }
 }
 
+record string(value) {
+    fn split(delimiter) {
+
+    }
+}
+
 record person(name, age) {
-    fn doSomething() {
+    if !(name is string) {
+        throw error("TypeError", "a person's name must be a string")
+    }
+
+    fn eat(x) {
 
     }
 }
 
 fn main() {
-    custom := error {
+    c1 := error {
         kind: "NetworkError",
         message: "TCP connection could not be established",
         // more meta-deta can be optionally added like
         something: 10 
     }
+
+    c2 := error({ kind: "NetworkError", message: "TCP connection could not be established"})
+
+    c3 := error("NetworkError", "TCP connection could not be established")
 }

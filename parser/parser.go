@@ -411,6 +411,38 @@ func (ps *parser) parseArgsList() []ast.Node {
 
 }
 
+func (ps *parser) parseObject(main token.Token) ast.Node {
+	obj := ast.Object{Pos: main.Line}
+
+	// empty object {}
+	if ps.consume("}") {
+		return obj
+	}
+
+	for {
+		keyTok := ps.NextToken()
+		if keyTok.Type != token.Word {
+			panic(fmt.Errorf("object expected field name on line %v, got '%v'", main.Line, keyTok.Literal))
+		}
+
+		if !ps.consume(":") {
+			panic(fmt.Errorf("object expected ':' after key '%v' on line %v, got '%v'", keyTok.Literal, main.Line, ps.PeekToken().Literal))
+		}
+
+		value := ps.parse(0, true)
+		obj.Fields = append(obj.Fields, ast.ObjectField{Key: keyTok.Literal, Value: value})
+
+		if ps.consume("}") {
+			break
+		}
+		if !ps.consume(",") {
+			panic(fmt.Errorf("object expected ',' or '}' on line %v, got '%v'", main.Line, ps.PeekToken().Literal))
+		}
+	}
+
+	return obj
+}
+
 func (ps *parser) parse(precedenceLevel int, asExpr bool) (node ast.Node) {
 	// handle parentheses explicitly
 	if ps.consume("(") {
@@ -438,6 +470,9 @@ func (ps *parser) parse(precedenceLevel int, asExpr bool) (node ast.Node) {
 
 	case main.Type == token.Word:
 		return ps.handleWords(ps.NextToken(), asExpr)
+
+	case main.IsSimple("{"):
+		node = ps.parseObject(ps.NextToken())
 
 	case main.IsSimple("-"):
 		ps.NextToken()

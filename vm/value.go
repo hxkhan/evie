@@ -57,6 +57,7 @@ const (
 	packageType
 	bufferType
 	errorType
+	objectType
 	customType
 )
 
@@ -143,6 +144,11 @@ func BoxGoFuncUnsynced[T SafeGoFunc](fn T) Value {
 // BoxArray boxes an evie array
 func BoxArray(array []Value) Value {
 	return Value{scalar: arrayType, pointer: unsafe.Pointer(&array)}
+}
+
+// BoxObject boxes an evie object
+func BoxObject(obj map[fields.ID]Value) Value {
+	return Value{scalar: objectType, pointer: unsafe.Pointer(&obj)}
 }
 
 // BoxTask boxes an evie task
@@ -305,6 +311,9 @@ func (x Value) IsTruthy() bool {
 	case arrayType:
 		array := *(*[]Value)(x.pointer)
 		return len(array) != 0
+	case objectType:
+		obj := *(*map[fields.ID]Value)(x.pointer)
+		return len(obj) != 0
 	case taskType:
 		task := *(*chan evaluation)(x.pointer)
 		return len(task) != 0
@@ -393,6 +402,36 @@ func (x Value) String() string {
 		builder.WriteByte(']')
 		return builder.String()
 
+	case objectType:
+		obj := *(*map[fields.ID]Value)(x.pointer)
+
+		builder := strings.Builder{}
+		builder.WriteByte('{')
+
+		iter := 0
+		for i, v := range obj {
+			builder.WriteString(fields.Lookup(i))
+			builder.WriteByte(':')
+			builder.WriteByte(' ')
+
+			if str, ok := v.AsString(); ok {
+				builder.WriteByte('"')
+				builder.WriteString(str)
+				builder.WriteByte('"')
+			} else {
+				builder.WriteString(v.String())
+			}
+
+			if iter != len(obj)-1 {
+				builder.WriteString(", ")
+			}
+
+			iter += 1
+		}
+
+		builder.WriteByte('}')
+		return builder.String()
+
 	case taskType:
 		return "<task>"
 	case packageType:
@@ -429,6 +468,8 @@ func (x Value) TypeOf() string {
 		return "function"
 	case arrayType:
 		return "array"
+	case objectType:
+		return "object"
 	case taskType:
 		return "task"
 	case packageType:
@@ -487,6 +528,16 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 
 		m := Method{this: x, fn: *value}
 		return boxMethod(m), true
+
+	case objectType:
+		obj := *(*map[fields.ID]Value)(x.pointer)
+
+		value, exists := obj[f]
+		if !exists {
+			return Value{}, false
+		}
+
+		return value, true
 
 	case packageType:
 		pkg := (*packageInstance)(x.pointer)

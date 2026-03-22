@@ -1,7 +1,9 @@
 package main imports("io")
 
 fn main() {
-    obj := {name:"Hassan", age: 22}
+    obj := {name: "John", age: 22}
 
     io.println(obj)
+    io.println(obj.name)
+    io.println(obj.age)
 }

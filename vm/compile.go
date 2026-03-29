@@ -100,7 +100,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			return Value{}, continueSignal
 		}
 
-	case ast.Unsynced:
+	/* case ast.Unsynced:
 		vm.cp.modes.Push(ast.UnsyncedMode)
 		action := vm.compile(node.Action)
 		vm.cp.modes.Pop()
@@ -142,7 +142,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			vm.rt.ReleaseGIL()
 
 			return res, err
-		}
+		} */
 
 	case ast.Catch:
 		return vm.emitCatch(node)
@@ -299,18 +299,12 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 				panic(fmt.Errorf("double declaration of %s", fn.Name))
 			}
 
-			mode := fn.SyncMode
-			// effectively inherits from global which is synced
-			if mode == ast.UndefinedMode {
-				mode = ast.SyncedMode
-			}
-
 			// create a stub for now
 			fn := BoxUserFn(UserFn{
 				funcInfoStatic: &funcInfoStatic{
 					name: fn.Name,
 					args: fn.Args,
-					mode: mode,
+					mode: fn.SyncMode,
 					vm:   vm,
 				},
 			})
@@ -715,28 +709,16 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					// save current state
 					prevBase := fbr.swapBase(base)
 
-					// correctly invoke ourselves (mode can still change)
-					synced := fn.Synced()
-					switch {
 					// no transition
-					case fbr.synced() == synced || fn.mode == ast.AgnosticMode:
+					if fn.mode == ast.UndefinedMode || fbr.synced() {
 						result, exc = fn.code(fbr)
-
-					// to synced
-					case synced:
+					} else {
+						// transition unsynced -> synced
 						vm.rt.AcquireGIL()
 						fbr.unsynchronized = false
 						result, exc = fn.code(fbr)
 						fbr.unsynchronized = true
 						vm.rt.ReleaseGIL()
-
-					// to unsynced
-					default:
-						vm.rt.ReleaseGIL()
-						fbr.unsynchronized = true
-						result, exc = fn.code(fbr)
-						fbr.unsynchronized = false
-						vm.rt.AcquireGIL()
 					}
 
 					// restore old state
@@ -782,28 +764,16 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				prevBase := fbr.swapBase(base)
 				prevFn := fbr.swapActive(fn)
 
-				// correctly invoke the function
-				synced := fn.Synced()
-				switch {
 				// no transition
-				case fbr.synced() == synced || fn.mode == ast.AgnosticMode:
+				if fn.mode == ast.UndefinedMode || fbr.synced() {
 					result, exc = fn.code(fbr)
-
-				// to synced
-				case synced:
+				} else {
+					// transition unsynced -> synced
 					vm.rt.AcquireGIL()
 					fbr.unsynchronized = false
 					result, exc = fn.code(fbr)
 					fbr.unsynchronized = true
 					vm.rt.ReleaseGIL()
-
-				// to unsynced
-				default:
-					vm.rt.ReleaseGIL()
-					fbr.unsynchronized = true
-					result, exc = fn.code(fbr)
-					fbr.unsynchronized = false
-					vm.rt.AcquireGIL()
 				}
 
 				// restore old state
@@ -912,28 +882,16 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			prevBase := fbr.swapBase(base)
 			prevFn := fbr.swapActive(fn)
 
-			// correctly invoke the function
-			synced := fn.Synced()
-			switch {
 			// no transition
-			case fbr.synced() == synced || fn.mode == ast.AgnosticMode:
+			if fn.mode == ast.UndefinedMode || fbr.synced() {
 				result, exc = fn.code(fbr)
-
-			// to synced
-			case synced:
+			} else {
+				// transition unsynced -> synced
 				vm.rt.AcquireGIL()
 				fbr.unsynchronized = false
 				result, exc = fn.code(fbr)
 				fbr.unsynchronized = true
 				vm.rt.ReleaseGIL()
-
-			// to unsynced
-			default:
-				vm.rt.ReleaseGIL()
-				fbr.unsynchronized = true
-				result, exc = fn.code(fbr)
-				fbr.unsynchronized = false
-				vm.rt.AcquireGIL()
 			}
 
 			// restore old state
@@ -1002,16 +960,6 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					params[i] = arg
 				}
 
-				// decide sync mode
-				unsynced := fbr.unsynchronized
-				// overide if explicitly specified
-				switch fn.mode {
-				case ast.UnsyncedMode:
-					unsynced = true
-				case ast.SyncedMode:
-					unsynced = false
-				}
-
 				task := make(chan evaluation, 1)
 				vm.rt.wg.Go(func() {
 					// setup new fiber
@@ -1019,7 +967,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					fbr.active = fn
 					fbr.base = 0
 					fbr.stack = fbr.stack[:0]
-					fbr.unsynchronized = unsynced
+					fbr.unsynchronized = fn.mode != ast.SyncedMode
 
 					// setup stack locals
 					for idx, escapes := range fn.locals {
@@ -1036,7 +984,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					}
 
 					// run code
-					if fbr.unsynced() {
+					if fn.mode == ast.UndefinedMode {
 						result, exc = fn.code(fbr)
 					} else {
 						vm.rt.AcquireGIL()
@@ -1070,23 +1018,13 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					return Value{}, CustomError("function requires %v argument(s), %v provided", fn.nargs, len(arguments))
 				}
 
-				// decide sync mode
-				unsynced := fbr.unsynchronized
-				// overide if explicitly specified
-				switch fn.mode {
-				case ast.UnsyncedMode:
-					unsynced = true
-				case ast.SyncedMode:
-					unsynced = false
-				}
-
 				task := make(chan evaluation, 1)
 				vm.rt.wg.Go(func() {
 					var result Value
 					var exc *Exception
 
 					// run code
-					if unsynced {
+					if fn.mode == ast.UndefinedMode {
 						result, exc = fn.invoke(fbr, arguments)
 					} else {
 						vm.rt.AcquireGIL()

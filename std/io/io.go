@@ -26,14 +26,14 @@ var println = vm.BoxGoFunc(func(output vm.Value) (vm.Value, *vm.Exception) {
 	return vm.Value{}, nil
 })
 
-var prompt = vm.BoxGoFuncUnsynced(func(output vm.Value) (vm.Value, *vm.Exception) {
+var prompt = vm.BoxGoFunc(func(output vm.Value) (vm.Value, *vm.Exception) {
 	fmt.Print(output)
 	var input string
 	fmt.Scanln(&input)
 	return vm.BoxString(input), nil
 })
 
-var readln = vm.BoxGoFuncUnsynced(func() (vm.Value, *vm.Exception) {
+var readln = vm.BoxGoFunc(func() (vm.Value, *vm.Exception) {
 	var input string
 	fmt.Scanln(&input)
 	return vm.BoxString(input), nil

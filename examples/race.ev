@@ -10,8 +10,7 @@ fn main() {
     io.println(count) // are we expecting 10000?
 }
 
-// play with removing the unsynced keyword
-fn incrementer(times) unsynced {
+fn incrementer(times) {
     while times > 0 {
         count += 1
         times -= 1

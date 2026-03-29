@@ -198,7 +198,7 @@ func (m Method) call(fbr *fiber, arguments []instruction) (result Value, exc *Ex
 		return Value{}, CustomError("method requires %v argument(s), %v provided", fn.nargs-1, len(arguments))
 	}
 
-	if fn.mode != ast.AgnosticMode {
+	/* if fn.mode != ast.AgnosticMode {
 		synced := fn.Synced()
 		switch {
 		// no transition
@@ -215,7 +215,7 @@ func (m Method) call(fbr *fiber, arguments []instruction) (result Value, exc *Ex
 			fbr.vm.rt.AcquireGIL()
 			defer fbr.vm.rt.ReleaseGIL()
 		}
-	}
+	} */
 
 	switch fn.nargs {
 	case -1:
@@ -252,28 +252,19 @@ func (fn *GoFunc) call(fbr *fiber, arguments []instruction) (result Value, exc *
 		return Value{}, CustomError("function requires %v argument(s), %v provided", fn.nargs, len(arguments))
 	}
 
-	// no sync mode transition needed
-	if fn.mode == ast.AgnosticMode {
-		return fn.invoke(fbr, arguments)
-	} else if fn.Synced() == fbr.synced() {
+	// no transition
+	if fn.mode == ast.UndefinedMode || fbr.synced() {
 		return fn.invoke(fbr, arguments)
 	}
 
-	return fn.callTransition(fbr, arguments)
-}
-
-func (fn *GoFunc) callTransition(fbr *fiber, arguments []instruction) (result Value, exc *Exception) {
-	if fn.mode == ast.UnsyncedMode {
-		fbr.vm.rt.ReleaseGIL()
-		result, exc = fn.invoke(fbr, arguments)
-		fbr.vm.rt.AcquireGIL()
-		return
-	}
-
+	// transition unsynced -> synced
 	fbr.vm.rt.AcquireGIL()
+	fbr.unsynchronized = false
 	result, exc = fn.invoke(fbr, arguments)
+	fbr.unsynchronized = true
 	fbr.vm.rt.ReleaseGIL()
-	return
+
+	return result, exc
 }
 
 // just call; no args check; no GIL consideration

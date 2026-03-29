@@ -116,7 +116,7 @@ func BoxGoFunc[T SafeGoFunc](fn T) Value {
 	ptr := unsafe.Pointer(&GoFunc{
 		nargs: reflect.TypeOf(fn).NumIn(),
 		ptr:   unsafe.Pointer(&fn),
-		mode:  ast.AgnosticMode,
+		mode:  ast.UndefinedMode,
 	})
 	return Value{scalar: goFuncType, pointer: ptr}
 }
@@ -127,16 +127,6 @@ func BoxGoFuncSynced[T SafeGoFunc](fn T) Value {
 		nargs: reflect.TypeOf(fn).NumIn(),
 		ptr:   unsafe.Pointer(&fn),
 		mode:  ast.SyncedMode,
-	})
-	return Value{scalar: goFuncType, pointer: ptr}
-}
-
-// BoxGoFunc boxes an unsynced Go function that yields on all calls
-func BoxGoFuncUnsynced[T SafeGoFunc](fn T) Value {
-	ptr := unsafe.Pointer(&GoFunc{
-		nargs: reflect.TypeOf(fn).NumIn(),
-		ptr:   unsafe.Pointer(&fn),
-		mode:  ast.UnsyncedMode,
 	})
 	return Value{scalar: goFuncType, pointer: ptr}
 }

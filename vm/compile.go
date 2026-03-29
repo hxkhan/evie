@@ -710,14 +710,14 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					prevBase := fbr.swapBase(base)
 
 					// no transition
-					if fn.mode == ast.UndefinedMode || fbr.synced() {
+					if fn.mode == ast.UndefinedMode || fbr.synced {
 						result, exc = fn.code(fbr)
 					} else {
 						// transition unsynced -> synced
 						vm.rt.AcquireGIL()
-						fbr.unsynchronized = false
+						fbr.synced = true
 						result, exc = fn.code(fbr)
-						fbr.unsynchronized = true
+						fbr.synced = false
 						vm.rt.ReleaseGIL()
 					}
 
@@ -765,14 +765,14 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				prevFn := fbr.swapActive(fn)
 
 				// no transition
-				if fn.mode == ast.UndefinedMode || fbr.synced() {
+				if fn.mode == ast.UndefinedMode || fbr.synced {
 					result, exc = fn.code(fbr)
 				} else {
 					// transition unsynced -> synced
 					vm.rt.AcquireGIL()
-					fbr.unsynchronized = false
+					fbr.synced = true
 					result, exc = fn.code(fbr)
-					fbr.unsynchronized = true
+					fbr.synced = false
 					vm.rt.ReleaseGIL()
 				}
 
@@ -883,14 +883,14 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			prevFn := fbr.swapActive(fn)
 
 			// no transition
-			if fn.mode == ast.UndefinedMode || fbr.synced() {
+			if fn.mode == ast.UndefinedMode || fbr.synced {
 				result, exc = fn.code(fbr)
 			} else {
 				// transition unsynced -> synced
 				vm.rt.AcquireGIL()
-				fbr.unsynchronized = false
+				fbr.synced = true
 				result, exc = fn.code(fbr)
-				fbr.unsynchronized = true
+				fbr.synced = false
 				vm.rt.ReleaseGIL()
 			}
 
@@ -967,7 +967,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					fbr.active = fn
 					fbr.base = 0
 					fbr.stack = fbr.stack[:0]
-					fbr.unsynchronized = fn.mode != ast.SyncedMode
+					fbr.synced = fn.mode == ast.SyncedMode
 
 					// setup stack locals
 					for idx, escapes := range fn.locals {
@@ -1096,13 +1096,13 @@ func (vm *Instance) emitAwait(node ast.Await) instruction {
 		}
 
 		if task, ok := v.AsTask(); ok {
-			if fbr.synced() {
+			if fbr.synced {
 				vm.rt.ReleaseGIL()
 			}
 
 			response, ok := <-task
 
-			if fbr.synced() {
+			if fbr.synced {
 				vm.rt.AcquireGIL()
 			}
 
@@ -1140,7 +1140,7 @@ func (vm *Instance) emitAwaitAll(node ast.AwaitAll) instruction {
 		}
 
 		// release GIL if synced
-		if fbr.synced() {
+		if fbr.synced {
 			vm.rt.ReleaseGIL()
 		}
 
@@ -1150,7 +1150,7 @@ func (vm *Instance) emitAwaitAll(node ast.AwaitAll) instruction {
 
 			if !ok {
 				// acquire GIL if synced
-				if fbr.synced() {
+				if fbr.synced {
 					vm.rt.AcquireGIL()
 				}
 				return Value{}, CustomError("cannot await on a finished task")
@@ -1158,7 +1158,7 @@ func (vm *Instance) emitAwaitAll(node ast.AwaitAll) instruction {
 
 			if response.err != nil {
 				// acquire GIL if synced
-				if fbr.synced() {
+				if fbr.synced {
 					vm.rt.AcquireGIL()
 				}
 				return response.result, response.err
@@ -1168,7 +1168,7 @@ func (vm *Instance) emitAwaitAll(node ast.AwaitAll) instruction {
 		}
 
 		// acquire GIL if synced
-		if fbr.synced() {
+		if fbr.synced {
 			vm.rt.AcquireGIL()
 		}
 

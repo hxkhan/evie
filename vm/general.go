@@ -111,7 +111,7 @@ func (vm *Instance) EvalNode(node ast.Node) (result Value, err error) {
 		result = v
 	} else {
 		fbr := vm.rt.fibers.Get().(*fiber)
-		fbr.unsynchronized = false
+		fbr.synced = true
 		fbr.active = &UserFn{funcInfoStatic: &funcInfoStatic{name: "anonymous"}}
 		fbr.base = 0
 		fbr.stack = fbr.stack[:0]

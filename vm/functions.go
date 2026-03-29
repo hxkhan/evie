@@ -59,7 +59,7 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 
 	// fetch a fiber and reset it
 	fbr := vm.rt.fibers.Get().(*fiber)
-	fbr.unsynchronized = false
+	fbr.synced = true
 	fbr.active = fn
 	fbr.base = 0
 	fbr.stack = fbr.stack[:0]
@@ -253,15 +253,15 @@ func (fn *GoFunc) call(fbr *fiber, arguments []instruction) (result Value, exc *
 	}
 
 	// no transition
-	if fn.mode == ast.UndefinedMode || fbr.synced() {
+	if fn.mode == ast.UndefinedMode || fbr.synced {
 		return fn.invoke(fbr, arguments)
 	}
 
 	// transition unsynced -> synced
 	fbr.vm.rt.AcquireGIL()
-	fbr.unsynchronized = false
+	fbr.synced = true
 	result, exc = fn.invoke(fbr, arguments)
-	fbr.unsynchronized = true
+	fbr.synced = false
 	fbr.vm.rt.ReleaseGIL()
 
 	return result, exc

@@ -28,7 +28,7 @@ var keywords = []string{
 	"if",
 	"else",
 	"await", "go",
-	"synced", "unsynced", "agnostic", "catch",
+	"synced", "catch",
 }
 
 var operators = map[string]ast.Operator{
@@ -339,12 +339,8 @@ func (ps *parser) parseFn(main token.Token, asExpr bool) ast.Node {
 
 	// sync mode
 	switch {
-	case ps.consume("agnostic"):
-		fn.SyncMode = ast.AgnosticMode
 	case ps.consume("synced"):
 		fn.SyncMode = ast.SyncedMode
-	case ps.consume("unsynced"):
-		fn.SyncMode = ast.UnsyncedMode
 	}
 
 	if ps.consume("{") {

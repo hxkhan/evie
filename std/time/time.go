@@ -8,7 +8,7 @@ import (
 
 func Construct() vm.Package {
 	pkg := vm.NewHostPackage()
-	pkg.SetSymbol("wait", vm.BoxGoFuncUnsynced(wait))
+	pkg.SetSymbol("wait", vm.BoxGoFunc(wait))
 	return pkg
 }
 

@@ -8,7 +8,7 @@ import (
 
 func Construct() vm.Package {
 	pkg := vm.NewHostPackage()
-	pkg.SetSymbol("readFile", vm.BoxGoFuncUnsynced(readFile))
+	pkg.SetSymbol("readFile", vm.BoxGoFunc(readFile))
 	return pkg
 }
 

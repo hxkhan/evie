@@ -9,15 +9,22 @@ import (
 
 type SyncMode int
 
+func (sm SyncMode) String() string {
+	switch sm {
+	case UndefinedMode:
+		return "UndefinedMode"
+	case SyncedMode:
+		return "SyncedMode"
+	}
+
+	return "UnknownMode"
+}
+
 const (
 	// Undefined mode inherits from lexical parent
 	UndefinedMode SyncMode = iota
 	// Synced mode assumes GIL
 	SyncedMode
-	// Unsynced mode assumes no GIL
-	UnsyncedMode
-	// Agnostic mode inherits from caller
-	AgnosticMode
 )
 
 type Fn struct {

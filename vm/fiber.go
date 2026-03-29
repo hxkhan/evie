@@ -1,20 +1,12 @@
 package vm
 
 type fiber struct {
-	vm             *Instance // the instance that spawned this fiber
-	unsynchronized bool      // run in unsynchronized mode or not
-	active         *UserFn   // currently active user function
-	stack          []*Value  // flat shared stack for local variables in the current call stack
-	base           int       // where locals of the active function start at
-	boxes          []Value   // pooled boxes for this fiber
-}
-
-func (fbr *fiber) synced() bool {
-	return !fbr.unsynchronized
-}
-
-func (fbr *fiber) unsynced() bool {
-	return fbr.unsynchronized
+	vm     *Instance // the instance that spawned this fiber
+	synced bool      // run in synchronized mode or not
+	active *UserFn   // currently active user function
+	stack  []*Value  // flat shared stack for local variables in the current call stack
+	base   int       // where locals of the active function start at
+	boxes  []Value   // pooled boxes for this fiber
 }
 
 func (fbr *fiber) get(binding local) *Value {

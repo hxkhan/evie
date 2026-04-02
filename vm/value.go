@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"github.com/hxkhan/evie/ast"
@@ -88,6 +89,23 @@ type SafeGoFunc interface {
 		func(Value, Value, Value, Value, Value, Value) (Value, *Exception)
 }
 
+// Array is a thread-safe equivalent of go slices
+type Array struct {
+	MU   sync.RWMutex // temporarily exported
+	Data []Value      // temporarily exported
+}
+
+func NewArray(values ...Value) *Array {
+	return &Array{Data: values}
+}
+
+// View provides a safe and consistent snapshot like view for the duration of the viewers execution
+func (arr *Array) View(viewer func(data []Value)) {
+	arr.MU.RLock()
+	defer arr.MU.RUnlock()
+	viewer(arr.Data)
+}
+
 // BoxNumber boxes a float64
 func BoxNumber(f float64) Value {
 	return Value{scalar: math.Float64bits(f), pointer: f64Type}
@@ -132,8 +150,8 @@ func BoxGoFuncSynced[T SafeGoFunc](fn T) Value {
 }
 
 // BoxArray boxes an evie array
-func BoxArray(array []Value) Value {
-	return Value{scalar: arrayType, pointer: unsafe.Pointer(&array)}
+func BoxArray(arr *Array) Value {
+	return Value{scalar: arrayType, pointer: unsafe.Pointer(arr)}
 }
 
 // BoxObject boxes an evie object
@@ -213,11 +231,11 @@ func (x Value) AsGoFunc() (fn *GoFunc, ok bool) {
 	return (*GoFunc)(x.pointer), true
 }
 
-func (x Value) AsArray() (array []Value, ok bool) {
+func (x Value) AsArray() (arr *Array, ok bool) {
 	if x.scalar != arrayType || isKnown(x.pointer) {
 		return nil, false
 	}
-	return *(*[]Value)(x.pointer), true
+	return (*Array)(x.pointer), true
 }
 
 func (x Value) AsObject() (obj map[fields.ID]Value, ok bool) {
@@ -306,8 +324,8 @@ func (x Value) IsTruthy() bool {
 		// In both JavaScript and Python, functions are inherently truthy
 		return true
 	case arrayType:
-		array := *(*[]Value)(x.pointer)
-		return len(array) != 0
+		array := (*Array)(x.pointer)
+		return len(array.Data) != 0
 	case objectType:
 		obj := *(*map[fields.ID]Value)(x.pointer)
 		return len(obj) != 0
@@ -315,8 +333,8 @@ func (x Value) IsTruthy() bool {
 		task := *(*chan evaluation)(x.pointer)
 		return len(task) != 0
 	case bufferType:
-		array := *(*[]Value)(x.pointer)
-		return len(array) != 0
+		buffer := *(*[]byte)(x.pointer)
+		return len(buffer) != 0
 	case errorType:
 		exc := (*Exception)(x.pointer)
 		return exc != nil
@@ -377,24 +395,26 @@ func (x Value) String() string {
 	case goFuncType:
 		return "<function>"
 	case arrayType:
-		array := *(*[]Value)(x.pointer)
+		array := (*Array)(x.pointer)
 
 		builder := strings.Builder{}
 		builder.WriteByte('[')
 
-		for i, v := range array {
-			if str, ok := v.AsString(); ok {
-				builder.WriteByte('"')
-				builder.WriteString(str)
-				builder.WriteByte('"')
-			} else {
-				builder.WriteString(v.String())
-			}
+		array.View(func(data []Value) {
+			for i, v := range data {
+				if str, ok := v.AsString(); ok {
+					builder.WriteByte('"')
+					builder.WriteString(str)
+					builder.WriteByte('"')
+				} else {
+					builder.WriteString(v.String())
+				}
 
-			if i != len(array)-1 {
-				builder.WriteString(", ")
+				if i != len(data)-1 {
+					builder.WriteString(", ")
+				}
 			}
-		}
+		})
 
 		builder.WriteByte(']')
 		return builder.String()

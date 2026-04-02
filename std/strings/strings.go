@@ -21,7 +21,7 @@ func split(this, sep vm.Value) (vm.Value, *vm.Exception) {
 			for i, part := range parts {
 				result[i] = vm.BoxString(part)
 			}
-			return vm.BoxArray(result), nil
+			return vm.BoxArray(vm.NewArray(result...)), nil
 		}
 	}
 	return vm.Value{}, vm.ErrTypes

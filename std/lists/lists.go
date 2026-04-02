@@ -15,9 +15,11 @@ func Construct() vm.Package {
 func join(this, sep vm.Value) (vm.Value, *vm.Exception) {
 	if parts, ok := this.AsArray(); ok {
 		if sep, ok := sep.AsString(); ok {
+			parts.MU.RLock()
+			defer parts.MU.RUnlock()
 
-			strs := make([]string, len(parts))
-			for i, part := range parts {
+			strs := make([]string, len(parts.Data))
+			for i, part := range parts.Data {
 				str, ok := part.AsString()
 				if !ok {
 					return vm.Value{}, vm.ErrTypes

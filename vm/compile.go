@@ -1176,7 +1176,7 @@ func (vm *Instance) emitAwaitAll(node ast.AwaitAll) instruction {
 			vm.rt.AcquireGIL()
 		}
 
-		return BoxArray(results), nil
+		return BoxArray(NewArray(results...)), nil
 	}
 }
 

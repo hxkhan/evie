@@ -16,7 +16,7 @@ var stringMethods = map[fields.ID]*Value{
 				for i, part := range parts {
 					result[i] = BoxString(part)
 				}
-				return BoxArray(result), nil
+				return BoxArray(NewArray(result...)), nil
 			}
 		}
 		return Value{}, ErrTypes
@@ -27,9 +27,11 @@ var arrayMethods = map[fields.ID]*Value{
 	fields.Get("join"): BoxGoFunc(func(this, sep Value) (Value, *Exception) {
 		if parts, ok := this.AsArray(); ok {
 			if sep, ok := sep.AsString(); ok {
+				parts.MU.RLock()
+				defer parts.MU.RUnlock()
 
-				strs := make([]string, len(parts))
-				for i, part := range parts {
+				strs := make([]string, len(parts.Data))
+				for i, part := range parts.Data {
 					str, ok := part.AsString()
 					if !ok {
 						return Value{}, ErrTypes

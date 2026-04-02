@@ -969,6 +969,10 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					fbr.stack = fbr.stack[:0]
 					fbr.synced = fn.mode == ast.SyncedMode
 
+					// unique locals
+					var result Value
+					var exc *Exception
+
 					// setup stack locals
 					for idx, escapes := range fn.locals {
 						if !escapes {

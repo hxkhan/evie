@@ -22,11 +22,11 @@ type parser struct {
 var keywords = []string{
 	"package", "imports",
 	"nil", "true", "false",
-	"var", "fn",
+	"var", "fn", "struct",
 	"echo",
 	"return",
-	"if",
-	"else",
+	"if", "else",
+	"is",
 	"await", "go",
 	"synced", "catch",
 }
@@ -36,13 +36,12 @@ var operators = map[string]ast.Operator{
 	"+=": ast.AddOp, "-=": ast.SubOp, "*=": ast.MulOp, "/=": ast.DivOp,
 	"==": ast.EqOp, "<": ast.LtOp, ">": ast.GtOp, "<=": ast.LtEqOp, ">=": ast.GtEqOp,
 	"||": ast.OrOp, "&&": ast.AndOp,
-	"is": ast.IsOp,
 }
 
 var precedence = map[string]int{
 	"||": 0,
 	"&&": 1,
-	"<":  2, ">": 2, "==": 2, "<=": 2, ">=": 2, "is": 2,
+	"<":  2, ">": 2, "==": 2, "<=": 2, ">=": 2,
 	"+": 3, "-": 3,
 	"*": 4, "/": 4, "%": 4,
 	".": 5,
@@ -143,7 +142,11 @@ func (ps *parser) parseStringList() []string {
 
 func (ps *parser) panic(main token.Token, expected string) {
 	context := map[string]string{
-		"fn": "function", "if": "if statement", "else": "else statement", ".": "operator '.'",
+		"fn":     "function",
+		"if":     "if statement",
+		"else":   "else statement",
+		".":      "operator '.'",
+		"struct": "struct definition",
 	}
 	what := context[main.Literal]
 	if what == "" {
@@ -166,6 +169,8 @@ func (ps *parser) handleWords(main token.Token, asExpr bool) ast.Node {
 		return ast.Echo{Pos: main.Line, Value: ps.parse(0, true)}
 	case "fn":
 		return ps.parseFn(main, asExpr)
+	case "struct":
+		return ps.parseStruct(main)
 	case "go":
 		return ast.Go{Pos: main.Line, Fn: ps.parse(0, true)}
 	case "await":
@@ -353,6 +358,23 @@ func (ps *parser) parseFn(main token.Token, asExpr bool) ast.Node {
 	return fn
 }
 
+// helper to parse a struct
+func (ps *parser) parseStruct(main token.Token) ast.Node {
+	str := ast.StructDefinition{Pos: main.Line}
+	if ps.PeekToken().Type == token.Word {
+		str.Name = ps.NextToken().Literal
+	}
+	str.Args = ps.parseNamesList(main)
+
+	if ps.consume("{") {
+		str.Action = ps.parseBlock()
+	} else {
+		ps.panic(main, "'{' or '=>'")
+	}
+
+	return str
+}
+
 // helper to parse names surrounded by parentheses
 func (ps *parser) parseNamesList(main token.Token) []string {
 	if !ps.consume("(") {
@@ -518,6 +540,13 @@ func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) ast.N
 			ps.NextToken() // consume '?'
 			left = ast.Exists{Pos: next.Line, Value: left}
 			break // ? is always the end of an expression
+		}
+
+		// instance check
+		if next.IsWord("is") {
+			ps.NextToken() // consume 'is'
+			left = ast.IsInstanceOf{Pos: next.Line, Lhs: left, Rhs: ps.parse(0, true)}
+			continue
 		}
 
 		// function call

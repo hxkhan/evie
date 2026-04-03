@@ -1,0 +1,16 @@
+package main
+
+struct person(name, age) {}
+
+fn main() {
+    echo person
+    echo string
+
+    p := person("John", 22)
+
+    if p is person {
+        echo "p is definitely a person"
+    }
+
+    echo p
+}

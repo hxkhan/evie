@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"sync"
 	"unsafe"
 
 	"github.com/hxkhan/evie/ast"
@@ -49,17 +48,20 @@ type Value struct {
 }
 
 const (
-	stringType = iota
-	userFnType
-	goFuncType
-	methodType
-	arrayType
-	taskType
-	packageType
-	bufferType
-	errorType
-	objectType
-	customType
+	kindString = iota
+	kindUserFn
+	kindGoFunc
+	kindMethod
+	kindArray
+	kindTask
+	kindPackage
+	kindBuffer
+	kindError
+	kindObject
+	kindBuiltinType
+	kindStruct
+	kindStructInstance
+	kindCustom
 )
 
 // scalar types
@@ -89,23 +91,6 @@ type SafeGoFunc interface {
 		func(Value, Value, Value, Value, Value, Value) (Value, *Exception)
 }
 
-// Array is a thread-safe equivalent of go slices
-type Array struct {
-	MU   sync.RWMutex // temporarily exported
-	Data []Value      // temporarily exported
-}
-
-func NewArray(values ...Value) *Array {
-	return &Array{Data: values}
-}
-
-// View provides a safe and consistent snapshot like view for the duration of the viewers execution
-func (arr *Array) View(viewer func(data []Value)) {
-	arr.MU.RLock()
-	defer arr.MU.RUnlock()
-	viewer(arr.Data)
-}
-
 // BoxNumber boxes a float64
 func BoxNumber(f float64) Value {
 	return Value{scalar: math.Float64bits(f), pointer: f64Type}
@@ -121,12 +106,25 @@ func BoxBool(b bool) Value {
 
 // BoxString boxes a string
 func BoxString(str string) Value {
-	return Value{scalar: stringType, pointer: unsafe.Pointer(&str)}
+	return Value{scalar: kindString, pointer: unsafe.Pointer(&str)}
 }
 
 // BoxUserFn boxes an evie function
 func BoxUserFn(fn UserFn) Value {
-	return Value{scalar: userFnType, pointer: unsafe.Pointer(&fn)}
+	return Value{scalar: kindUserFn, pointer: unsafe.Pointer(&fn)}
+}
+
+// BoxBuiltinType boxes a Go function that is a type constructor
+func BoxBuiltinType[T SafeGoFunc](name string, fn T) Value {
+	ptr := unsafe.Pointer(&BuiltinType{
+		Name: name,
+		Constructor: GoFunc{
+			nargs: reflect.TypeOf(fn).NumIn(),
+			ptr:   unsafe.Pointer(&fn),
+			mode:  ast.UndefinedMode,
+		},
+	})
+	return Value{scalar: kindBuiltinType, pointer: ptr}
 }
 
 // BoxGoFunc boxes a sync-agnostic Go function
@@ -136,7 +134,7 @@ func BoxGoFunc[T SafeGoFunc](fn T) Value {
 		ptr:   unsafe.Pointer(&fn),
 		mode:  ast.UndefinedMode,
 	})
-	return Value{scalar: goFuncType, pointer: ptr}
+	return Value{scalar: kindGoFunc, pointer: ptr}
 }
 
 // BoxGoFunc boxes a synced Go function always assuming the safety of the GIL
@@ -146,22 +144,32 @@ func BoxGoFuncSynced[T SafeGoFunc](fn T) Value {
 		ptr:   unsafe.Pointer(&fn),
 		mode:  ast.SyncedMode,
 	})
-	return Value{scalar: goFuncType, pointer: ptr}
+	return Value{scalar: kindGoFunc, pointer: ptr}
 }
 
 // BoxArray boxes an evie array
 func BoxArray(arr *Array) Value {
-	return Value{scalar: arrayType, pointer: unsafe.Pointer(arr)}
+	return Value{scalar: kindArray, pointer: unsafe.Pointer(arr)}
 }
 
 // BoxObject boxes an evie object
 func BoxObject(obj map[fields.ID]Value) Value {
-	return Value{scalar: objectType, pointer: unsafe.Pointer(&obj)}
+	return Value{scalar: kindObject, pointer: unsafe.Pointer(&obj)}
+}
+
+// BoxUserStruct boxes an evie struct
+func BoxUserStruct(obj *UserStruct) Value {
+	return Value{scalar: kindStruct, pointer: unsafe.Pointer(obj)}
+}
+
+// BoxUserStructInstance boxes an evie struct instance
+func BoxUserStructInstance(obj *UserStructInstance) Value {
+	return Value{scalar: kindStructInstance, pointer: unsafe.Pointer(obj)}
 }
 
 // BoxTask boxes an evie task
 func BoxTask(task chan evaluation) Value {
-	return Value{scalar: taskType, pointer: unsafe.Pointer(&task)}
+	return Value{scalar: kindTask, pointer: unsafe.Pointer(&task)}
 }
 
 // BoxPackage boxes an evie package
@@ -171,26 +179,26 @@ func BoxTask(task chan evaluation) Value {
 
 // Box boxes an evie package
 func (pkg *packageInstance) Box() Value {
-	return Value{scalar: packageType, pointer: unsafe.Pointer(pkg)}
+	return Value{scalar: kindPackage, pointer: unsafe.Pointer(pkg)}
 }
 
 func boxMethod(m Method) Value {
-	return Value{scalar: methodType, pointer: unsafe.Pointer(&m)}
+	return Value{scalar: kindMethod, pointer: unsafe.Pointer(&m)}
 }
 
 // BoxBuffer boxes a Golang byte slice
 func BoxBuffer(bytes []byte) Value {
-	return Value{scalar: bufferType, pointer: unsafe.Pointer(&bytes)}
+	return Value{scalar: kindBuffer, pointer: unsafe.Pointer(&bytes)}
 }
 
 // BoxException boxes an evie Exception
 func BoxException(e *Exception) Value {
-	return Value{scalar: errorType, pointer: unsafe.Pointer(e)}
+	return Value{scalar: kindError, pointer: unsafe.Pointer(e)}
 }
 
 // BoxCustom boxes a value of a custom type
 func BoxCustom(cv CustomValue) Value {
-	return Value{scalar: customType, pointer: unsafe.Pointer(&cv)}
+	return Value{scalar: kindCustom, pointer: unsafe.Pointer(&cv)}
 }
 
 func (x Value) IsNil() bool {
@@ -210,7 +218,7 @@ func (x Value) AsString() (s string, ok bool) {
 		return "", false
 	}
 
-	if x.scalar == stringType {
+	if x.scalar == kindString {
 		return *(*string)(x.pointer), true
 	}
 
@@ -218,77 +226,98 @@ func (x Value) AsString() (s string, ok bool) {
 }
 
 func (x Value) AsUserFn() (fn *UserFn, ok bool) {
-	if x.scalar != userFnType || isKnown(x.pointer) {
+	if x.scalar != kindUserFn || isKnown(x.pointer) {
 		return nil, false
 	}
 	return (*UserFn)(x.pointer), true
 }
 
 func (x Value) AsGoFunc() (fn *GoFunc, ok bool) {
-	if x.scalar != goFuncType || isKnown(x.pointer) {
+	if x.scalar != kindGoFunc || isKnown(x.pointer) {
 		return nil, false
 	}
 	return (*GoFunc)(x.pointer), true
 }
 
 func (x Value) AsArray() (arr *Array, ok bool) {
-	if x.scalar != arrayType || isKnown(x.pointer) {
+	if x.scalar != kindArray || isKnown(x.pointer) {
 		return nil, false
 	}
 	return (*Array)(x.pointer), true
 }
 
 func (x Value) AsObject() (obj map[fields.ID]Value, ok bool) {
-	if x.scalar != objectType || isKnown(x.pointer) {
+	if x.scalar != kindObject || isKnown(x.pointer) {
 		return nil, false
 	}
 	return *(*map[fields.ID]Value)(x.pointer), true
 }
 
+func (x Value) AsUserStruct() (obj *UserStruct, ok bool) {
+	if x.scalar != kindStruct || isKnown(x.pointer) {
+		return nil, false
+	}
+	return (*UserStruct)(x.pointer), true
+}
+
+func (x Value) AsUserStructInstance() (obj *UserStructInstance, ok bool) {
+	if x.scalar != kindStructInstance || isKnown(x.pointer) {
+		return nil, false
+	}
+	return (*UserStructInstance)(x.pointer), true
+}
+
+func (x Value) AsBuiltinType() (obj *BuiltinType, ok bool) {
+	if x.scalar != kindBuiltinType || isKnown(x.pointer) {
+		return nil, false
+	}
+	return (*BuiltinType)(x.pointer), true
+}
+
 func (x Value) AsTask() (task <-chan evaluation, ok bool) {
-	if x.scalar != taskType || isKnown(x.pointer) {
+	if x.scalar != kindTask || isKnown(x.pointer) {
 		return nil, false
 	}
 	return *(*chan evaluation)(x.pointer), true
 }
 
 func (x Value) asPackage() (pkg *packageInstance, ok bool) {
-	if x.scalar != packageType || isKnown(x.pointer) {
+	if x.scalar != kindPackage || isKnown(x.pointer) {
 		return nil, false
 	}
 	return (*packageInstance)(x.pointer), true
 }
 
 func (x Value) AsPackage() (pkg Package, ok bool) {
-	if x.scalar != packageType || isKnown(x.pointer) {
+	if x.scalar != kindPackage || isKnown(x.pointer) {
 		return nil, false
 	}
 	return (*packageInstance)(x.pointer), true
 }
 
 func (x Value) asMethod() (m *Method, ok bool) {
-	if x.scalar != methodType || isKnown(x.pointer) {
+	if x.scalar != kindMethod || isKnown(x.pointer) {
 		return nil, false
 	}
 	return (*Method)(x.pointer), true
 }
 
 func (x Value) AsBuffer() (buffer []byte, ok bool) {
-	if x.scalar != bufferType || isKnown(x.pointer) {
+	if x.scalar != kindBuffer || isKnown(x.pointer) {
 		return nil, false
 	}
 	return *(*[]byte)(x.pointer), true
 }
 
 func (x Value) AsException() (e *Exception, ok bool) {
-	if x.scalar != errorType || isKnown(x.pointer) {
+	if x.scalar != kindError || isKnown(x.pointer) {
 		return nil, false
 	}
 	return (*Exception)(x.pointer), true
 }
 
 func (x Value) AsCustom() (cv CustomValue, ok bool) {
-	if x.scalar != customType || isKnown(x.pointer) {
+	if x.scalar != kindCustom || isKnown(x.pointer) {
 		return nil, false
 	}
 	return *(*CustomValue)(x.pointer), true
@@ -318,27 +347,27 @@ func (x Value) IsTruthy() bool {
 	}
 
 	switch x.scalar {
-	case stringType:
+	case kindString:
 		return *(*string)(x.pointer) != ""
-	case userFnType:
+	case kindUserFn:
 		// In both JavaScript and Python, functions are inherently truthy
 		return true
-	case arrayType:
+	case kindArray:
 		array := (*Array)(x.pointer)
 		return len(array.Data) != 0
-	case objectType:
+	case kindObject:
 		obj := *(*map[fields.ID]Value)(x.pointer)
 		return len(obj) != 0
-	case taskType:
+	case kindTask:
 		task := *(*chan evaluation)(x.pointer)
 		return len(task) != 0
-	case bufferType:
+	case kindBuffer:
 		buffer := *(*[]byte)(x.pointer)
 		return len(buffer) != 0
-	case errorType:
+	case kindError:
 		exc := (*Exception)(x.pointer)
 		return exc != nil
-	case customType:
+	case kindCustom:
 		cv := *(*CustomValue)(x.pointer)
 		return cv.IsTruthy()
 	}
@@ -362,9 +391,9 @@ func (x Value) Equals(y Value) bool {
 	}
 
 	switch x.scalar {
-	case stringType:
+	case kindString:
 		return *(*string)(x.pointer) == *(*string)(y.pointer)
-	case customType:
+	case kindCustom:
 		lhs := (*(*CustomValue)(x.pointer))
 		rhs := (*(*CustomValue)(y.pointer))
 		return lhs.Equals(rhs)
@@ -388,38 +417,18 @@ func (x Value) String() string {
 	}
 
 	switch x.scalar {
-	case stringType:
+	case kindString:
 		return *(*string)(x.pointer)
-	case userFnType:
+	case kindUserFn:
 		return (*UserFn)(x.pointer).String()
-	case goFuncType:
+	case kindStructInstance:
+		return (*UserStructInstance)(x.pointer).String()
+	case kindGoFunc:
 		return "<function>"
-	case arrayType:
-		array := (*Array)(x.pointer)
+	case kindArray:
+		return (*Array)(x.pointer).String()
 
-		builder := strings.Builder{}
-		builder.WriteByte('[')
-
-		array.View(func(data []Value) {
-			for i, v := range data {
-				if str, ok := v.AsString(); ok {
-					builder.WriteByte('"')
-					builder.WriteString(str)
-					builder.WriteByte('"')
-				} else {
-					builder.WriteString(v.String())
-				}
-
-				if i != len(data)-1 {
-					builder.WriteString(", ")
-				}
-			}
-		})
-
-		builder.WriteByte(']')
-		return builder.String()
-
-	case objectType:
+	case kindObject:
 		obj := *(*map[fields.ID]Value)(x.pointer)
 
 		builder := strings.Builder{}
@@ -449,18 +458,24 @@ func (x Value) String() string {
 		builder.WriteByte('}')
 		return builder.String()
 
-	case taskType:
+	case kindStruct:
+		obj := (*UserStruct)(x.pointer)
+		return fmt.Sprintf("<type '%v'>", obj.Name)
+	case kindTask:
 		return "<task>"
-	case packageType:
+	case kindPackage:
 		return "<package>"
-	case methodType:
+	case kindMethod:
 		return "<method>"
-	case bufferType:
+	case kindBuiltinType:
+		obj := (*BuiltinType)(x.pointer)
+		return fmt.Sprintf("<type '%v'>", obj.Name)
+	case kindBuffer:
 		return fmt.Sprintf("<buffer: %v>", x.pointer)
-	case errorType:
+	case kindError:
 		exc := (*Exception)(x.pointer)
 		return fmt.Sprintf("<error: %v>", exc.message)
-	case customType:
+	case kindCustom:
 		cv := (*(*CustomValue)(x.pointer))
 		return cv.String()
 	}
@@ -479,25 +494,29 @@ func (x Value) TypeOf() string {
 	}
 
 	switch x.scalar {
-	case stringType:
+	case kindString:
 		return "string"
-	case userFnType:
+	case kindUserFn:
 		return "function"
-	case arrayType:
+	case kindGoFunc:
+		return "function"
+	case kindArray:
 		return "array"
-	case objectType:
+	case kindObject:
 		return "object"
-	case taskType:
+	case kindTask:
 		return "task"
-	case packageType:
+	case kindPackage:
 		return "package"
-	case methodType:
+	case kindMethod:
 		return "method"
-	case bufferType:
+	case kindBuffer:
 		return "buffer"
-	case errorType:
+	case kindError:
 		return "error"
-	case customType:
+	case kindStruct:
+		return "error"
+	case kindCustom:
 		cv := (*(*CustomValue)(x.pointer))
 		return cv.TypeOf()
 	}
@@ -511,11 +530,11 @@ func (x Value) TypeID() unsafe.Pointer {
 	}
 
 	switch x.scalar {
-	case stringType:
+	case kindString:
 		return strTypeID
-	case arrayType:
+	case kindArray:
 		return arrayTypeID
-	case packageType:
+	case kindPackage:
 		return x.pointer
 	}
 
@@ -528,7 +547,7 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 	}
 
 	switch x.scalar {
-	case stringType:
+	case kindString:
 		value, exists := stringMethods[f]
 		if !exists {
 			return Value{}, false
@@ -537,7 +556,7 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 		m := Method{this: x, fn: *value}
 		return boxMethod(m), true
 
-	case arrayType:
+	case kindArray:
 		value, exists := arrayMethods[f]
 		if !exists {
 			return Value{}, false
@@ -546,7 +565,7 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 		m := Method{this: x, fn: *value}
 		return boxMethod(m), true
 
-	case objectType:
+	case kindObject:
 		obj := *(*map[fields.ID]Value)(x.pointer)
 
 		value, exists := obj[f]
@@ -556,7 +575,7 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 
 		return value, true
 
-	case packageType:
+	case kindPackage:
 		pkg := (*packageInstance)(x.pointer)
 		value, exists := pkg.globals[f]
 		if !value.IsPublic {
@@ -574,11 +593,11 @@ func (x Value) dotAccess(f fields.ID) (field *Value) {
 	}
 
 	switch x.scalar {
-	case stringType:
+	case kindString:
 		return stringMethods[f]
-	case arrayType:
+	case kindArray:
 		return arrayMethods[f]
-	case packageType:
+	case kindPackage:
 		pkg := (*packageInstance)(x.pointer)
 		value := pkg.globals[f]
 		if !value.IsPublic {

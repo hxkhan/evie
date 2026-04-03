@@ -177,6 +177,38 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	case ast.MutableBinOp:
 		return vm.emitMutableBinOp(node)
 
+	case ast.IsInstanceOf:
+		lhs := vm.compile(node.Lhs)
+		rhs := vm.compile(node.Rhs)
+
+		return func(fbr *fiber) (Value, *Exception) {
+			lhs, exc := lhs(fbr)
+			if exc != nil {
+				return lhs, exc
+			}
+
+			rhs, exc := rhs(fbr)
+			if exc != nil {
+				return rhs, exc
+			}
+
+			// structs
+			if us, isUserStruct := rhs.AsUserStruct(); isUserStruct {
+				if usi, isUserStructInstance := lhs.AsUserStructInstance(); isUserStructInstance {
+					return BoxBool(usi.InstanceOf == us), nil
+				}
+				return BoxBool(false), nil
+			}
+
+			// built-ins
+			if rhs == stringType {
+				_, isString := lhs.AsString()
+				return BoxBool(isString), nil
+			}
+
+			return BoxBool(false), nil
+		}
+
 	case ast.Object:
 		items := make(map[fields.ID]instruction, len(node.Fields))
 		for _, f := range node.Fields {
@@ -272,8 +304,8 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 	/*
 		------ Hoisting Protocol ------
 
-		1. Allocated all symbols without initialization.
-		2. Initialize variables in the order they appear
+		1. Allocated function symbols without initialization
+		2. Allocate & initialize variables in the order that they appear
 		3. Initialize functions (order doesn't matter)
 
 		So this is not possible because the order is maintained:
@@ -291,7 +323,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 			z := hop(8)
 	*/
 
-	// 1. allocate (functions)
+	// 1. allocate functions & structs
 	for _, node := range node.Code {
 		if fn, isFn := node.(ast.Fn); isFn {
 			index := fields.Get(fn.Name)
@@ -310,9 +342,28 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 			})
 			this.globals[index] = Global{Value: &fn, IsStatic: true}
 		}
+
+		if str, isStruct := node.(ast.StructDefinition); isStruct {
+			index := fields.Get(str.Name)
+			if _, exists := this.globals[index]; exists {
+				panic(fmt.Errorf("double declaration of %s", str.Name))
+			}
+
+			args := make([]fields.ID, len(str.Args))
+			for i, a := range str.Args {
+				args[i] = fields.Get(a)
+			}
+
+			// create a stub for now
+			v := BoxUserStruct(&UserStruct{
+				Name:   str.Name,
+				Fields: args,
+			})
+			this.globals[index] = Global{Value: &v, IsStatic: true}
+		}
 	}
 
-	// 2. allocate & initialize (bindings)
+	// 2. allocate & initialize variables
 	for _, node := range node.Code {
 		if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
 			// check if contains function calls
@@ -339,7 +390,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, *Exception) {
 		}
 	}
 
-	// 3. initialize (functions)
+	// 3. initialize functions
 	for _, node := range node.Code {
 		if fn, isFn := node.(ast.Fn); isFn {
 			global := this.globals[fields.Get(fn.Name)]
@@ -805,6 +856,37 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 		if m, isMethod := value.asMethod(); isMethod {
 			return func(fbr *fiber) (Value, *Exception) {
 				return m.call(fbr, arguments)
+			}
+		}
+
+		// try struct
+		if us, isUserStruct := value.AsUserStruct(); isUserStruct {
+			if len(us.Fields) != len(arguments) {
+				panic(CustomError("struct '%v' requires %v argument(s), %v provided", us.Name, len(us.Fields), len(arguments)))
+			}
+
+			return func(fbr *fiber) (Value, *Exception) {
+				usi := UserStructInstance{InstanceOf: us}
+				usi.Fields = make(map[fields.ID]Value, len(us.Fields))
+
+				for i, f := range us.Fields {
+					v, exc := arguments[i](fbr)
+					if exc != nil {
+						return v, exc
+					}
+
+					usi.Fields[f] = v
+				}
+
+				return BoxUserStructInstance(&usi), nil
+			}
+
+		}
+
+		// try built-in
+		if bt, isBuiltinType := value.AsBuiltinType(); isBuiltinType {
+			return func(fbr *fiber) (Value, *Exception) {
+				return bt.Constructor.call(fbr, arguments)
 			}
 		}
 

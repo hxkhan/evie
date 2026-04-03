@@ -34,7 +34,7 @@ type Fn struct {
 	SyncMode   SyncMode
 	Action     Node
 	IsPublic   bool
-	UsedAsExpr bool
+	UsedAsExpr bool // if true then create and return, else declare
 }
 
 type Go struct {

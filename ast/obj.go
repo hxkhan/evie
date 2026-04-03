@@ -53,5 +53,5 @@ type Subscript struct {
 }
 
 func (node Subscript) String() string {
-	return fmt.Sprintf("%v[%v]?", node.Lhs, node.Key)
+	return fmt.Sprintf("%v[%v]", node.Lhs, node.Key)
 }

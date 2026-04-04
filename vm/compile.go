@@ -604,11 +604,11 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 					if pkg, ok := lhs.asPackage(); ok {
 						field, exists := pkg.globals[index]
 						if !exists {
-							panic(TypeErrorF("Symbol '%s' not found in package '%s'.", fa.Rhs, pkg.name))
+							return Value{}, TypeErrorF("Symbol '%s' not found in package '%s'.", fa.Rhs, pkg.name)
 						}
 
 						if field.IsStatic {
-							panic(TypeErrorF("Assignment to constant symbol '%v' of package '%v'.", fa.Rhs, pkg.name))
+							return Value{}, TypeErrorF("Assignment to constant symbol '%v' of package '%v'.", fa.Rhs, pkg.name)
 						}
 
 						value, err := value(fbr)

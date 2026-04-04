@@ -444,7 +444,7 @@ func (x Value) String() string {
 
 	case kindStruct:
 		obj := (*UserStruct)(x.pointer)
-		return fmt.Sprintf("<type '%v'>", obj.Name)
+		return fmt.Sprintf("<type %v>", obj.Name)
 	case kindTask:
 		return "<task>"
 	case kindPackage:
@@ -453,9 +453,9 @@ func (x Value) String() string {
 		return "<method>"
 	case kindBuiltinType:
 		obj := (*BuiltinType)(x.pointer)
-		return fmt.Sprintf("<type '%v'>", obj.Name)
+		return fmt.Sprintf("<type %v>", obj.Name)
 	case kindBuffer:
-		return fmt.Sprintf("<buffer: %v>", x.pointer)
+		return fmt.Sprintf("<buffer %v>", x.pointer)
 	case kindCustom:
 		cv := (*(*CustomValue)(x.pointer))
 		return cv.String()
@@ -548,6 +548,16 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 		obj := *(*map[fields.ID]Value)(x.pointer)
 
 		value, exists := obj[f]
+		if !exists {
+			return Value{}, false
+		}
+
+		return value, true
+
+	case kindStructInstance:
+		obj := (*UserStructInstance)(x.pointer)
+
+		value, exists := obj.Fields[f]
 		if !exists {
 			return Value{}, false
 		}

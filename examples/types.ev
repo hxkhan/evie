@@ -1,18 +1,38 @@
 package main
 
-record error(kind, message) {
+struct vec2(x, y) {
+    @add(a, b) => vec2{x: a.x+b.x, y: a.y+b.y}
+}
+
+struct vec2(x, y) {
+    @add(rhs) => vec2{x: x+rhs.x, y: y+b.y}
+
+    @string => `vec({x}, {y})`
+}
+
+struct animal() {
+    fn eat(food) {
+
+    }
+}
+
+struct dog() {
+    @index(what) => animal[what]
+}
+
+struct error(kind, message) {
     fn wrap(a) {
         
     }
 }
 
-record string(value) {
+struct string(value) {
     fn split(delimiter) {
 
     }
 }
 
-record person(name, age) {
+struct person(name, age) {
     if !(name is string) {
         throw error("TypeError", "a person's name must be a string")
     }
@@ -20,6 +40,10 @@ record person(name, age) {
     fn eat(x) {
 
     }
+}
+
+struct color(r, g, b) {
+    fn darken(amount) { ... }
 }
 
 fn main() {

@@ -50,7 +50,7 @@
 				{
 					"comment": "Declaration keywords",
 					"name": "keyword.declaration.evie",
-					"match": "\\b(package|pub|var|fn|record|imports)\\b"
+					"match": "\\b(package|pub|var|fn|struct|imports)\\b"
 				},
 				{
 					"comment": "Other keywords",

@@ -4,9 +4,9 @@ struct person(name, age) {}
 
 fn main() {
     echo person
-    echo string
 
     p := person("John", 22)
+    p.email = "john03@gmail.com" // optional fields can be added
 
     if p is person {
         echo "p is definitely a person"

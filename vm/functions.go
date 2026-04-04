@@ -42,7 +42,7 @@ func (fn UserFn) Synced() bool {
 }
 
 func (fn UserFn) String() string {
-	return fmt.Sprintf("<function '%v'>", fn.name)
+	return fmt.Sprintf("<function %v>", fn.name)
 }
 
 func (fn *UserFn) Call(args ...Value) (result Value, err error) {

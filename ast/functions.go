@@ -68,16 +68,6 @@ type AwaitAny struct {
 	Tasks []Node
 }
 
-type FieldAccess struct {
-	token.Pos
-	Lhs Node
-	Rhs string
-}
-
-/* func (node FieldAccess) String() string {
-	return fmt.Sprintf("%v.%v", node.Lhs, node.Rhs)
-} */
-
 func (fn Fn) String() string {
 	b := strings.Builder{}
 	b.WriteString("fn")
@@ -120,8 +110,4 @@ func (call Call) String() string {
 
 func (ret Return) String() string {
 	return fmt.Sprintf("return %v", ret.Value)
-}
-
-func (fa FieldAccess) String() string {
-	return fmt.Sprintf("%v.%s", fa.Lhs, fa.Rhs)
 }

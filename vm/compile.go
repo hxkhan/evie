@@ -244,7 +244,12 @@ func (vm *Instance) compile(node ast.Node) instruction {
 					return BoxBool(exists), nil
 				}
 
-				panic("not an object")
+				if obj, ok := lhs.AsUserStructInstance(); ok {
+					_, exists := obj.Fields[index]
+					return BoxBool(exists), nil
+				}
+
+				panic("implement type")
 			}
 		}
 
@@ -532,85 +537,53 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 
 	// handle field access assignments
 	if fa, isFieldAccess := node.Lhs.(ast.FieldAccess); isFieldAccess {
-		if iGet, isIdentGet := fa.Lhs.(ast.Ident); isIdentGet {
-			variable, err := vm.cp.reach(iGet.Name)
-			if err != nil {
-				panic(err)
+		// Lhs can for e.g. be an ast.Ident
+		switch lhs := vm.evaluate(fa.Lhs).(type) {
+		case local:
+			// compile new value & return setter
+			value := vm.compile(node.Value)
+			index := fields.Get(fa.Rhs)
+			return func(fbr *fiber) (Value, Exception) {
+				lhs := fbr.get(lhs)
+
+				if obj, ok := lhs.AsObject(); ok {
+					value, err := value(fbr)
+					if err != nil {
+						return value, err
+					}
+
+					obj[index] = value
+					return Value{}, nil
+				}
+
+				if obj, ok := lhs.AsUserStructInstance(); ok {
+					value, err := value(fbr)
+					if err != nil {
+						return value, err
+					}
+
+					obj.Fields[index] = value
+					return Value{}, nil
+				}
+
+				panic("implement type")
 			}
 
-			switch lhs := variable.(type) {
-			case local:
-				// compile new value & return setter
-				value := vm.compile(node.Value)
-				index := fields.Get(fa.Rhs)
-				return func(fbr *fiber) (Value, Exception) {
-					lhs := fbr.get(lhs)
-
-					if obj, ok := lhs.AsObject(); ok {
-						value, err := value(fbr)
-						if err != nil {
-							return value, err
-						}
-
-						obj[index] = value
-						return Value{}, nil
+		case Global:
+			if lhs.IsStatic {
+				if pkg, ok := lhs.asPackage(); ok {
+					field, exists := pkg.globals[fields.Get(fa.Rhs)]
+					if !exists {
+						panic(TypeErrorF("Symbol '%s' not found in package '%s'.", fa.Rhs, pkg.name))
 					}
 
-					if obj, ok := lhs.AsUserStructInstance(); ok {
-						value, err := value(fbr)
-						if err != nil {
-							return value, err
-						}
-
-						obj.Fields[index] = value
-						return Value{}, nil
+					if field.IsStatic {
+						panic(TypeErrorF("Assignment to constant symbol '%v' of package '%v'.", fa.Rhs, pkg.name))
 					}
 
-					panic("implement type")
-				}
-
-			case Global:
-				if lhs.IsStatic {
-					if pkg, ok := lhs.asPackage(); ok {
-						field, exists := pkg.globals[fields.Get(fa.Rhs)]
-						if !exists {
-							panic(TypeErrorF("Symbol '%s' not found in package '%s'.", fa.Rhs, pkg.name))
-						}
-
-						if field.IsStatic {
-							panic(TypeErrorF("Assignment to constant symbol '%v' of package '%v'.", fa.Rhs, pkg.name))
-						}
-
-						// compile new value & return setter
-						value := vm.compile(node.Value)
-						return func(fbr *fiber) (Value, Exception) {
-							value, err := value(fbr)
-							if err != nil {
-								return value, err
-							}
-
-							*(field.Value) = value
-							return Value{}, nil
-						}
-					}
-
-					panic("implement type")
-				}
-
-				// compile new value & return setter
-				value := vm.compile(node.Value)
-				index := fields.Get(fa.Rhs)
-				return func(fbr *fiber) (Value, Exception) {
-					if pkg, ok := lhs.asPackage(); ok {
-						field, exists := pkg.globals[index]
-						if !exists {
-							return Value{}, TypeErrorF("Symbol '%s' not found in package '%s'.", fa.Rhs, pkg.name)
-						}
-
-						if field.IsStatic {
-							return Value{}, TypeErrorF("Assignment to constant symbol '%v' of package '%v'.", fa.Rhs, pkg.name)
-						}
-
+					// compile new value & return setter
+					value := vm.compile(node.Value)
+					return func(fbr *fiber) (Value, Exception) {
 						value, err := value(fbr)
 						if err != nil {
 							return value, err
@@ -619,29 +592,55 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 						*(field.Value) = value
 						return Value{}, nil
 					}
-
-					if obj, ok := lhs.AsObject(); ok {
-						value, err := value(fbr)
-						if err != nil {
-							return value, err
-						}
-
-						obj[index] = value
-						return Value{}, nil
-					}
-
-					if obj, ok := lhs.AsUserStructInstance(); ok {
-						value, err := value(fbr)
-						if err != nil {
-							return value, err
-						}
-
-						obj.Fields[index] = value
-						return Value{}, nil
-					}
-
-					panic("implement type")
 				}
+
+				panic("implement type")
+			}
+
+			// compile new value & return setter
+			value := vm.compile(node.Value)
+			index := fields.Get(fa.Rhs)
+			return func(fbr *fiber) (Value, Exception) {
+				if pkg, ok := lhs.asPackage(); ok {
+					field, exists := pkg.globals[index]
+					if !exists {
+						return Value{}, TypeErrorF("Symbol '%s' not found in package '%s'.", fa.Rhs, pkg.name)
+					}
+
+					if field.IsStatic {
+						return Value{}, TypeErrorF("Assignment to constant symbol '%v' of package '%v'.", fa.Rhs, pkg.name)
+					}
+
+					value, err := value(fbr)
+					if err != nil {
+						return value, err
+					}
+
+					*(field.Value) = value
+					return Value{}, nil
+				}
+
+				if obj, ok := lhs.AsObject(); ok {
+					value, err := value(fbr)
+					if err != nil {
+						return value, err
+					}
+
+					obj[index] = value
+					return Value{}, nil
+				}
+
+				if obj, ok := lhs.AsUserStructInstance(); ok {
+					value, err := value(fbr)
+					if err != nil {
+						return value, err
+					}
+
+					obj.Fields[index] = value
+					return Value{}, nil
+				}
+
+				panic("implement type")
 			}
 		}
 	}

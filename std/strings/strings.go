@@ -12,7 +12,7 @@ func Construct() vm.Package {
 	return pkg
 }
 
-func split(this, sep vm.Value) (vm.Value, *vm.Exception) {
+func split(this, sep vm.Value) (vm.Value, vm.Exception) {
 	if str, ok := this.AsString(); ok {
 		if sep, ok := sep.AsString(); ok {
 

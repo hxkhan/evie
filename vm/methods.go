@@ -7,7 +7,7 @@ import (
 )
 
 var stringMethods = map[fields.ID]*Value{
-	fields.Get("split"): BoxGoFunc(func(this, sep Value) (Value, *Exception) {
+	fields.Get("split"): BoxGoFunc(func(this, sep Value) (Value, Exception) {
 		if str, ok := this.AsString(); ok {
 			if sep, ok := sep.AsString(); ok {
 
@@ -24,7 +24,7 @@ var stringMethods = map[fields.ID]*Value{
 }
 
 var arrayMethods = map[fields.ID]*Value{
-	fields.Get("join"): BoxGoFunc(func(this, sep Value) (Value, *Exception) {
+	fields.Get("join"): BoxGoFunc(func(this, sep Value) (Value, Exception) {
 		if parts, ok := this.AsArray(); ok {
 			if sep, ok := sep.AsString(); ok {
 				parts.MU.RLock()

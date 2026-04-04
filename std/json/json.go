@@ -12,7 +12,7 @@ func Construct() vm.Package {
 	return pkg
 }
 
-func decode(v vm.Value) (vm.Value, *vm.Exception) {
+func decode(v vm.Value) (vm.Value, vm.Exception) {
 	str, ok := v.AsString()
 	if ok {
 		var v any

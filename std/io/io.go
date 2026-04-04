@@ -16,30 +16,30 @@ func Construct() vm.Package {
 	return pkg
 }
 
-var print = vm.BoxGoFunc(func(output vm.Value) (vm.Value, *vm.Exception) {
+var print = vm.BoxGoFunc(func(output vm.Value) (vm.Value, vm.Exception) {
 	fmt.Print(output)
 	return vm.Value{}, nil
 })
 
-var println = vm.BoxGoFunc(func(output vm.Value) (vm.Value, *vm.Exception) {
+var println = vm.BoxGoFunc(func(output vm.Value) (vm.Value, vm.Exception) {
 	fmt.Println(output)
 	return vm.Value{}, nil
 })
 
-var prompt = vm.BoxGoFunc(func(output vm.Value) (vm.Value, *vm.Exception) {
+var prompt = vm.BoxGoFunc(func(output vm.Value) (vm.Value, vm.Exception) {
 	fmt.Print(output)
 	var input string
 	fmt.Scanln(&input)
 	return vm.BoxString(input), nil
 })
 
-var readln = vm.BoxGoFunc(func() (vm.Value, *vm.Exception) {
+var readln = vm.BoxGoFunc(func() (vm.Value, vm.Exception) {
 	var input string
 	fmt.Scanln(&input)
 	return vm.BoxString(input), nil
 })
 
-var dec = vm.BoxGoFunc(func(n vm.Value) (vm.Value, *vm.Exception) {
+var dec = vm.BoxGoFunc(func(n vm.Value) (vm.Value, vm.Exception) {
 	f64, ok := n.AsFloat64()
 	if !ok {
 		return vm.Value{}, vm.ErrTypes

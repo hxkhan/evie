@@ -566,7 +566,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 						return Value{}, nil
 					}
 
-					panic("unresolved type")
+					panic("implement type")
 				}
 
 			case Global:
@@ -594,7 +594,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 						}
 					}
 
-					panic("not a package")
+					panic("implement type")
 				}
 
 				// compile new value & return setter
@@ -619,7 +619,28 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 						*(field.Value) = value
 						return Value{}, nil
 					}
-					panic("not a package")
+
+					if obj, ok := lhs.AsObject(); ok {
+						value, err := value(fbr)
+						if err != nil {
+							return value, err
+						}
+
+						obj[index] = value
+						return Value{}, nil
+					}
+
+					if obj, ok := lhs.AsUserStructInstance(); ok {
+						value, err := value(fbr)
+						if err != nil {
+							return value, err
+						}
+
+						obj.Fields[index] = value
+						return Value{}, nil
+					}
+
+					panic("implement type")
 				}
 			}
 		}

@@ -56,7 +56,6 @@ const (
 	kindTask
 	kindPackage
 	kindBuffer
-	kindError
 	kindObject
 	kindBuiltinType
 	kindStruct
@@ -82,13 +81,13 @@ type CustomValue interface {
 
 // SafeGoFunc is a compile time safety interface so uncallable functions don't get into the system
 type SafeGoFunc interface {
-	func() (Value, *Exception) |
-		func(Value) (Value, *Exception) |
-		func(Value, Value) (Value, *Exception) |
-		func(Value, Value, Value) (Value, *Exception) |
-		func(Value, Value, Value, Value) (Value, *Exception) |
-		func(Value, Value, Value, Value, Value) (Value, *Exception) |
-		func(Value, Value, Value, Value, Value, Value) (Value, *Exception)
+	func() (Value, Exception) |
+		func(Value) (Value, Exception) |
+		func(Value, Value) (Value, Exception) |
+		func(Value, Value, Value) (Value, Exception) |
+		func(Value, Value, Value, Value) (Value, Exception) |
+		func(Value, Value, Value, Value, Value) (Value, Exception) |
+		func(Value, Value, Value, Value, Value, Value) (Value, Exception)
 }
 
 // BoxNumber boxes a float64
@@ -189,11 +188,6 @@ func boxMethod(m Method) Value {
 // BoxBuffer boxes a Golang byte slice
 func BoxBuffer(bytes []byte) Value {
 	return Value{scalar: kindBuffer, pointer: unsafe.Pointer(&bytes)}
-}
-
-// BoxException boxes an evie Exception
-func BoxException(e *Exception) Value {
-	return Value{scalar: kindError, pointer: unsafe.Pointer(e)}
 }
 
 // BoxCustom boxes a value of a custom type
@@ -309,13 +303,6 @@ func (x Value) AsBuffer() (buffer []byte, ok bool) {
 	return *(*[]byte)(x.pointer), true
 }
 
-func (x Value) AsException() (e *Exception, ok bool) {
-	if x.scalar != kindError || isKnown(x.pointer) {
-		return nil, false
-	}
-	return (*Exception)(x.pointer), true
-}
-
 func (x Value) AsCustom() (cv CustomValue, ok bool) {
 	if x.scalar != kindCustom || isKnown(x.pointer) {
 		return nil, false
@@ -364,9 +351,6 @@ func (x Value) IsTruthy() bool {
 	case kindBuffer:
 		buffer := *(*[]byte)(x.pointer)
 		return len(buffer) != 0
-	case kindError:
-		exc := (*Exception)(x.pointer)
-		return exc != nil
 	case kindCustom:
 		cv := *(*CustomValue)(x.pointer)
 		return cv.IsTruthy()
@@ -472,9 +456,6 @@ func (x Value) String() string {
 		return fmt.Sprintf("<type '%v'>", obj.Name)
 	case kindBuffer:
 		return fmt.Sprintf("<buffer: %v>", x.pointer)
-	case kindError:
-		exc := (*Exception)(x.pointer)
-		return fmt.Sprintf("<error: %v>", exc.message)
 	case kindCustom:
 		cv := (*(*CustomValue)(x.pointer))
 		return cv.String()
@@ -512,8 +493,6 @@ func (x Value) TypeOf() string {
 		return "method"
 	case kindBuffer:
 		return "buffer"
-	case kindError:
-		return "error"
 	case kindStruct:
 		return "error"
 	case kindCustom:

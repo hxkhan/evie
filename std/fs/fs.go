@@ -12,7 +12,7 @@ func Construct() vm.Package {
 	return pkg
 }
 
-func readFile(fileName vm.Value) (vm.Value, *vm.Exception) {
+func readFile(fileName vm.Value) (vm.Value, vm.Exception) {
 	if fileName, ok := fileName.AsString(); ok {
 		bytes, err := os.ReadFile(fileName)
 		if err != nil {

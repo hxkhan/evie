@@ -12,7 +12,7 @@ func Construct() vm.Package {
 	return pkg
 }
 
-func join(this, sep vm.Value) (vm.Value, *vm.Exception) {
+func join(this, sep vm.Value) (vm.Value, vm.Exception) {
 	if parts, ok := this.AsArray(); ok {
 		if sep, ok := sep.AsString(); ok {
 			parts.MU.RLock()

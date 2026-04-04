@@ -90,7 +90,7 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 	switch exc {
 	case nil:
 		return Value{}, nil
-	case returnSignal:
+	case signalReturn:
 		return result, nil
 	default:
 		return result, exc
@@ -153,7 +153,7 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 
 		out = make([]reflect.Value, 2)
 		// don't implicitly return the return value of the last executed instruction
-		if err == returnSignal {
+		if err == signalReturn {
 			out[1] = reflect.Zero(reflect.TypeOf((*error)(nil)).Elem())
 		}
 
@@ -188,10 +188,11 @@ type Method struct {
 	fn   Value
 }
 
-func (m Method) call(fbr *fiber, arguments []instruction) (result Value, exc *Exception) {
+func (m Method) call(fbr *fiber, arguments []instruction) (result Value, exc Exception) {
 	fn, ok := m.fn.AsGoFunc()
 	if !ok {
-		return Value{}, notFunction
+		panic("impossible.. how did we get here?")
+		//return Value{}, notFunction
 	}
 
 	if fn.nargs-1 != len(arguments) {
@@ -223,10 +224,10 @@ func (m Method) call(fbr *fiber, arguments []instruction) (result Value, exc *Ex
 	case 0:
 		panic("how did we get a method that does not even take itself as an arguement?")
 	case 1:
-		function := *(*func(Value) (Value, *Exception))(fn.ptr)
+		function := *(*func(Value) (Value, Exception))(fn.ptr)
 		return function(m.this)
 	case 2:
-		function := *(*func(Value, Value) (Value, *Exception))(fn.ptr)
+		function := *(*func(Value, Value) (Value, Exception))(fn.ptr)
 		arg0, err := arguments[0](fbr)
 		if err != nil {
 			return arg0, err
@@ -247,7 +248,7 @@ func (fn GoFunc) Synced() bool {
 	return fn.mode == ast.SyncedMode
 }
 
-func (fn *GoFunc) call(fbr *fiber, arguments []instruction) (result Value, exc *Exception) {
+func (fn *GoFunc) call(fbr *fiber, arguments []instruction) (result Value, exc Exception) {
 	if fn.nargs != len(arguments) {
 		return Value{}, CustomError("function requires %v argument(s), %v provided", fn.nargs, len(arguments))
 	}
@@ -268,22 +269,22 @@ func (fn *GoFunc) call(fbr *fiber, arguments []instruction) (result Value, exc *
 }
 
 // just call; no args check; no GIL consideration
-func (fn *GoFunc) invoke(fbr *fiber, arguments []instruction) (result Value, exc *Exception) {
+func (fn *GoFunc) invoke(fbr *fiber, arguments []instruction) (result Value, exc Exception) {
 	switch fn.nargs {
 	case -1:
 		panic("variadic functions not supported yet")
 	case 0:
-		function := *(*func() (Value, *Exception))(fn.ptr)
+		function := *(*func() (Value, Exception))(fn.ptr)
 		return function()
 	case 1:
-		function := *(*func(Value) (Value, *Exception))(fn.ptr)
+		function := *(*func(Value) (Value, Exception))(fn.ptr)
 		arg0, err := arguments[0](fbr)
 		if err != nil {
 			return arg0, err
 		}
 		return function(arg0)
 	case 2:
-		function := *(*func(Value, Value) (Value, *Exception))(fn.ptr)
+		function := *(*func(Value, Value) (Value, Exception))(fn.ptr)
 		arg0, err := arguments[0](fbr)
 		if err != nil {
 			return arg0, err

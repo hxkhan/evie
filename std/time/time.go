@@ -12,7 +12,7 @@ func Construct() vm.Package {
 	return pkg
 }
 
-func wait(duration vm.Value) (vm.Value, *vm.Exception) {
+func wait(duration vm.Value) (vm.Value, vm.Exception) {
 	if duration, ok := duration.AsFloat64(); ok {
 		time.Sleep(time.Millisecond * time.Duration(duration))
 		return vm.Value{}, nil

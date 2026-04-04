@@ -127,7 +127,7 @@ func (vm *Instance) EvalNode(node ast.Node) (result Value, err error) {
 	switch err {
 	case nil:
 		return result, nil
-	case returnSignal:
+	case signalReturn:
 		return result, nil
 	default:
 		return result, err

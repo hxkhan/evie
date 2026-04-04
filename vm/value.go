@@ -115,12 +115,12 @@ func BoxUserFn(fn UserFn) Value {
 }
 
 // BoxBuiltinType boxes a Go function that is a type constructor
-func BoxBuiltinType[T SafeGoFunc](name string, fn T) Value {
+func BoxBuiltinType[T SafeGoFunc](name string, constructor T) Value {
 	ptr := unsafe.Pointer(&BuiltinType{
 		Name: name,
 		Constructor: GoFunc{
-			nargs: reflect.TypeOf(fn).NumIn(),
-			ptr:   unsafe.Pointer(&fn),
+			nargs: reflect.TypeOf(constructor).NumIn(),
+			ptr:   unsafe.Pointer(&constructor),
 			mode:  ast.UndefinedMode,
 		},
 	})

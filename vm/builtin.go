@@ -5,8 +5,8 @@ type BuiltinType struct {
 	Constructor GoFunc
 }
 
-var stringType = BoxBuiltinType("string", func(a Value) (Value, *Exception) {
-	return BoxString(a.String()), nil
+var stringType = BoxBuiltinType("string", func(x Value) (Value, *Exception) {
+	return BoxString(x.String()), nil
 })
 
 var builtins = map[string]*Value{

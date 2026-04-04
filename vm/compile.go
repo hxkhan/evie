@@ -555,7 +555,18 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 						obj[index] = value
 						return Value{}, nil
 					}
-					panic("not an object")
+
+					if obj, ok := lhs.AsUserStructInstance(); ok {
+						value, err := value(fbr)
+						if err != nil {
+							return value, err
+						}
+
+						obj.Fields[index] = value
+						return Value{}, nil
+					}
+
+					panic("unresolved type")
 				}
 
 			case Global:

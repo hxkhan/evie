@@ -1,6 +1,10 @@
 package ast
 
-import "github.com/hxkhan/evie/token"
+import (
+	"fmt"
+
+	"github.com/hxkhan/evie/token"
+)
 
 type IsInstanceOf struct {
 	token.Pos
@@ -17,4 +21,14 @@ type StructDefinition struct {
 
 func (node StructDefinition) String() string {
 	return "struct"
+}
+
+type FieldAccess struct {
+	token.Pos
+	Lhs Node
+	Rhs string
+}
+
+func (fa FieldAccess) String() string {
+	return fmt.Sprintf("%v.%s", fa.Lhs, fa.Rhs)
 }

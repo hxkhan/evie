@@ -16,7 +16,7 @@ var exception = &UserStruct{
 	},
 }
 
-var signalReturn = &UserStructInstance{
+var signalReturn Exception = &UserStructInstance{
 	InstanceOf: exception,
 	Fields: map[fields.ID]Value{
 		fields.Get("kind"):    BoxString("Signal"),
@@ -24,7 +24,7 @@ var signalReturn = &UserStructInstance{
 	},
 }
 
-var signalContinue = &UserStructInstance{
+var signalContinue Exception = &UserStructInstance{
 	InstanceOf: exception,
 	Fields: map[fields.ID]Value{
 		fields.Get("kind"):    BoxString("Signal"),
@@ -32,7 +32,7 @@ var signalContinue = &UserStructInstance{
 	},
 }
 
-var signalBreak = &UserStructInstance{
+var signalBreak Exception = &UserStructInstance{
 	InstanceOf: exception,
 	Fields: map[fields.ID]Value{
 		fields.Get("kind"):    BoxString("Signal"),
@@ -71,7 +71,7 @@ func (t trace) Error() string {
 
 var ErrNotCallable error = errors.New("not a callable")
 
-var ErrTypes = &UserStructInstance{
+var ErrTypes Exception = &UserStructInstance{
 	InstanceOf: exception,
 	Fields: map[fields.ID]Value{
 		fields.Get("kind"):    BoxString("TypeError"),

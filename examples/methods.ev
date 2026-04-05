@@ -6,8 +6,15 @@ fn main() {
     whole := parts.join("_")
 
     // hello world -> ["hello", "world"] -> hello_world
-    echo message + " -> " + string(parts) + " -> " +  whole
+    echo `{message} -> {parts} -> {whole}`
 
-    // hello world -> hello|world
-    echo message + " -> " + message.split(" ").join("|")
+    echo message.contains(" ")       // true
+    echo message.endsWith("world")   // true
+    echo message.startsWith("hello") // true
+
+    echo "  ABC    ".trim() // ABC
+
+    echo message.toUpper() // HELLO WORLD
+
+    echo message.len() // 11
 }

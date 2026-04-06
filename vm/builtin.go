@@ -28,11 +28,11 @@ func NewBuiltinType[T SafeGoFunc](name string, constructor T, fields map[fields.
 }
 
 var builtins = map[string]*Value{
-	"string": BoxBuiltinType(stringType).Allocate(),
+	"string": BoxBuiltinType(typeString).Allocate(),
 	"error":  BoxUserStruct(exception).Allocate(),
 }
 
-var stringType = NewBuiltinType("string", func(x Value) (Value, Exception) {
+var typeString = NewBuiltinType("string", func(x Value) (Value, Exception) {
 	return BoxString(x.String()), nil
 }, map[fields.ID]Value{
 	fields.Get("len"): BoxGoMethod(func(this Value) (Value, Exception) {
@@ -106,7 +106,7 @@ var stringType = NewBuiltinType("string", func(x Value) (Value, Exception) {
 	}),
 })
 
-var arrayType = NewBuiltinType("array", func(x Value) (Value, Exception) {
+var typeArray = NewBuiltinType("array", func(x Value) (Value, Exception) {
 	return BoxString(x.String()), nil
 }, map[fields.ID]Value{
 	fields.Get("join"): BoxGoMethod(func(this, sep Value) (Value, Exception) {

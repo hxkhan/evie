@@ -201,7 +201,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			}
 
 			// built-ins
-			if rhs == BoxBuiltinType(stringType) {
+			if rhs == BoxBuiltinType(typeString) {
 				_, isString := lhs.AsString()
 				return BoxBool(isString), nil
 			}

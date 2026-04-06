@@ -530,7 +530,7 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 
 	switch x.scalar {
 	case kindString:
-		value, exists := stringType.Fields[f]
+		value, exists := typeString.Fields[f]
 		if !exists {
 			return Value{}, false
 		}
@@ -539,7 +539,7 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 		return boxMethod(m), true
 
 	case kindArray:
-		value, exists := arrayType.Fields[f]
+		value, exists := typeArray.Fields[f]
 		if !exists {
 			return Value{}, false
 		}
@@ -596,9 +596,9 @@ func (x Value) dotAccess(f fields.ID) (field Value) {
 
 	switch x.scalar {
 	case kindString:
-		return stringType.Fields[f]
+		return typeString.Fields[f]
 	case kindArray:
-		return arrayType.Fields[f]
+		return typeArray.Fields[f]
 	case kindPackage:
 		pkg := (*packageInstance)(x.pointer)
 		value := pkg.globals[f]

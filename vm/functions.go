@@ -3,7 +3,6 @@ package vm
 import (
 	"fmt"
 	"reflect"
-	"unsafe"
 
 	"github.com/hxkhan/evie/ast"
 )
@@ -45,24 +44,15 @@ func (fn UserFn) String() string {
 	return fmt.Sprintf("<function %v>", fn.name)
 }
 
-func (fn *UserFn) Call(args ...Value) (result Value, err error) {
+func (fn *UserFn) Call(fbr *Fiber, args ...Value) (result Value, err Exception) {
 	if len(fn.args) != len(args) {
 		if fn.name != "λ" {
 			return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(args))
 		}
-		return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(args))
+		return Value{}, CustomError("callable requires %v argument(s), %v provided", len(fn.args), len(args))
 	}
 
-	vm := fn.vm
-	vm.rt.AcquireGIL()
-	defer vm.rt.ReleaseGIL()
-
-	// fetch a fiber and reset it
-	fbr := vm.rt.fibers.Get().(*fiber)
-	fbr.synced = true
-	fbr.active = fn
-	fbr.base = 0
-	fbr.stack = fbr.stack[:0]
+	base := len(fbr.stack)
 
 	// create space for all the locals
 	for idx, escapes := range fn.locals {
@@ -74,17 +64,20 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 
 		// assign arguments
 		if idx < len(args) {
-			*fbr.stack[idx] = args[idx]
+			*fbr.stack[base+idx] = args[idx]
 		}
 	}
 
-	// prep for execution & save currently captured values
-	result, exc := fn.code(fbr)
-	//fmt.Println(exc)
+	// save current state
+	prevBase := fbr.swapBase(base)
 
-	// release non-escaping locals & fiber
+	// call the function
+	result, exc := fn.code(fbr)
+
+	// restore old state
 	fbr.push(fn.recyclable)
-	vm.rt.fibers.Put(fbr)
+	fbr.popStack(len(fn.locals))
+	fbr.swapBase(prevBase)
 
 	// don't implicitly return the return value of the last executed instruction
 	switch exc {
@@ -104,7 +97,7 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 		if fn.name != "λ" {
 			return CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), fun.Type().NumIn())
 		}
-		return CustomError("function requires %v argument(s), %v provided", len(fn.args), fun.Type().NumIn())
+		return CustomError("callable requires %v argument(s), %v provided", len(fn.args), fun.Type().NumIn())
 	}
 
 	resultKind := fun.Type().Out(0).Kind()
@@ -115,7 +108,7 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 		defer vm.rt.ReleaseGIL()
 
 		// fetch a fiber and prepare it
-		fbr := vm.rt.fibers.Get().(*fiber)
+		fbr := vm.rt.fibers.Get().(*Fiber)
 		fbr.active = fn
 		fbr.base = 0
 		fbr.stack = fbr.stack[:0]
@@ -188,73 +181,69 @@ type Method struct {
 	fn   Value
 }
 
-func (m Method) call(fbr *fiber, arguments []instruction) (result Value, exc Exception) {
+func (m Method) call(fbr *Fiber, arguments []instruction) (result Value, exc Exception) {
 	fn, ok := m.fn.AsGoFunc()
 	if !ok {
-		panic("impossible.. how did we get here?")
-		//return Value{}, notFunction
+		return Value{}, RuntimeExceptionF("impossible.. how did we get here?")
 	}
 
-	if fn.nargs-1 != len(arguments) {
-		return Value{}, CustomError("method requires %v argument(s), %v provided", fn.nargs-1, len(arguments))
+	if fn.Arguments-1 != len(arguments) {
+		return Value{}, CustomError("method requires %v argument(s), %v provided", fn.Arguments-1, len(arguments))
 	}
 
-	/* if fn.mode != ast.AgnosticMode {
-		synced := fn.Synced()
-		switch {
-		// no transition
-		case fbr.synced() == synced:
-			break
+	base := len(fbr.stack)
 
-		// to unsynced
-		case !synced:
-			fbr.vm.rt.ReleaseGIL()
-			defer fbr.vm.rt.AcquireGIL()
+	// push self
+	box := fbr.pop()
+	*box = m.this
+	fbr.stack = append(fbr.stack, box)
 
-		// to synced
-		default:
-			fbr.vm.rt.AcquireGIL()
-			defer fbr.vm.rt.ReleaseGIL()
+	for _, arg := range arguments {
+		v, exc := arg(fbr)
+		if exc != nil {
+			return v, exc
 		}
-	} */
 
-	switch fn.nargs {
-	case -1:
-		panic("variadic functions not supported yet")
-	case 0:
-		panic("how did we get a method that does not even take itself as an arguement?")
-	case 1:
-		function := *(*func(Value) (Value, Exception))(fn.ptr)
-		return function(m.this)
-	case 2:
-		function := *(*func(Value, Value) (Value, Exception))(fn.ptr)
-		arg0, err := arguments[0](fbr)
-		if err != nil {
-			return arg0, err
-		}
-		return function(m.this, arg0)
+		box := fbr.pop()
+		*box = v
+		fbr.stack = append(fbr.stack, box)
 	}
 
-	panic("unsuported call")
+	// save current state
+	prevBase := fbr.swapBase(base)
+
+	// call the function
+	result, exc = fn.Fn(fbr)
+
+	// restore old state
+	fbr.push(fn.Arguments)
+	fbr.popStack(fn.Arguments)
+	fbr.swapBase(prevBase)
+
+	return result, exc
 }
 
+type GoFuncSignature = func(fbr *Fiber) (Value, Exception)
+
 type GoFunc struct {
-	nargs int
-	ptr   unsafe.Pointer
-	mode  ast.SyncMode
+	Name      string
+	Fn        GoFuncSignature
+	Mode      ast.SyncMode
+	Arguments int
+	IsMethod  bool
 }
 
 func (fn GoFunc) Synced() bool {
-	return fn.mode == ast.SyncedMode
+	return fn.Mode == ast.SyncedMode
 }
 
-func (fn *GoFunc) call(fbr *fiber, arguments []instruction) (result Value, exc Exception) {
-	if fn.nargs != len(arguments) {
-		return Value{}, CustomError("function requires %v argument(s), %v provided", fn.nargs, len(arguments))
+func (fn *GoFunc) call(fbr *Fiber, arguments []instruction) (result Value, exc Exception) {
+	if fn.Arguments != len(arguments) {
+		return Value{}, CustomError("callable requires %v argument(s), %v provided", fn.Arguments, len(arguments))
 	}
 
 	// no transition
-	if fn.mode == ast.UndefinedMode || fbr.synced {
+	if fn.Mode == ast.UndefinedMode || fbr.synced {
 		return fn.invoke(fbr, arguments)
 	}
 
@@ -269,33 +258,56 @@ func (fn *GoFunc) call(fbr *fiber, arguments []instruction) (result Value, exc E
 }
 
 // just call; no args check; no GIL consideration
-func (fn *GoFunc) invoke(fbr *fiber, arguments []instruction) (result Value, exc Exception) {
-	switch fn.nargs {
-	case -1:
-		panic("variadic functions not supported yet")
-	case 0:
-		function := *(*func() (Value, Exception))(fn.ptr)
-		return function()
-	case 1:
-		function := *(*func(Value) (Value, Exception))(fn.ptr)
-		arg0, err := arguments[0](fbr)
-		if err != nil {
-			return arg0, err
-		}
-		return function(arg0)
-	case 2:
-		function := *(*func(Value, Value) (Value, Exception))(fn.ptr)
-		arg0, err := arguments[0](fbr)
-		if err != nil {
-			return arg0, err
+func (fn *GoFunc) invoke(fbr *Fiber, arguments []instruction) (result Value, exc Exception) {
+	base := len(fbr.stack)
+	for _, arg := range arguments {
+		v, exc := arg(fbr)
+		if exc != nil {
+			return v, exc
 		}
 
-		arg1, err := arguments[1](fbr)
-		if err != nil {
-			return arg0, err
-		}
-		return function(arg0, arg1)
+		box := fbr.pop()
+		*box = v
+		fbr.stack = append(fbr.stack, box)
 	}
 
-	panic("unsuported call")
+	// save current state
+	prevBase := fbr.swapBase(base)
+
+	// call the fucntion
+	result, exc = fn.Fn(fbr)
+
+	// restore old state
+	fbr.push(fn.Arguments)
+	fbr.popStack(fn.Arguments)
+	fbr.swapBase(prevBase)
+
+	return result, exc
+}
+
+// mostly only used when calling from Go -> GoFunc
+func (fn *GoFunc) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) {
+	if fn.Arguments != len(args) {
+		return Value{}, CustomError("callable requires %v argument(s), %v provided", fn.Arguments, len(args))
+	}
+
+	base := len(fbr.stack)
+	for _, arg := range args {
+		box := fbr.pop()
+		*box = arg
+		fbr.stack = append(fbr.stack, box)
+	}
+
+	// save current state
+	prevBase := fbr.swapBase(base)
+
+	// call the fucntion
+	result, exc = fn.Fn(fbr)
+
+	// restore old state
+	fbr.push(fn.Arguments)
+	fbr.popStack(fn.Arguments)
+	fbr.swapBase(prevBase)
+
+	return result, exc
 }

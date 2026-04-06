@@ -8,14 +8,20 @@ import (
 
 func Construct() vm.Package {
 	pkg := vm.NewHostPackage()
-	pkg.SetSymbol("wait", vm.BoxGoFunc(wait))
+	pkg.SetSymbol("wait", wait)
 	return pkg
 }
 
-func wait(duration vm.Value) (vm.Value, vm.Exception) {
-	if duration, ok := duration.AsFloat64(); ok {
-		time.Sleep(time.Millisecond * time.Duration(duration))
-		return vm.Value{}, nil
-	}
-	return vm.Value{}, vm.ErrTypes
-}
+var wait = vm.BoxGoFunc(&vm.GoFunc{
+	Name:      "wait",
+	Arguments: 1,
+	IsMethod:  false,
+	Fn: func(fbr *vm.Fiber) (vm.Value, vm.Exception) {
+		if duration, ok := fbr.GetLocal(0).AsFloat64(); ok {
+			time.Sleep(time.Millisecond * time.Duration(duration))
+			return vm.Value{}, nil
+		}
+
+		return vm.Value{}, vm.ErrTypes
+	},
+})

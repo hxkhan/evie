@@ -42,9 +42,34 @@ struct person(name, age) {
     }
 }
 
-struct color(r, g, b) {
-    fn darken(amount) { ... }
+record color(r, g, b) {
+    @constructor(this) {
+        if this.r < 0 || this.g > 255 || this.g < 0 || this.r > 255 || this.b < 0 || this.b > 255 {
+            throw "rgb values need to be between 0 and 255"
+        }
+    }
+
+    @equals(rhs) => this.r == rhs.r && this.g == rhs.g && this.b == rhs.b
+
+    black := fn() => color(0, 0, 0)
+    white := color(255, 255, 255)
+
+    darken(this, percentage) {
+        factor := 1.0 - percentage
+        return color(
+            Math.max(0, this.r * factor),
+            Math.max(0, this.g * factor),
+            Math.max(0, this.b * factor)
+        )
+    }
 }
+
+// so all functions need to be marked: takesSelf = true/false
+// then doing a dot-access on the type will return Method{this: nil, fn(this, ...)}
+// and doing a dot-access on the value will return Method{this: value, fn(this, ...)}
+
+color.darken == darken(this, ...)
+color.white.darken == BoundedMethod{this: color.white, darken(this, ...)}
 
 fn main() {
     c1 := error {

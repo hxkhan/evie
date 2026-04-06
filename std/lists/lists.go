@@ -8,13 +8,19 @@ import (
 
 func Construct() vm.Package {
 	pkg := vm.NewHostPackage()
-	pkg.SetSymbol("join", vm.BoxGoFunc(join))
+	pkg.SetSymbol("join", join)
 	return pkg
 }
 
-func join(this, sep vm.Value) (vm.Value, vm.Exception) {
-	if parts, ok := this.AsArray(); ok {
-		if sep, ok := sep.AsString(); ok {
+var join = vm.BoxGoFunc(&vm.GoFunc{
+	Name:      "join",
+	Arguments: 2,
+	IsMethod:  false,
+	Fn: func(fbr *vm.Fiber) (vm.Value, vm.Exception) {
+		parts, ok1 := fbr.GetLocal(0).AsArray()
+		sep, ok2 := fbr.GetLocal(1).AsString()
+
+		if ok1 && ok2 {
 			parts.MU.RLock()
 			defer parts.MU.RUnlock()
 
@@ -29,6 +35,7 @@ func join(this, sep vm.Value) (vm.Value, vm.Exception) {
 
 			return vm.BoxString(strings.Join(strs, sep)), nil
 		}
-	}
-	return vm.Value{}, vm.ErrTypes
-}
+
+		return vm.Value{}, vm.ErrTypes
+	},
+})

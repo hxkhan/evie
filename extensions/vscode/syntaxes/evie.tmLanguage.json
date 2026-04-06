@@ -50,12 +50,12 @@
 				{
 					"comment": "Declaration keywords",
 					"name": "keyword.declaration.evie",
-					"match": "\\b(package|pub|var|fn|struct|imports)\\b"
+					"match": "\\b(package|pub|var|fn|struct|record|static|imports)\\b"
 				},
 				{
 					"comment": "Other keywords",
 					"name": "keyword.other.evie",
-					"match": "\\b(echo)\\b"
+					"match": "\\b(echo|self|this)\\b"
 				},
 				{
 					"comment": "Await and variants",

@@ -201,7 +201,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			}
 
 			// built-ins
-			if rhs == stringType {
+			if rhs == BoxBuiltinType(stringType) {
 				_, isString := lhs.AsString()
 				return BoxBool(isString), nil
 			}
@@ -946,10 +946,10 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 				// 100% method
 				value := obj.dotAccess(index)
-				if value == nil {
+				if value.IsNil() {
 					return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", iFA.Rhs, iFA)
 				}
-				return Method{this: *obj, fn: *value}.call(fbr, arguments)
+				return Method{this: *obj, fn: value}.call(fbr, arguments)
 			}
 		}
 	}

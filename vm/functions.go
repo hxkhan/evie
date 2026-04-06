@@ -54,8 +54,8 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 	}
 
 	vm := fn.vm
-	vm.rt.AcquireGIL()
-	defer vm.rt.ReleaseGIL()
+	//vm.rt.AcquireGIL()
+	//defer vm.rt.ReleaseGIL()
 
 	// fetch a fiber and reset it
 	fbr := vm.rt.fibers.Get().(*fiber)
@@ -239,9 +239,10 @@ func (m Method) call(fbr *fiber, arguments []instruction) (result Value, exc Exc
 }
 
 type GoFunc struct {
-	nargs int
-	ptr   unsafe.Pointer
-	mode  ast.SyncMode
+	nargs    int
+	ptr      unsafe.Pointer
+	isMethod bool
+	mode     ast.SyncMode
 }
 
 func (fn GoFunc) Synced() bool {

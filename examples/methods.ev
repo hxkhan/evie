@@ -17,4 +17,14 @@ fn main() {
     echo message.toUpper() // HELLO WORLD
 
     echo message.len() // 11
+    echo message.len
+    
+    echo string.toUpper
+
+    echo parts.map(fn(v) => v.toUpper()) // v.toUpper      => Method{this: v, fn: toUpper(self)}
+    echo parts.map(string.toUpper)       // string.toUpper => fn(self)
 }
+
+
+// "john".toUpper => Method{this: "hello", fn: toUpper(self)}
+// string.toUpper => fn(self)

@@ -114,16 +114,8 @@ func BoxUserFn(fn UserFn) Value {
 }
 
 // BoxBuiltinType boxes a Go function that is a type constructor
-func BoxBuiltinType[T SafeGoFunc](name string, constructor T) Value {
-	ptr := unsafe.Pointer(&BuiltinType{
-		Name: name,
-		Constructor: GoFunc{
-			nargs: reflect.TypeOf(constructor).NumIn(),
-			ptr:   unsafe.Pointer(&constructor),
-			mode:  ast.UndefinedMode,
-		},
-	})
-	return Value{scalar: kindBuiltinType, pointer: ptr}
+func BoxBuiltinType(t *BuiltinType) Value {
+	return Value{scalar: kindBuiltinType, pointer: unsafe.Pointer(t)}
 }
 
 // BoxGoFunc boxes a sync-agnostic Go function
@@ -132,6 +124,17 @@ func BoxGoFunc[T SafeGoFunc](fn T) Value {
 		nargs: reflect.TypeOf(fn).NumIn(),
 		ptr:   unsafe.Pointer(&fn),
 		mode:  ast.UndefinedMode,
+	})
+	return Value{scalar: kindGoFunc, pointer: ptr}
+}
+
+// BoxGoFunc boxes a sync-agnostic Go function
+func BoxGoMethod[T SafeGoFunc](fn T) Value {
+	ptr := unsafe.Pointer(&GoFunc{
+		nargs:    reflect.TypeOf(fn).NumIn(),
+		ptr:      unsafe.Pointer(&fn),
+		mode:     ast.UndefinedMode,
+		isMethod: true,
 	})
 	return Value{scalar: kindGoFunc, pointer: ptr}
 }
@@ -527,27 +530,37 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 
 	switch x.scalar {
 	case kindString:
-		value, exists := stringMethods[f]
+		value, exists := stringType.Fields[f]
 		if !exists {
 			return Value{}, false
 		}
 
-		m := Method{this: x, fn: *value}
+		m := Method{this: x, fn: value}
 		return boxMethod(m), true
 
 	case kindArray:
-		value, exists := arrayMethods[f]
+		value, exists := arrayType.Fields[f]
 		if !exists {
 			return Value{}, false
 		}
 
-		m := Method{this: x, fn: *value}
+		m := Method{this: x, fn: value}
 		return boxMethod(m), true
 
 	case kindObject:
 		obj := *(*map[fields.ID]Value)(x.pointer)
 
 		value, exists := obj[f]
+		if !exists {
+			return Value{}, false
+		}
+
+		return value, true
+
+	case kindBuiltinType:
+		obj := (*BuiltinType)(x.pointer)
+
+		value, exists := obj.Fields[f]
 		if !exists {
 			return Value{}, false
 		}
@@ -576,23 +589,23 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 	return Value{}, false
 }
 
-func (x Value) dotAccess(f fields.ID) (field *Value) {
+func (x Value) dotAccess(f fields.ID) (field Value) {
 	if isKnown(x.pointer) {
-		return nil
+		return Value{}
 	}
 
 	switch x.scalar {
 	case kindString:
-		return stringMethods[f]
+		return stringType.Fields[f]
 	case kindArray:
-		return arrayMethods[f]
+		return arrayType.Fields[f]
 	case kindPackage:
 		pkg := (*packageInstance)(x.pointer)
 		value := pkg.globals[f]
 		if !value.IsPublic {
-			return nil
+			return Value{}
 		}
-		return value.Value
+		return *value.Value
 	}
 
 	panic("add more types?")

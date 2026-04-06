@@ -44,7 +44,7 @@ func (fn UserFn) String() string {
 	return fmt.Sprintf("<function %v>", fn.name)
 }
 
-func (fn *UserFn) Call(args ...Value) (result Value, err error) {
+func (fn *UserFn) Call(fbr *Fiber, args ...Value) (result Value, err Exception) {
 	if len(fn.args) != len(args) {
 		if fn.name != "λ" {
 			return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(args))
@@ -52,16 +52,7 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 		return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(args))
 	}
 
-	vm := fn.vm
-	//vm.rt.AcquireGIL()
-	//defer vm.rt.ReleaseGIL()
-
-	// fetch a fiber and reset it
-	fbr := vm.rt.fibers.Get().(*Fiber)
-	fbr.synced = true
-	fbr.active = fn
-	fbr.base = 0
-	fbr.stack = fbr.stack[:0]
+	base := len(fbr.stack)
 
 	// create space for all the locals
 	for idx, escapes := range fn.locals {
@@ -73,17 +64,20 @@ func (fn *UserFn) Call(args ...Value) (result Value, err error) {
 
 		// assign arguments
 		if idx < len(args) {
-			*fbr.stack[idx] = args[idx]
+			*fbr.stack[base+idx] = args[idx]
 		}
 	}
 
-	// prep for execution & save currently captured values
-	result, exc := fn.code(fbr)
-	//fmt.Println(exc)
+	// save current state
+	prevBase := fbr.swapBase(base)
 
-	// release non-escaping locals & fiber
+	// call the function
+	result, exc := fn.code(fbr)
+
+	// restore old state
 	fbr.push(fn.recyclable)
-	vm.rt.fibers.Put(fbr)
+	fbr.popStack(len(fn.locals))
+	fbr.swapBase(prevBase)
 
 	// don't implicitly return the return value of the last executed instruction
 	switch exc {
@@ -218,7 +212,7 @@ func (m Method) call(fbr *Fiber, arguments []instruction) (result Value, exc Exc
 	// save current state
 	prevBase := fbr.swapBase(base)
 
-	// call the fucntion
+	// call the function
 	result, exc = fn.Fn(fbr)
 
 	// restore old state

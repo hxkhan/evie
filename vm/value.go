@@ -372,7 +372,12 @@ func (x Value) String() string {
 	case kindStructInstance:
 		return (*UserStructInstance)(x.pointer).String()
 	case kindGoFunc:
+		fn := (*GoFunc)(x.pointer)
+		if fn.IsMethod {
+			return "<method>"
+		}
 		return "<function>"
+
 	case kindArray:
 		return (*Array)(x.pointer).String()
 
@@ -570,4 +575,18 @@ func (x Value) dotAccess(f fields.ID) (field Value) {
 	}
 
 	panic("add more types?")
+}
+
+func (x Value) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) {
+	if !isKnown(x.pointer) {
+		switch x.scalar {
+		case kindUserFn:
+			fn := (*UserFn)(x.pointer)
+			return fn.Call(fbr, args...)
+		case kindGoFunc:
+			fn := (*GoFunc)(x.pointer)
+			return fn.Call(fbr, args...)
+		}
+	}
+	return Value{}, RuntimeExceptionF("cannot call a non-function '%v'", x)
 }

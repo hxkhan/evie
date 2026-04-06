@@ -99,6 +99,10 @@ func New(opts Options) (vm *Instance) {
 	return vm
 }
 
+func (vm *Instance) NewFiber() (fbr *Fiber) {
+	return vm.rt.fibers.Get().(*Fiber)
+}
+
 func (vm *Instance) EvalNode(node ast.Node) (result Value, err error) {
 	vm.rt.AcquireGIL()
 	defer vm.rt.ReleaseGIL()

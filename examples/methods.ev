@@ -1,27 +1,31 @@
 package main
 
 fn main() {
-    message := "hello world"
+    message := "Lorem ipsum dolor sit amet"
+
+    echo message.split(" ")           // ["Lorem", "ipsum", "dolor", "sit", "amet"]
+    echo message.split(" ").join("_") // Lorem_ipsum_dolor_sit_amet
+
+    echo "---"
+
+    echo message.startsWith("Lorem") // true
+    echo message.endsWith("amet")    // true
+    echo message.contains("dolor")   // true
+
+    echo "---"
+
+    echo message.toUpper() // LOREM IPSUM DOLOR SIT AMET
+    echo message.len()     // 26
+
+    echo "---"
+
+    echo message.len // <method>
+    echo string.len  // <method>
+
     parts := message.split(" ")
-    whole := parts.join("_")
-
-    // hello world -> ["hello", "world"] -> hello_world
-    echo `{message} -> {parts} -> {whole}`
-
-    echo message.contains(" ")       // true
-    echo message.endsWith("world")   // true
-    echo message.startsWith("hello") // true
-
-    echo "  ABC    ".trim() // ABC
-
-    echo message.toUpper() // HELLO WORLD
-
-    echo message.len() // 11
-    echo message.len
-    echo string.toUpper
-
-    echo parts.map(fn(v) => v.toUpper()) // ["HELLO", "WORLD"]
-    echo parts.map(string.toUpper)       // ["HELLO", "WORLD"]
+    echo parts.map(fn(v) => v.toUpper()) // ["LOREM", "IPSUM", "DOLOR", "SIT", "AMET"]
+    echo parts.map(string.toUpper)       // ["LOREM", "IPSUM", "DOLOR", "SIT", "AMET"]
+    echo parts.map(string.len)           // [5, 5, 5, 3, 4]
 }
 
 

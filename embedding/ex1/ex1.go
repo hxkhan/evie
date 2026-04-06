@@ -72,10 +72,12 @@ func main() {
 		panic("symbol fib is not a function")
 	}
 
+	fbr := evm.NewFiber()
+
 	// call it & check for errors
-	result, err = add.Call(vm.BoxNumber(3), vm.BoxNumber(2))
-	if err != nil {
-		panic(err)
+	result, exc := add.Call(fbr, vm.BoxNumber(3), vm.BoxNumber(2))
+	if exc != nil {
+		panic(exc)
 	}
 
 	// print the result

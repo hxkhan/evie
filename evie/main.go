@@ -76,9 +76,11 @@ func main() {
 		return
 	}
 
+	fbr := evm.NewFiber()
+
 	before := time.Now()
-	res, err := fn.Call()
-	if err != nil {
+	res, exc := fn.Call(fbr)
+	if exc != nil {
 		fmt.Println(err)
 		return
 	}

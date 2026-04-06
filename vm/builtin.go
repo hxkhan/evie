@@ -174,34 +174,17 @@ var typeArray = NewBuiltinType("array", nil, map[fields.ID]Value{
 		Name:      "map",
 		Arguments: 2,
 		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
+		Fn: func(fbr *Fiber) (l Value, e Exception) {
 			parts, ok1 := fbr.GetLocal(0).AsArray()
-			ufn, ok2 := fbr.GetLocal(1).AsUserFn()
+			callback := fbr.GetLocal(1)
 
-			if ok1 && ok2 {
+			if ok1 {
 				parts.MU.RLock()
 				defer parts.MU.RUnlock()
 
 				result := make([]Value, len(parts.Data))
 				for i, part := range parts.Data {
-					v, exc := ufn.Call(part)
-					if exc != nil {
-						return v, exc.(Exception)
-					}
-					result[i] = v
-				}
-
-				return BoxArray(NewArray(result...)), nil
-			}
-
-			fn, ok2 := fbr.GetLocal(1).AsGoFunc()
-			if ok1 && ok2 {
-				parts.MU.RLock()
-				defer parts.MU.RUnlock()
-
-				result := make([]Value, len(parts.Data))
-				for i, part := range parts.Data {
-					v, exc := fn.Call(fbr, part)
+					v, exc := callback.Call(fbr, part)
 					if exc != nil {
 						return v, exc
 					}

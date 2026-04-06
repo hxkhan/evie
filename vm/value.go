@@ -3,12 +3,10 @@ package vm
 import (
 	"fmt"
 	"math"
-	"reflect"
 	"strconv"
 	"strings"
 	"unsafe"
 
-	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/vm/fields"
 )
 
@@ -79,17 +77,6 @@ type CustomValue interface {
 	Equals(b CustomValue) bool
 }
 
-// SafeGoFunc is a compile time safety interface so uncallable functions don't get into the system
-type SafeGoFunc interface {
-	func() (Value, Exception) |
-		func(Value) (Value, Exception) |
-		func(Value, Value) (Value, Exception) |
-		func(Value, Value, Value) (Value, Exception) |
-		func(Value, Value, Value, Value) (Value, Exception) |
-		func(Value, Value, Value, Value, Value) (Value, Exception) |
-		func(Value, Value, Value, Value, Value, Value) (Value, Exception)
-}
-
 // BoxNumber boxes a float64
 func BoxNumber(f float64) Value {
 	return Value{scalar: math.Float64bits(f), pointer: f64Type}
@@ -118,35 +105,9 @@ func BoxBuiltinType(t *BuiltinType) Value {
 	return Value{scalar: kindBuiltinType, pointer: unsafe.Pointer(t)}
 }
 
-// BoxGoFunc boxes a sync-agnostic Go function
-func BoxGoFunc[T SafeGoFunc](fn T) Value {
-	ptr := unsafe.Pointer(&GoFunc{
-		nargs: reflect.TypeOf(fn).NumIn(),
-		ptr:   unsafe.Pointer(&fn),
-		mode:  ast.UndefinedMode,
-	})
-	return Value{scalar: kindGoFunc, pointer: ptr}
-}
-
-// BoxGoFunc boxes a sync-agnostic Go function
-func BoxGoMethod[T SafeGoFunc](fn T) Value {
-	ptr := unsafe.Pointer(&GoFunc{
-		nargs:    reflect.TypeOf(fn).NumIn(),
-		ptr:      unsafe.Pointer(&fn),
-		mode:     ast.UndefinedMode,
-		isMethod: true,
-	})
-	return Value{scalar: kindGoFunc, pointer: ptr}
-}
-
-// BoxGoFunc boxes a synced Go function always assuming the safety of the GIL
-func BoxGoFuncSynced[T SafeGoFunc](fn T) Value {
-	ptr := unsafe.Pointer(&GoFunc{
-		nargs: reflect.TypeOf(fn).NumIn(),
-		ptr:   unsafe.Pointer(&fn),
-		mode:  ast.SyncedMode,
-	})
-	return Value{scalar: kindGoFunc, pointer: ptr}
+// BoxGoFunc boxes a Go function
+func BoxGoFunc(fn *GoFunc) Value {
+	return Value{scalar: kindGoFunc, pointer: unsafe.Pointer(fn)}
 }
 
 // BoxArray boxes an evie array

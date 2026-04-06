@@ -1,6 +1,6 @@
 package vm
 
-type fiber struct {
+type Fiber struct {
 	vm     *Instance // the instance that spawned this fiber
 	synced bool      // run in synchronized mode or not
 	active *UserFn   // currently active user function
@@ -9,14 +9,14 @@ type fiber struct {
 	boxes  []Value   // pooled boxes for this fiber
 }
 
-func (fbr *fiber) get(binding local) *Value {
+func (fbr *Fiber) get(binding local) *Value {
 	if !binding.isCaptured {
 		return fbr.stack[fbr.base+int(binding.index)]
 	}
 	return fbr.active.references[binding.index]
 }
 
-func (fbr *fiber) set(binding local, value Value) {
+func (fbr *Fiber) set(binding local, value Value) {
 	if !binding.isCaptured {
 		*(fbr.stack[fbr.base+int(binding.index)]) = value
 		return
@@ -24,43 +24,43 @@ func (fbr *fiber) set(binding local, value Value) {
 	*(fbr.active.references[int(binding.index)]) = value
 }
 
-func (fbr *fiber) getLocal(index int16) Value {
+func (fbr *Fiber) GetLocal(index int16) Value {
 	return *(fbr.stack[fbr.base+int(index)])
 }
 
-func (fbr *fiber) setLocal(index int, value Value) {
+func (fbr *Fiber) setLocal(index int, value Value) {
 	*(fbr.stack[fbr.base+index]) = value
 }
 
-func (fbr *fiber) getCaptured(index int16) Value {
+func (fbr *Fiber) getCaptured(index int16) Value {
 	return *(fbr.active.references[index])
 }
 
-func (fbr *fiber) getLocalByRef(index int) *Value {
+func (fbr *Fiber) getLocalByRef(index int) *Value {
 	return fbr.stack[fbr.base+index]
 }
 
-func (fbr *fiber) getCapturedByRef(index int) *Value {
+func (fbr *Fiber) getCapturedByRef(index int) *Value {
 	return fbr.active.references[index]
 }
 
-func (fbr *fiber) popStack(n int) {
+func (fbr *Fiber) popStack(n int) {
 	fbr.stack = fbr.stack[:len(fbr.stack)-n]
 }
 
-func (fbr *fiber) swapBase(base int) (old int) {
+func (fbr *Fiber) swapBase(base int) (old int) {
 	old = fbr.base
 	fbr.base = base
 	return old
 }
 
-func (fbr *fiber) swapActive(new *UserFn) (old *UserFn) {
+func (fbr *Fiber) swapActive(new *UserFn) (old *UserFn) {
 	old = fbr.active
 	fbr.active = new
 	return old
 }
 
-func (fbr *fiber) pop() (v *Value) {
+func (fbr *Fiber) pop() (v *Value) {
 	if len(fbr.boxes) == 0 {
 		return new(Value)
 	}
@@ -71,7 +71,7 @@ func (fbr *fiber) pop() (v *Value) {
 	return v
 }
 
-func (fbr *fiber) push(amount int) {
+func (fbr *Fiber) push(amount int) {
 	size := len(fbr.boxes) + amount
 	if size <= cap(fbr.boxes) {
 		fbr.boxes = fbr.boxes[:size]

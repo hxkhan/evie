@@ -92,7 +92,7 @@ func New(opts Options) (vm *Instance) {
 
 	vm.rt.fibers = sync.Pool{
 		New: func() any {
-			return &fiber{vm: vm, boxes: make([]Value, 48)}
+			return &Fiber{vm: vm, boxes: make([]Value, 48)}
 		},
 	}
 
@@ -110,7 +110,7 @@ func (vm *Instance) EvalNode(node ast.Node) (result Value, err error) {
 		}
 		result = v
 	} else {
-		fbr := vm.rt.fibers.Get().(*fiber)
+		fbr := vm.rt.fibers.Get().(*Fiber)
 		fbr.synced = true
 		fbr.active = &UserFn{funcInfoStatic: &funcInfoStatic{name: "anonymous"}}
 		fbr.base = 0

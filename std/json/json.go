@@ -8,7 +8,7 @@ import (
 
 func Construct() vm.Package {
 	pkg := vm.NewHostPackage()
-	pkg.SetSymbol("decode", vm.BoxGoFunc(decode))
+	//pkg.SetSymbol("decode", vm.BoxGoFunc(decode))
 	return pkg
 }
 

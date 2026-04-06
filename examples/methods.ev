@@ -18,11 +18,10 @@ fn main() {
 
     echo message.len() // 11
     echo message.len
-    
     echo string.toUpper
 
-    echo parts.map(fn(v) => v.toUpper()) // v.toUpper      => Method{this: v, fn: toUpper(self)}
-    echo parts.map(string.toUpper)       // string.toUpper => fn(self)
+    echo parts.map(fn(v) => v.toUpper()) // ["HELLO", "WORLD"]
+    echo parts.map(string.toUpper)       // ["HELLO", "WORLD"]
 }
 
 

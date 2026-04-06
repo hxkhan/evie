@@ -49,7 +49,7 @@ func (fn *UserFn) Call(fbr *Fiber, args ...Value) (result Value, err Exception) 
 		if fn.name != "λ" {
 			return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(args))
 		}
-		return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(args))
+		return Value{}, CustomError("callable requires %v argument(s), %v provided", len(fn.args), len(args))
 	}
 
 	base := len(fbr.stack)
@@ -97,7 +97,7 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 		if fn.name != "λ" {
 			return CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), fun.Type().NumIn())
 		}
-		return CustomError("function requires %v argument(s), %v provided", len(fn.args), fun.Type().NumIn())
+		return CustomError("callable requires %v argument(s), %v provided", len(fn.args), fun.Type().NumIn())
 	}
 
 	resultKind := fun.Type().Out(0).Kind()
@@ -239,7 +239,7 @@ func (fn GoFunc) Synced() bool {
 
 func (fn *GoFunc) call(fbr *Fiber, arguments []instruction) (result Value, exc Exception) {
 	if fn.Arguments != len(arguments) {
-		return Value{}, CustomError("function requires %v argument(s), %v provided", fn.Arguments, len(arguments))
+		return Value{}, CustomError("callable requires %v argument(s), %v provided", fn.Arguments, len(arguments))
 	}
 
 	// no transition
@@ -285,9 +285,10 @@ func (fn *GoFunc) invoke(fbr *Fiber, arguments []instruction) (result Value, exc
 	return result, exc
 }
 
+// mostly only used when calling from Go -> GoFunc
 func (fn *GoFunc) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) {
 	if fn.Arguments != len(args) {
-		return Value{}, CustomError("function requires %v argument(s), %v provided", fn.Arguments, len(args))
+		return Value{}, CustomError("callable requires %v argument(s), %v provided", fn.Arguments, len(args))
 	}
 
 	base := len(fbr.stack)

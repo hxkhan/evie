@@ -81,7 +81,7 @@ func main() {
 	before := time.Now()
 	res, exc := fn.Call(fbr)
 	if exc != nil {
-		fmt.Println(err)
+		fmt.Println(exc)
 		return
 	}
 

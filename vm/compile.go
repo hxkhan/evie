@@ -762,7 +762,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				if fn.name != "λ" {
 					panic(CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments)))
 				}
-				panic(CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments)))
+				panic(CustomError("callable requires %v argument(s), %v provided", len(fn.args), len(arguments)))
 			}
 
 			// optimise: call to ourselves (recursion)
@@ -968,7 +968,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				if fn.name != "λ" {
 					return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments))
 				}
-				return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments))
+				return Value{}, CustomError("callable requires %v argument(s), %v provided", len(fn.args), len(arguments))
 			}
 
 			// setup stack locals
@@ -1060,7 +1060,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					if fn.name != "λ" {
 						return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments))
 					}
-					return Value{}, CustomError("function requires %v argument(s), %v provided", len(fn.args), len(arguments))
+					return Value{}, CustomError("callable requires %v argument(s), %v provided", len(fn.args), len(arguments))
 				}
 
 				// evaluate arguments
@@ -1132,7 +1132,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 			// try go func
 			if fn, isGoFunc := value.AsGoFunc(); isGoFunc {
 				if fn.Arguments != len(arguments) {
-					return Value{}, CustomError("function requires %v argument(s), %v provided", fn.Arguments, len(arguments))
+					return Value{}, CustomError("callable requires %v argument(s), %v provided", fn.Arguments, len(arguments))
 				}
 
 				task := make(chan evaluation, 1)

@@ -1140,6 +1140,11 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					var result Value
 					var exc Exception
 
+					// setup new fiber
+					fbr := vm.rt.fibers.Get().(*Fiber)
+					fbr.base = 0
+					fbr.stack = fbr.stack[:0]
+
 					// run code
 					if fn.Mode == ast.UndefinedMode {
 						result, exc = fn.invoke(fbr, arguments)

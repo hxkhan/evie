@@ -19,8 +19,8 @@ fn main() {
 
     echo "---"
 
-    echo message.len // <method>
-    echo string.len  // <method>
+    echo message.len // <callable>
+    echo string.len  // <callable>
 
     parts := message.split(" ")
     echo parts.map(fn(v) => v.toUpper()) // ["LOREM", "IPSUM", "DOLOR", "SIT", "AMET"]

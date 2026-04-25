@@ -949,7 +949,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				if value.IsNil() {
 					return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", iFA.Rhs, iFA)
 				}
-				return Method{this: *obj, fn: value}.call(fbr, arguments)
+				return BoundMethod{this: *obj, fn: value}.call(fbr, arguments)
 			}
 		}
 	}

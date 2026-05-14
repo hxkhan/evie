@@ -49,7 +49,7 @@ const (
 	kindString = iota
 	kindUserFn
 	kindGoFunc
-	kindMethod
+	kindBoundMethod
 	kindArray
 	kindTask
 	kindPackage
@@ -58,6 +58,7 @@ const (
 	kindBuiltinType
 	kindStruct
 	kindStructInstance
+	kindError
 	kindCustom
 )
 
@@ -140,13 +141,18 @@ func BoxTask(task chan evaluation) Value {
 	return Value{scalar: packageType, pointer: unsafe.Pointer(pkg.(*packageInstance))}
 } */
 
+// BoxError boxes an evie error
+func BoxError(err *Error) Value {
+	return Value{scalar: kindError, pointer: unsafe.Pointer(err)}
+}
+
 // Box boxes an evie package
 func (pkg *packageInstance) Box() Value {
 	return Value{scalar: kindPackage, pointer: unsafe.Pointer(pkg)}
 }
 
-func boxMethod(m Method) Value {
-	return Value{scalar: kindMethod, pointer: unsafe.Pointer(&m)}
+func boxMethod(m BoundMethod) Value {
+	return Value{scalar: kindBoundMethod, pointer: unsafe.Pointer(&m)}
 }
 
 // BoxBuffer boxes a Golang byte slice
@@ -253,11 +259,18 @@ func (x Value) AsPackage() (pkg Package, ok bool) {
 	return (*packageInstance)(x.pointer), true
 }
 
-func (x Value) asMethod() (m *Method, ok bool) {
-	if x.scalar != kindMethod || isKnown(x.pointer) {
+func (x Value) AsError() (err *Error, ok bool) {
+	if x.scalar != kindError || isKnown(x.pointer) {
 		return nil, false
 	}
-	return (*Method)(x.pointer), true
+	return (*Error)(x.pointer), true
+}
+
+func (x Value) asMethod() (m *BoundMethod, ok bool) {
+	if x.scalar != kindBoundMethod || isKnown(x.pointer) {
+		return nil, false
+	}
+	return (*BoundMethod)(x.pointer), true
 }
 
 func (x Value) AsBuffer() (buffer []byte, ok bool) {
@@ -368,15 +381,16 @@ func (x Value) String() string {
 	case kindString:
 		return *(*string)(x.pointer)
 	case kindUserFn:
-		return (*UserFn)(x.pointer).String()
+		//return (*UserFn)(x.pointer).String()
+		return "callable"
 	case kindStructInstance:
 		return (*UserStructInstance)(x.pointer).String()
 	case kindGoFunc:
 		fn := (*GoFunc)(x.pointer)
 		if fn.IsMethod {
-			return "<method>"
+			return "<callable>"
 		}
-		return "<function>"
+		return "<callable>"
 
 	case kindArray:
 		return (*Array)(x.pointer).String()
@@ -418,13 +432,17 @@ func (x Value) String() string {
 		return "<task>"
 	case kindPackage:
 		return "<package>"
-	case kindMethod:
-		return "<method>"
+	case kindBoundMethod:
+		//m := (*BoundMethod)(x.pointer)
+		return "<callable>"
 	case kindBuiltinType:
 		obj := (*BuiltinType)(x.pointer)
 		return fmt.Sprintf("<type %v>", obj.Name)
 	case kindBuffer:
 		return fmt.Sprintf("<buffer %v>", x.pointer)
+	case kindError:
+		obj := (*Error)(x.pointer)
+		return obj.Error()
 	case kindCustom:
 		cv := (*(*CustomValue)(x.pointer))
 		return cv.String()
@@ -458,7 +476,7 @@ func (x Value) TypeOf() string {
 		return "task"
 	case kindPackage:
 		return "package"
-	case kindMethod:
+	case kindBoundMethod:
 		return "method"
 	case kindBuffer:
 		return "buffer"
@@ -501,7 +519,7 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 			return Value{}, false
 		}
 
-		m := Method{this: x, fn: value}
+		m := BoundMethod{this: x, fn: value}
 		return boxMethod(m), true
 
 	case kindArray:
@@ -510,7 +528,7 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 			return Value{}, false
 		}
 
-		m := Method{this: x, fn: value}
+		m := BoundMethod{this: x, fn: value}
 		return boxMethod(m), true
 
 	case kindObject:
@@ -586,7 +604,10 @@ func (x Value) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) {
 		case kindGoFunc:
 			fn := (*GoFunc)(x.pointer)
 			return fn.Call(fbr, args...)
+		case kindBoundMethod:
+			bm := (*BoundMethod)(x.pointer)
+			return bm.Call(fbr, args...)
 		}
 	}
-	return Value{}, RuntimeExceptionF("cannot call a non-function '%v'", x)
+	return Value{}, RuntimeExceptionF("cannot invoke a non-callable '%v'", x)
 }

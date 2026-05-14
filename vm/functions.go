@@ -40,9 +40,9 @@ func (fn UserFn) Synced() bool {
 	return fn.mode == ast.SyncedMode
 }
 
-func (fn UserFn) String() string {
+/* func (fn UserFn) String() string {
 	return fmt.Sprintf("<function %v>", fn.name)
-}
+} */
 
 func (fn *UserFn) Call(fbr *Fiber, args ...Value) (result Value, err Exception) {
 	if len(fn.args) != len(args) {
@@ -176,12 +176,12 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 	return nil
 }
 
-type Method struct {
+type BoundMethod struct {
 	this Value
 	fn   Value
 }
 
-func (m Method) call(fbr *Fiber, arguments []instruction) (result Value, exc Exception) {
+func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (result Value, exc Exception) {
 	fn, ok := m.fn.AsGoFunc()
 	if !ok {
 		return Value{}, RuntimeExceptionF("impossible.. how did we get here?")
@@ -223,14 +223,51 @@ func (m Method) call(fbr *Fiber, arguments []instruction) (result Value, exc Exc
 	return result, exc
 }
 
+func (m BoundMethod) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) {
+	fn, ok := m.fn.AsGoFunc()
+	if !ok {
+		return Value{}, RuntimeExceptionF("impossible.. how did we get here?")
+	}
+
+	if fn.Arguments-1 != len(args) {
+		return Value{}, CustomError("method requires %v argument(s), %v provided", fn.Arguments-1, len(args))
+	}
+
+	base := len(fbr.stack)
+
+	// push self
+	box := fbr.pop()
+	*box = m.this
+	fbr.stack = append(fbr.stack, box)
+
+	for _, v := range args {
+		box := fbr.pop()
+		*box = v
+		fbr.stack = append(fbr.stack, box)
+	}
+
+	// save current state
+	prevBase := fbr.swapBase(base)
+
+	// call the function
+	result, exc = fn.Fn(fbr)
+
+	// restore old state
+	fbr.push(fn.Arguments)
+	fbr.popStack(fn.Arguments)
+	fbr.swapBase(prevBase)
+
+	return result, exc
+}
+
 type GoFuncSignature = func(fbr *Fiber) (Value, Exception)
 
 type GoFunc struct {
 	Name      string
-	Fn        GoFuncSignature
-	Mode      ast.SyncMode
 	Arguments int
 	IsMethod  bool
+	Mode      ast.SyncMode
+	Fn        GoFuncSignature
 }
 
 func (fn GoFunc) Synced() bool {

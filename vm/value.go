@@ -58,6 +58,7 @@ const (
 	kindBuiltinType
 	kindStruct
 	kindStructInstance
+	kindError
 	kindCustom
 )
 
@@ -139,6 +140,11 @@ func BoxTask(task chan evaluation) Value {
 /* func BoxPackage(pkg Package) Value {
 	return Value{scalar: packageType, pointer: unsafe.Pointer(pkg.(*packageInstance))}
 } */
+
+// BoxError boxes an evie error
+func BoxError(err *Error) Value {
+	return Value{scalar: kindError, pointer: unsafe.Pointer(err)}
+}
 
 // Box boxes an evie package
 func (pkg *packageInstance) Box() Value {
@@ -251,6 +257,13 @@ func (x Value) AsPackage() (pkg Package, ok bool) {
 		return nil, false
 	}
 	return (*packageInstance)(x.pointer), true
+}
+
+func (x Value) AsError() (err *Error, ok bool) {
+	if x.scalar != kindError || isKnown(x.pointer) {
+		return nil, false
+	}
+	return (*Error)(x.pointer), true
 }
 
 func (x Value) asMethod() (m *BoundMethod, ok bool) {
@@ -427,6 +440,9 @@ func (x Value) String() string {
 		return fmt.Sprintf("<type %v>", obj.Name)
 	case kindBuffer:
 		return fmt.Sprintf("<buffer %v>", x.pointer)
+	case kindError:
+		obj := (*Error)(x.pointer)
+		return obj.Error()
 	case kindCustom:
 		cv := (*(*CustomValue)(x.pointer))
 		return cv.String()

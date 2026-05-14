@@ -204,6 +204,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			if rhs == BoxBuiltinType(typeString) {
 				_, isString := lhs.AsString()
 				return BoxBool(isString), nil
+			} else if rhs == BoxBuiltinType(typeError) {
+				_, isError := lhs.AsError()
+				return BoxBool(isError), nil
 			}
 
 			return BoxBool(false), nil
@@ -1503,7 +1506,7 @@ func (vm *Instance) emitCatch(node ast.Catch) instruction {
 		if err != nil {
 			if err != signalReturn && err != signalContinue && err != signalBreak {
 				// convert exception to error-as-value and return
-				return BoxUserStructInstance(err), nil
+				return BoxError(err), nil
 			}
 
 			// propagate as normal

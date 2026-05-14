@@ -22,8 +22,16 @@ func NewBuiltinType(name string, constructor *GoFunc, fields map[fields.ID]Value
 
 var builtins = map[string]*Value{
 	"string": BoxBuiltinType(typeString).Allocate(),
-	"error":  BoxUserStruct(exception).Allocate(),
+	"error":  BoxBuiltinType(typeError).Allocate(),
 }
+
+var typeError = NewBuiltinType("error", &GoFunc{
+	Name: "error",
+	Fn: func(fbr *Fiber) (Value, Exception) {
+		return BoxString(fbr.GetLocal(0).String()), nil
+	},
+	Arguments: 1,
+}, nil)
 
 var typeString = NewBuiltinType("string", &GoFunc{
 	Name: "string",

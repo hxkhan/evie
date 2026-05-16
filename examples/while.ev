@@ -1,7 +1,8 @@
 package main
 
 fn main() {
-    var x := 10
+    var x: int = 10
+
     while x > 0 {
         x -= 1
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/ds"
+	"github.com/hxkhan/evie/types"
 	"github.com/hxkhan/evie/vm/fields"
 )
 
@@ -342,10 +343,10 @@ func (vm *Instance) runPackage(node ast.Package) (Value, Exception) {
 			// create a stub for now
 			fn := BoxUserFn(UserFn{
 				funcInfoStatic: &funcInfoStatic{
-					name: fn.Name,
-					args: fn.Args,
-					mode: fn.SyncMode,
-					vm:   vm,
+					name:   fn.Name,
+					params: fn.Params,
+					mode:   fn.SyncMode,
+					vm:     vm,
 				},
 			})
 			this.globals[index] = Global{Value: &fn, IsStatic: true}
@@ -408,9 +409,29 @@ func (vm *Instance) runPackage(node ast.Package) (Value, Exception) {
 			vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: ufn.funcInfoStatic})
 			vm.cp.closures.Last(0).scope.OpenBlock()
 
+			// Build the function type
+			t := &types.FnType{}
+
+			if fn.ReturnType != nil {
+				returnType, ok := types.From(fn.ReturnType)
+				if !ok {
+					panic("return type not found")
+				}
+				t.Return = returnType
+			}
+
 			// declare the fn arguments and only then compile the code
-			for _, arg := range fn.Args {
-				vm.cp.closures.Last(0).scope.Declare(arg, false)
+			for _, arg := range fn.Params {
+				if arg.Type == nil {
+					panic("undefined argument type")
+				}
+
+				paramType, ok := types.From(arg.Type)
+				if !ok {
+					panic("param type could not be determined")
+				}
+				t.Params = append(t.Params, paramType)
+				vm.cp.closures.Last(0).scope.Declare(arg.Name, false, paramType)
 			}
 
 			ufn.code = vm.compile(fn.Action)
@@ -436,7 +457,12 @@ func (vm *Instance) runPackage(node ast.Package) (Value, Exception) {
 }
 
 func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
-	index, success := vm.cp.closures.Last(0).scope.Declare(node.Name, node.IsStatic)
+	t, ok := types.From(node.Type)
+	if !ok {
+		panic("variable type could not be determined")
+	}
+
+	index, success := vm.cp.closures.Last(0).scope.Declare(node.Name, node.IsStatic, t)
 	if !success {
 		panic(fmt.Errorf("double declaration of %s", node.Name))
 	}
@@ -480,13 +506,13 @@ func (vm *Instance) emitIdentGet(node ast.Ident) instruction {
 	}
 
 	switch v := variable.(type) {
-	case local:
+	case binding[local]:
 		return func(fbr *Fiber) (Value, Exception) {
-			return *fbr.get(v), nil
+			return *fbr.get(v.Value), nil
 		}
-	case Global:
+	case binding[Global]:
 		return func(fbr *Fiber) (Value, Exception) {
-			return *v.Value, nil
+			return *v.Value.Value, nil
 		}
 	}
 
@@ -661,18 +687,38 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 
 	// create static info object
 	info := &funcInfoStatic{
-		name: node.Name,
-		args: node.Args,
-		mode: mode,
-		vm:   vm,
+		name:   node.Name,
+		params: node.Params,
+		mode:   mode,
+		vm:     vm,
 	}
 
 	vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: info})
 	vm.cp.closures.Last(0).scope.OpenBlock()
 
+	// Build the function type
+	t := &types.FnType{}
+
+	if node.ReturnType != nil {
+		returnType, ok := types.From(node.ReturnType)
+		if !ok {
+			panic("return type not found")
+		}
+		t.Return = returnType
+	}
+
 	// declare the fn arguments and only then compile the code
-	for _, arg := range node.Args {
-		vm.cp.closures.Last(0).scope.Declare(arg, false)
+	for _, arg := range node.Params {
+		if arg.Type == nil {
+			panic("undefined argument type")
+		}
+
+		paramType, ok := types.From(arg.Type)
+		if !ok {
+			panic("param type could not be determined")
+		}
+		t.Params = append(t.Params, paramType)
+		vm.cp.closures.Last(0).scope.Declare(arg.Name, false, paramType)
 	}
 
 	info.code = vm.compile(node.Action)
@@ -723,7 +769,7 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 		panic("cannot declare an fn statement with no name")
 	}
 
-	index, ok := vm.cp.closures.Last(0).scope.Declare(node.Name, true)
+	index, ok := vm.cp.closures.Last(0).scope.Declare(node.Name, true, t)
 	if !ok {
 		panic(fmt.Errorf("double declaration of %s", node.Name))
 	}
@@ -761,11 +807,11 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 	if value, ok := vm.evaluate(node.Fn).(Value); ok {
 		// try evie fn
 		if fn, isUserFn := value.AsUserFn(); isUserFn {
-			if len(fn.args) != len(arguments) {
+			if len(fn.params) != len(arguments) {
 				if fn.name != "λ" {
-					panic(CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments)))
+					panic(CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.params), len(arguments)))
 				}
-				panic(CustomError("callable requires %v argument(s), %v provided", len(fn.args), len(arguments)))
+				panic(CustomError("callable requires %v argument(s), %v provided", len(fn.params), len(arguments)))
 			}
 
 			// optimise: call to ourselves (recursion)
@@ -929,10 +975,10 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 	// optimise: calling methods (avoids heap allocation of Method{})
 	if iFA, ok := node.Fn.(ast.FieldAccess); ok {
-		if lhs, ok := vm.evaluate(iFA.Lhs).(local); ok {
+		if lhs, ok := vm.evaluate(iFA.Lhs).(binding[local]); ok {
 			index := fields.Get(iFA.Rhs)
 			return func(fbr *Fiber) (Value, Exception) {
-				obj := fbr.get(lhs)
+				obj := fbr.get(lhs.Value)
 				if pkg, ok := obj.asPackage(); ok {
 					value, exists := pkg.globals[index]
 					if !exists {
@@ -967,11 +1013,11 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 		// check if it is a user function
 		if fn, isUserFn := value.AsUserFn(); isUserFn {
-			if len(fn.args) != len(arguments) {
+			if len(fn.params) != len(arguments) {
 				if fn.name != "λ" {
-					return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments))
+					return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.params), len(arguments))
 				}
-				return Value{}, CustomError("callable requires %v argument(s), %v provided", len(fn.args), len(arguments))
+				return Value{}, CustomError("callable requires %v argument(s), %v provided", len(fn.params), len(arguments))
 			}
 
 			// setup stack locals
@@ -1059,11 +1105,11 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 
 			// check if it is a user function
 			if fn, isUserFn := value.AsUserFn(); isUserFn {
-				if len(fn.args) != len(arguments) {
+				if len(fn.params) != len(arguments) {
 					if fn.name != "λ" {
-						return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments))
+						return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.params), len(arguments))
 					}
-					return Value{}, CustomError("callable requires %v argument(s), %v provided", len(fn.args), len(arguments))
+					return Value{}, CustomError("callable requires %v argument(s), %v provided", len(fn.params), len(arguments))
 				}
 
 				// evaluate arguments
@@ -1187,14 +1233,14 @@ func (vm *Instance) emitReturn(node ast.Return) instruction {
 				panic(err)
 			}
 
-			if v, isLocal := variable.(local); isLocal {
-				if v.isCaptured {
+			if v, isLocal := variable.(binding[local]); isLocal {
+				if v.Value.isCaptured {
 					return func(fbr *Fiber) (Value, Exception) {
-						return fbr.getCaptured(v.index), signalReturn
+						return fbr.getCaptured(v.Value.index), signalReturn
 					}
 				}
 				return func(fbr *Fiber) (Value, Exception) {
-					return fbr.GetLocal(v.index), signalReturn
+					return fbr.GetLocal(v.Value.index), signalReturn
 				}
 			}
 		}
@@ -1389,14 +1435,14 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 					panic(err)
 				}
 
-				if v, isLocal := variable.(local); isLocal {
-					if v.isCaptured {
+				if v, isLocal := variable.(binding[local]); isLocal {
+					if v.Value.isCaptured {
 						return func(fbr *Fiber) (Value, Exception) {
-							return fbr.getCaptured(v.index), signalReturn
+							return fbr.getCaptured(v.Value.index), signalReturn
 						}
 					}
 					return func(fbr *Fiber) (Value, Exception) {
-						return fbr.GetLocal(v.index), signalReturn
+						return fbr.GetLocal(v.Value.index), signalReturn
 					}
 				}
 			}
@@ -1529,13 +1575,13 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 	if lhs := vm.evaluate(node.Lhs); lhs != nil {
 		if rhs := vm.evaluate(node.Rhs); rhs != nil {
 			// optimise: lhs being a local
-			if lhs, isLocal := lhs.(local); isLocal {
+			if lhs, isLocal := lhs.(binding[local]); isLocal {
 				// optimise: rhs being a local
-				if rhs, isLocal := rhs.(local); isLocal {
+				if rhs, isLocal := rhs.(binding[local]); isLocal {
 					switch node.Operator {
 					case ast.AddOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs, rhs := *fbr.get(lhs), *fbr.get(rhs)
+							lhs, rhs := *fbr.get(lhs.Value), *fbr.get(rhs.Value)
 							if result, ok := lhs.Add(rhs); ok {
 								return result, nil
 							}
@@ -1544,7 +1590,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.SubOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs, rhs := *fbr.get(lhs), *fbr.get(rhs)
+							lhs, rhs := *fbr.get(lhs.Value), *fbr.get(rhs.Value)
 							if result, ok := lhs.Sub(rhs); ok {
 								return result, nil
 							}
@@ -1553,7 +1599,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.MulOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs, rhs := *fbr.get(lhs), *fbr.get(rhs)
+							lhs, rhs := *fbr.get(lhs.Value), *fbr.get(rhs.Value)
 							if result, ok := lhs.Mul(rhs); ok {
 								return result, nil
 							}
@@ -1562,7 +1608,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.DivOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs, rhs := *fbr.get(lhs), *fbr.get(rhs)
+							lhs, rhs := *fbr.get(lhs.Value), *fbr.get(rhs.Value)
 							if result, ok := lhs.Mul(rhs); ok {
 								return result, nil
 							}
@@ -1571,7 +1617,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.ModOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs, rhs := *fbr.get(lhs), *fbr.get(rhs)
+							lhs, rhs := *fbr.get(lhs.Value), *fbr.get(rhs.Value)
 							if result, ok := lhs.Mod(rhs); ok {
 								return result, nil
 							}
@@ -1580,13 +1626,13 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.EqOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs, rhs := *fbr.get(lhs), *fbr.get(rhs)
+							lhs, rhs := *fbr.get(lhs.Value), *fbr.get(rhs.Value)
 							return BoxBool(lhs.Equals(rhs)), nil
 						}
 
 					case ast.LtOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs, rhs := *fbr.get(lhs), *fbr.get(rhs)
+							lhs, rhs := *fbr.get(lhs.Value), *fbr.get(rhs.Value)
 							if result, ok := lhs.LessThan(rhs); ok {
 								return result, nil
 							}
@@ -1595,7 +1641,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.GtOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs, rhs := *fbr.get(lhs), *fbr.get(rhs)
+							lhs, rhs := *fbr.get(lhs.Value), *fbr.get(rhs.Value)
 							if result, ok := lhs.GreaterThan(rhs); ok {
 								return result, nil
 							}
@@ -1604,7 +1650,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.LtEqOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs, rhs := *fbr.get(lhs), *fbr.get(rhs)
+							lhs, rhs := *fbr.get(lhs.Value), *fbr.get(rhs.Value)
 							if result, ok := lhs.LessThanOrEqualTo(rhs); ok {
 								return result, nil
 							}
@@ -1613,7 +1659,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.GtEqOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs, rhs := *fbr.get(lhs), *fbr.get(rhs)
+							lhs, rhs := *fbr.get(lhs.Value), *fbr.get(rhs.Value)
 							if result, ok := lhs.GreaterThanOrEqualTo(rhs); ok {
 								return result, nil
 							}
@@ -1622,9 +1668,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.OrOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							if fbr.get(lhs).IsTruthy() {
+							if fbr.get(lhs.Value).IsTruthy() {
 								return BoxBool(true), nil
-							} else if fbr.get(rhs).IsTruthy() {
+							} else if fbr.get(rhs.Value).IsTruthy() {
 								return BoxBool(true), nil
 							}
 							return BoxBool(false), nil
@@ -1632,7 +1678,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.AndOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							return BoxBool(fbr.get(lhs).IsTruthy() && fbr.get(rhs).IsTruthy()), nil
+							return BoxBool(fbr.get(lhs.Value).IsTruthy() && fbr.get(rhs.Value).IsTruthy()), nil
 						}
 					}
 				}
@@ -1642,7 +1688,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					switch node.Operator {
 					case ast.AddOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := *fbr.get(lhs)
+							lhs := *fbr.get(lhs.Value)
 							if result, ok := lhs.Add(rhs); ok {
 								return result, nil
 							}
@@ -1651,7 +1697,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.SubOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := *fbr.get(lhs)
+							lhs := *fbr.get(lhs.Value)
 							if result, ok := lhs.Sub(rhs); ok {
 								return result, nil
 							}
@@ -1660,7 +1706,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.MulOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := *fbr.get(lhs)
+							lhs := *fbr.get(lhs.Value)
 							if result, ok := lhs.Mul(rhs); ok {
 								return result, nil
 							}
@@ -1669,7 +1715,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.DivOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := *fbr.get(lhs)
+							lhs := *fbr.get(lhs.Value)
 							if result, ok := lhs.Div(rhs); ok {
 								return result, nil
 							}
@@ -1678,8 +1724,8 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.ModOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := *fbr.get(lhs)
-							if result, ok := lhs.Div(rhs); ok {
+							lhs := *fbr.get(lhs.Value)
+							if result, ok := lhs.Mod(rhs); ok {
 								return result, nil
 							}
 							return Value{}, operatorError("%", lhs, rhs)
@@ -1687,13 +1733,13 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.EqOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := fbr.get(lhs)
+							lhs := fbr.get(lhs.Value)
 							return BoxBool(lhs.Equals(rhs)), nil
 						}
 
 					case ast.LtOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := *fbr.get(lhs)
+							lhs := *fbr.get(lhs.Value)
 							if result, ok := lhs.LessThan(rhs); ok {
 								return result, nil
 							}
@@ -1702,7 +1748,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.GtOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := *fbr.get(lhs)
+							lhs := *fbr.get(lhs.Value)
 							if result, ok := lhs.GreaterThan(rhs); ok {
 								return result, nil
 							}
@@ -1711,7 +1757,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.LtEqOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := *fbr.get(lhs)
+							lhs := *fbr.get(lhs.Value)
 							if result, ok := lhs.LessThanOrEqualTo(rhs); ok {
 								return result, nil
 							}
@@ -1720,7 +1766,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.GtEqOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := *fbr.get(lhs)
+							lhs := *fbr.get(lhs.Value)
 							if result, ok := lhs.GreaterThanOrEqualTo(rhs); ok {
 								return result, nil
 							}
@@ -1732,11 +1778,11 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 			// optimise: lhs being a constant
 			if lhs, isLocal := lhs.(Value); isLocal {
-				if rhs, isValue := rhs.(local); isValue {
+				if rhs, isValue := rhs.(binding[local]); isValue {
 					switch node.Operator {
 					case ast.AddOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							rhs := *fbr.get(rhs)
+							rhs := *fbr.get(rhs.Value)
 							if result, ok := lhs.Add(rhs); ok {
 								return result, nil
 							}
@@ -1745,7 +1791,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.SubOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							rhs := *fbr.get(rhs)
+							rhs := *fbr.get(rhs.Value)
 							if result, ok := lhs.Sub(rhs); ok {
 								return result, nil
 							}
@@ -1754,7 +1800,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.MulOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							rhs := *fbr.get(rhs)
+							rhs := *fbr.get(rhs.Value)
 							if result, ok := lhs.Mul(rhs); ok {
 								return result, nil
 							}
@@ -1763,7 +1809,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.DivOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							rhs := *fbr.get(rhs)
+							rhs := *fbr.get(rhs.Value)
 							if result, ok := lhs.Div(rhs); ok {
 								return result, nil
 							}
@@ -1772,8 +1818,8 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.ModOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							rhs := *fbr.get(rhs)
-							if result, ok := lhs.Div(rhs); ok {
+							rhs := *fbr.get(rhs.Value)
+							if result, ok := lhs.Mod(rhs); ok {
 								return result, nil
 							}
 							return Value{}, operatorError("%", lhs, rhs)
@@ -1781,13 +1827,13 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.EqOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							rhs := *fbr.get(rhs)
+							rhs := *fbr.get(rhs.Value)
 							return BoxBool(lhs.Equals(rhs)), nil
 						}
 
 					case ast.LtOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							rhs := *fbr.get(rhs)
+							rhs := *fbr.get(rhs.Value)
 							if result, ok := lhs.LessThan(rhs); ok {
 								return result, nil
 							}
@@ -1796,7 +1842,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.GtOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							rhs := *fbr.get(rhs)
+							rhs := *fbr.get(rhs.Value)
 							if result, ok := lhs.GreaterThan(rhs); ok {
 								return result, nil
 							}
@@ -1805,7 +1851,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.LtEqOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							rhs := *fbr.get(rhs)
+							rhs := *fbr.get(rhs.Value)
 							if result, ok := lhs.LessThanOrEqualTo(rhs); ok {
 								return result, nil
 							}
@@ -1814,7 +1860,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 					case ast.GtEqOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							rhs := *fbr.get(rhs)
+							rhs := *fbr.get(rhs.Value)
 							if result, ok := lhs.GreaterThanOrEqualTo(rhs); ok {
 								return result, nil
 							}
@@ -2028,18 +2074,18 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 	if lhs := vm.evaluate(node.Lhs); lhs != nil {
 		if rhs := vm.evaluate(node.Rhs); rhs != nil {
 			// optimise: lhs being a local
-			if lhs, ok := lhs.(local); ok {
-				if lhs.isStatic {
+			if lhs, ok := lhs.(binding[local]); ok {
+				if lhs.Value.isStatic {
 					panic(fmt.Sprintf("Assignment to constant binding on line '%v'.", node.Line()))
 				}
 
 				// optimise: rhs being a local
-				if rhs, ok := rhs.(local); ok {
+				if rhs, ok := rhs.(binding[local]); ok {
 					switch node.Operator {
 					case ast.AddOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := fbr.get(lhs)
-							rhs := *fbr.get(rhs)
+							lhs := fbr.get(lhs.Value)
+							rhs := *fbr.get(rhs.Value)
 							if result, ok := lhs.Add(rhs); ok {
 								*lhs = result
 								return Value{}, nil
@@ -2049,8 +2095,8 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 
 					case ast.SubOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := fbr.get(lhs)
-							rhs := *fbr.get(rhs)
+							lhs := fbr.get(lhs.Value)
+							rhs := *fbr.get(rhs.Value)
 							if result, ok := lhs.Sub(rhs); ok {
 								*lhs = result
 								return Value{}, nil
@@ -2060,8 +2106,8 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 
 					case ast.MulOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := fbr.get(lhs)
-							rhs := *fbr.get(rhs)
+							lhs := fbr.get(lhs.Value)
+							rhs := *fbr.get(rhs.Value)
 							if result, ok := lhs.Mul(rhs); ok {
 								*lhs = result
 								return Value{}, nil
@@ -2071,8 +2117,8 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 
 					case ast.DivOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := fbr.get(lhs)
-							rhs := *fbr.get(rhs)
+							lhs := fbr.get(lhs.Value)
+							rhs := *fbr.get(rhs.Value)
 							if result, ok := lhs.Div(rhs); ok {
 								*lhs = result
 								return Value{}, nil
@@ -2082,8 +2128,8 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 
 					case ast.ModOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := fbr.get(lhs)
-							rhs := *fbr.get(rhs)
+							lhs := fbr.get(lhs.Value)
+							rhs := *fbr.get(rhs.Value)
 							if result, ok := lhs.Mod(rhs); ok {
 								*lhs = result
 								return Value{}, nil
@@ -2098,7 +2144,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 					switch node.Operator {
 					case ast.AddOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := fbr.get(lhs)
+							lhs := fbr.get(lhs.Value)
 							if result, ok := lhs.Add(rhs); ok {
 								*lhs = result
 								return Value{}, nil
@@ -2108,7 +2154,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 
 					case ast.SubOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := fbr.get(lhs)
+							lhs := fbr.get(lhs.Value)
 							if result, ok := lhs.Sub(rhs); ok {
 								*lhs = result
 								return Value{}, nil
@@ -2118,7 +2164,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 
 					case ast.MulOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := fbr.get(lhs)
+							lhs := fbr.get(lhs.Value)
 							if result, ok := lhs.Mul(rhs); ok {
 								*lhs = result
 								return Value{}, nil
@@ -2128,7 +2174,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 
 					case ast.DivOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := fbr.get(lhs)
+							lhs := fbr.get(lhs.Value)
 							if result, ok := lhs.Div(rhs); ok {
 								*lhs = result
 								return Value{}, nil
@@ -2138,7 +2184,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 
 					case ast.ModOp:
 						return func(fbr *Fiber) (Value, Exception) {
-							lhs := fbr.get(lhs)
+							lhs := fbr.get(lhs.Value)
 							if result, ok := lhs.Mod(rhs); ok {
 								*lhs = result
 								return Value{}, nil
@@ -2151,8 +2197,8 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 		}
 
 		// optimise: lhs being a global
-		if lhs, ok := lhs.(Global); ok {
-			if lhs.IsStatic {
+		if lhs, ok := lhs.(binding[Global]); ok {
+			if lhs.Value.IsStatic {
 				panic(fmt.Sprintf("Assignment to constant binding on line '%v'.", node.Line()))
 			}
 
@@ -2166,10 +2212,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 						return rhs, err
 					}
 					if result, ok := lhs.Add(rhs); ok {
-						*lhs = result
+						*lhs.Value = result
 						return Value{}, nil
 					}
-					return Value{}, operatorError("+", *lhs, rhs)
+					return Value{}, operatorError("+", *lhs.Value, rhs)
 				}
 
 			case ast.SubOp:
@@ -2179,10 +2225,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 						return rhs, err
 					}
 					if result, ok := lhs.Sub(rhs); ok {
-						*lhs = result
+						*lhs.Value = result
 						return Value{}, nil
 					}
-					return Value{}, operatorError("-", *lhs, rhs)
+					return Value{}, operatorError("-", *lhs.Value, rhs)
 				}
 
 			case ast.MulOp:
@@ -2192,10 +2238,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 						return rhs, err
 					}
 					if result, ok := lhs.Mul(rhs); ok {
-						*lhs = result
+						*lhs.Value = result
 						return Value{}, nil
 					}
-					return Value{}, operatorError("*", *lhs, rhs)
+					return Value{}, operatorError("*", *lhs.Value, rhs)
 				}
 
 			case ast.DivOp:
@@ -2205,10 +2251,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 						return rhs, err
 					}
 					if result, ok := lhs.Div(rhs); ok {
-						*lhs = result
+						*lhs.Value = result
 						return Value{}, nil
 					}
-					return Value{}, operatorError("/", *lhs, rhs)
+					return Value{}, operatorError("/", *lhs.Value, rhs)
 				}
 
 			case ast.ModOp:
@@ -2218,10 +2264,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 						return rhs, err
 					}
 					if result, ok := lhs.Mod(rhs); ok {
-						*lhs = result
+						*lhs.Value = result
 						return Value{}, nil
 					}
-					return Value{}, operatorError("%", *lhs, rhs)
+					return Value{}, operatorError("%", *lhs.Value, rhs)
 				}
 			}
 		}
@@ -2264,6 +2310,15 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 			return Value{}, operatorError("-", a, b)
 		}
 
+	case ast.MulOp:
+	case ast.MulOp:
+	case ast.MulOp:
+	case ast.MulOp:
+	case ast.MulOp:
+	case ast.MulOp:
+	case ast.MulOp:
+	case ast.MulOp:
+	case ast.MulOp:
 	case ast.MulOp:
 		return func(fbr *fiber) (Value, Exception) {
 			a, err := lhs(fbr)

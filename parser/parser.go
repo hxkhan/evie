@@ -89,8 +89,8 @@ func Parse(input []byte) (node ast.Node, err error) {
 }
 
 // consume will either try to consume a simple or a word
-func (ps *parser) consume(lit string) bool {
-	if next := ps.PeekToken(); next.IsSimple(lit) || next.IsWord(lit) {
+func (ps *parser) consume(what string) bool {
+	if next := ps.PeekToken(); next.IsSimple(what) || next.IsWord(what) {
 		ps.last = ps.NextToken()
 		return true
 	}
@@ -170,7 +170,8 @@ func (ps *parser) handleWords(main token.Token, asExpr bool) ast.Node {
 	case "fn":
 		return ps.parseFn(main, asExpr)
 	case "struct":
-		return ps.parseStruct(main)
+		panic("implement struct")
+		//return ps.parseStruct(main)
 	case "go":
 		return ast.Go{Pos: main.Line, Fn: ps.parse(0, true)}
 	case "await":
@@ -198,7 +199,7 @@ func (ps *parser) handleWords(main token.Token, asExpr bool) ast.Node {
 		}
 		return ret
 
-	case "unsynced":
+	/* case "unsynced":
 		if !ps.consume("{") {
 			return ast.Unsynced{Pos: main.Line, Action: ps.parse(0, true)}
 		}
@@ -208,7 +209,7 @@ func (ps *parser) handleWords(main token.Token, asExpr bool) ast.Node {
 		if !ps.consume("{") {
 			return ast.Synced{Pos: main.Line, Action: ps.parse(0, true)}
 		}
-		return ast.Synced{Pos: main.Line, Action: ps.parseBlock()}
+		return ast.Synced{Pos: main.Line, Action: ps.parseBlock()} */
 
 	case "catch":
 		if ps.consume("{") {
@@ -222,12 +223,22 @@ func (ps *parser) handleWords(main token.Token, asExpr bool) ast.Node {
 		}
 		panic(fmt.Errorf("'catch' expected '(' on line %v, got '%v'", ps.PeekToken().Line, ps.PeekToken().Literal))
 
-	case "var":
+	case "var", "let":
 		name := ps.NextToken()
-		if !ps.consume(":=") {
-			panic(fmt.Errorf("expected ':=' after 'var %v' on line %v, got '%v' instead", name.Literal, main.Line, ps.PeekToken().Literal))
+		if !name.IsAnyWord() {
+			panic(fmt.Errorf("expected identifier after 'var' on line %v, got '%v' instead", name.Line, name.Literal))
 		}
-		return ast.Decl{Pos: main.Line, Name: name.Literal, IsStatic: false, Value: ps.parse(0, true)}
+
+		var varType ast.Node
+		if ps.consume(":") {
+			varType = ps.parseType()
+		}
+
+		if !ps.consume("=") {
+			panic(fmt.Errorf("expected '=' after 'var %v' on line %v, got '%v' instead", name.Literal, main.Line, ps.PeekToken().Literal))
+		}
+		return ast.Decl{Pos: main.Line, Name: name.Literal, Type: varType, IsStatic: main.Literal == "let", Value: ps.parse(0, true)}
+
 	case "pub":
 		// skip for now
 		return ps.parse(0, true)
@@ -277,11 +288,6 @@ func (ps *parser) parseAwait(main token.Token) ast.Node {
 }
 
 func (ps *parser) parseIdent(main token.Token) ast.Node {
-	// handle const declarations explicitly
-	if ps.consume(":=") {
-		return ast.Decl{Pos: main.Line, Name: main.Literal, IsStatic: true, Value: ps.parse(0, true)}
-	}
-
 	// try infix stuff
 	left := ps.parseInfixExpression(ast.Ident{Pos: main.Line, Name: main.Literal}, 0)
 
@@ -340,7 +346,12 @@ func (ps *parser) parseFn(main token.Token, asExpr bool) ast.Node {
 	if ps.PeekToken().Type == token.Word {
 		fn.Name = ps.NextToken().Literal
 	}
-	fn.Args = ps.parseNamesList(main)
+	fn.Params = ps.parseNamesList(main)
+
+	if ps.consume("->") {
+		// parse type
+		fn.ReturnType = ps.parseType()
+	}
 
 	// sync mode
 	switch {
@@ -359,7 +370,7 @@ func (ps *parser) parseFn(main token.Token, asExpr bool) ast.Node {
 }
 
 // helper to parse a struct
-func (ps *parser) parseStruct(main token.Token) ast.Node {
+/* func (ps *parser) parseStruct(main token.Token) ast.Node {
 	str := ast.StructDefinition{Pos: main.Line}
 	if ps.PeekToken().Type == token.Word {
 		str.Name = ps.NextToken().Literal
@@ -373,24 +384,34 @@ func (ps *parser) parseStruct(main token.Token) ast.Node {
 	}
 
 	return str
-}
+} */
 
 // helper to parse names surrounded by parentheses
-func (ps *parser) parseNamesList(main token.Token) []string {
+func (ps *parser) parseNamesList(main token.Token) []ast.Param {
 	if !ps.consume("(") {
 		ps.panic(main, "'('")
 	}
 
-	var args []string
+	var list []ast.Param
 	if ps.consume(")") {
-		return args
+		return list
 	}
 
 	for {
+		// parse name
 		if ps.PeekToken().Type != token.Word {
-			ps.panic(main, "names in parentheses")
+			ps.panic(main, "params in parentheses")
 		}
-		args = append(args, ps.NextToken().Literal)
+		name := ps.NextToken().Literal
+		if !ps.consume(":") {
+			ps.panic(main, "':'")
+		}
+
+		// parse type
+		kind := ps.parseType()
+
+		// append param to list
+		list = append(list, ast.Param{Name: name, Type: kind})
 
 		if ps.consume(")") {
 			break
@@ -399,7 +420,60 @@ func (ps *parser) parseNamesList(main token.Token) []string {
 			ps.panic(main, "',' or ')'")
 		}
 	}
-	return args
+	return list
+}
+
+func (ps *parser) parseType() ast.Node {
+	var left ast.Node
+
+	main := ps.PeekToken()
+	if main.IsEOS() {
+		panic(errEOS)
+	}
+
+	switch {
+	case main.IsWord("fn"):
+		ps.NextToken() // consume 'fn'
+		fn := ast.FnType{Pos: main.Line}
+
+		// parse param types: fn(str, bool)
+		if !ps.consume("(") {
+			ps.panic(main, "'('")
+		}
+		if !ps.consume(")") {
+			for {
+				fn.Params = append(fn.Params, ps.parseType())
+				if ps.consume(")") {
+					break
+				}
+				if !ps.consume(",") {
+					ps.panic(main, "',' or ')'")
+				}
+			}
+		}
+
+		// optional return type: -> str
+		if ps.consume("->") {
+			fn.Returns = ps.parseType()
+		}
+
+		left = fn
+
+	case main.Type == token.Word:
+		ps.NextToken()
+		left = ast.Ident{Pos: main.Line, Name: main.Literal}
+
+	default:
+		panic(fmt.Errorf("expected type on line %v, got '%v'", main.Line, main.Literal))
+	}
+
+	// union: str | bool | fn(int) -> str
+	for ps.consume("|") {
+		right := ps.parseType()
+		left = ast.UnionType{Lhs: left, Rhs: right}
+	}
+
+	return left
 }
 
 func (ps *parser) parseArgsList() []ast.Node {

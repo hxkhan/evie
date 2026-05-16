@@ -10,6 +10,7 @@ import (
 
 type Node interface {
 	Line() int
+	String() string
 }
 
 type Package struct {

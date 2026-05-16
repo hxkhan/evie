@@ -9,6 +9,7 @@ import (
 type Decl struct {
 	token.Pos
 	Name     string
+	Type     Node
 	Value    Node
 	IsStatic bool
 }
@@ -30,7 +31,17 @@ func (node Ident) String() string {
 
 func (node Decl) String() string {
 	if node.IsStatic {
-		return fmt.Sprintf("%s := %v", node.Name, node.Value)
+		if node.Type != nil {
+			return fmt.Sprintf("let %s: %s = %v", node.Name, node.Type, node.Value)
+		}
+		return fmt.Sprintf("let %s = %v", node.Name, node.Value)
 	}
-	return fmt.Sprintf("var %s := %v", node.Name, node.Value)
+	if node.Type != nil {
+		return fmt.Sprintf("var %s: %s = %v", node.Name, node.Type, node.Value)
+	}
+	return fmt.Sprintf("var %s = %v", node.Name, node.Value)
+}
+
+func (node Assign) String() string {
+	return fmt.Sprintf("%v = %v", node.Lhs, node.Value)
 }

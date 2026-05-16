@@ -30,14 +30,16 @@ func (vm *Instance) evaluate(node ast.Node) any {
 			panic(err)
 		}
 
-		if global, isGlobal := variable.(Global); isGlobal {
+		if binding, isGlobal := variable.(binding[Global]); isGlobal {
 			// global statics evaluate to Value instead of Global
-			if global.IsStatic {
-				return *(global.Value)
+			if binding.Value.IsStatic {
+				return *(binding.Value.Value)
 			}
-			return global
-		} else if local, isLocal := variable.(local); isLocal {
-			return local
+			return binding
+		}
+
+		if binding, isLocal := variable.(binding[local]); isLocal {
+			return binding
 		}
 
 		return nil

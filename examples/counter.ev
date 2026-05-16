@@ -1,14 +1,14 @@
 package main
 
 fn main() {
-    counter := makeCounter()
+    let counter = make()
     echo counter() // 1
     echo counter() // 2
     echo counter() // 3
 }
 
-fn makeCounter() {
-    var count := 0
+fn make() {
+    var count = 0
 
     return fn() {
         count += 1

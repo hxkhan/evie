@@ -1,0 +1,12 @@
+package main
+
+fn main() {
+    message := "hello world"
+    parts := message.split(" ")
+    echo parts.map(fn(v) => v.toUpper()) // ["HELLO", "WORLD"]
+    echo parts.map(string.toUpper)       // ["HELLO", "WORLD"]
+}
+
+
+// "john".toUpper => Method{this: "hello", fn: toUpper(self)}
+// string.toUpper => fn(self)

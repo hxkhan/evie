@@ -27,10 +27,17 @@ const (
 	SyncedMode
 )
 
+// Param represents a single typed function argument
+type Param struct {
+	Name string
+	Type Node
+}
+
 type Fn struct {
 	token.Pos
 	Name       string
-	Args       []string
+	Params     []Param
+	ReturnType Node
 	SyncMode   SyncMode
 	Action     Node
 	IsPublic   bool
@@ -79,13 +86,22 @@ func (fn Fn) String() string {
 
 	// args
 	b.WriteByte('(')
-	for i, name := range fn.Args {
-		b.WriteString(name)
-		if i != len(fn.Args)-1 {
+	for i, param := range fn.Params {
+		b.WriteString(param.Name)
+		b.WriteByte(':')
+		b.WriteByte(' ')
+		b.WriteString(param.Type.String())
+		if i != len(fn.Params)-1 {
 			b.WriteByte(',')
 		}
 	}
 	b.WriteByte(')')
+
+	if fn.ReturnType != nil {
+		b.WriteByte(':')
+		b.WriteString(fn.ReturnType.String())
+		b.WriteByte(' ')
+	}
 
 	b.WriteString(fmt.Sprint(fn.Action))
 
@@ -110,4 +126,20 @@ func (call Call) String() string {
 
 func (ret Return) String() string {
 	return fmt.Sprintf("return %v", ret.Value)
+}
+
+func (node Go) String() string {
+	return "go " + node.Fn.String()
+}
+
+func (node Await) String() string {
+	return "await " + node.Task.String()
+}
+
+func (node AwaitAll) String() string {
+	return fmt.Sprintf("await.all(%v)", node.Tasks)
+}
+
+func (node AwaitAny) String() string {
+	return fmt.Sprintf("await.any(%v)", node.Tasks)
 }

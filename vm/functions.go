@@ -22,7 +22,7 @@ func (c capture) String() string {
 // funcInfoStatic holds static function information
 type funcInfoStatic struct {
 	name       string       // name of the function
-	args       []string     // argument names
+	params     []ast.Param  // argument names
 	locals     []bool       // all locals & true for those that escape
 	captures   []capture    // captured references
 	recyclable int          // number of non-escaping locals
@@ -45,11 +45,11 @@ func (fn UserFn) Synced() bool {
 } */
 
 func (fn *UserFn) Call(fbr *Fiber, args ...Value) (result Value, err Exception) {
-	if len(fn.args) != len(args) {
+	if len(fn.params) != len(args) {
 		if fn.name != "λ" {
-			return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(args))
+			return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.params), len(args))
 		}
-		return Value{}, CustomError("callable requires %v argument(s), %v provided", len(fn.args), len(args))
+		return Value{}, CustomError("callable requires %v argument(s), %v provided", len(fn.params), len(args))
 	}
 
 	base := len(fbr.stack)
@@ -93,11 +93,11 @@ func (fn *UserFn) Call(fbr *Fiber, args ...Value) (result Value, err Exception) 
 func (fn *UserFn) SaveInto(ptr any) (err error) {
 	fun := reflect.ValueOf(ptr).Elem()
 
-	if len(fn.args) != fun.Type().NumIn() {
+	if len(fn.params) != fun.Type().NumIn() {
 		if fn.name != "λ" {
-			return CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), fun.Type().NumIn())
+			return CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.params), fun.Type().NumIn())
 		}
-		return CustomError("callable requires %v argument(s), %v provided", len(fn.args), fun.Type().NumIn())
+		return CustomError("callable requires %v argument(s), %v provided", len(fn.params), fun.Type().NumIn())
 	}
 
 	resultKind := fun.Type().Out(0).Kind()

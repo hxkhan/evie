@@ -2,17 +2,17 @@ package main imports("io")
 
 fn main() {
     // 1 layer of capture
-    var printer := single()
+    var printer = single()
     printer()
 
     // 2 layers of capture
-    getter := double()
+    let getter = double()
     printer = getter()
     printer()
 }
 
 fn single() {
-    message := "Hello World"
+    let message = "Hello World"
 
     // printer
     return fn() {
@@ -21,7 +21,7 @@ fn single() {
 }
 
 fn double() {
-    message := "Bye World"
+    let message = "Bye World"
 
     // getter
     return fn() {

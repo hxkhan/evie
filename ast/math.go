@@ -133,3 +133,7 @@ type Neg struct {
 	token.Pos      // [required]
 	Value     Node // [required]
 }
+
+func (node Neg) String() string {
+	return fmt.Sprintf("-%v", node.Value)
+}

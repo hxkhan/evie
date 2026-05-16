@@ -11,6 +11,7 @@ import (
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/ds"
 	"github.com/hxkhan/evie/parser"
+	"github.com/hxkhan/evie/types"
 	"github.com/hxkhan/evie/vm/fields"
 )
 
@@ -199,37 +200,42 @@ type local struct {
 	isStatic   bool
 }
 
+type binding[T local | Global] struct {
+	Type  types.Type
+	Value T
+}
+
 // reach searches for a symbol across all scopes
 func (cp *compiler) reach(name string) (v any, err error) {
 	// 1. check stack
 	for scroll := range cp.closures.Len() {
 		closure := cp.closures.Last(scroll)
-		if binding, success := closure.scope.Reach(name); success {
+		if ref, success := closure.scope.Reach(name); success {
 			// check if it is a local
 			if scroll == 0 {
-				return local{index: int16(binding.Index), isCaptured: false, isStatic: binding.IsStatic}, nil
+				return binding[local]{Value: local{index: int16(ref.Index), isCaptured: false, isStatic: ref.IsStatic}}, nil
 			}
 
 			// otherwise capture it & return the index
-			return local{index: int16(cp.addToCaptured(scroll, binding.Index)), isCaptured: true, isStatic: binding.IsStatic}, nil
+			return binding[local]{Value: local{index: int16(cp.addToCaptured(scroll, ref.Index)), isCaptured: true, isStatic: ref.IsStatic}}, nil
 		}
 	}
 
 	// 2. check package globals
 	if ref, exists := cp.pkg.globals[fields.Get(name)]; exists {
-		return ref, nil
+		return binding[Global]{Value: ref}, nil
 	}
 
 	// 3. check universal statics
 	if value, exists := cp.statics[name]; exists {
 		// wrap as a global
-		return Global{Value: value, IsPublic: true, IsStatic: true}, nil
+		return binding[Global]{Value: Global{Value: value, IsPublic: true, IsStatic: true}}, nil
 	}
 
 	// 4. check builtins
 	if value, exists := builtins[name]; exists {
 		// wrap as a global
-		return Global{Value: value, IsPublic: true, IsStatic: true}, nil
+		return binding[Global]{Value: Global{Value: value, IsPublic: true, IsStatic: true}}, nil
 	}
 
 	return nil, fmt.Errorf("cp.reach(\"%v\") -> unreachable symbol", name)

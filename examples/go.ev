@@ -13,7 +13,7 @@ fn main() {
     go print("ten", 1000)
 }
 
-fn print(message, duration) {
+fn print(message: str, duration: int) {
     time.wait(duration)
     io.println(message)
 }

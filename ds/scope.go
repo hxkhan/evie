@@ -3,11 +3,14 @@ package ds
 import (
 	"fmt"
 	"strings"
+
+	"github.com/hxkhan/evie/types"
 )
 
 type Binding struct {
 	Index    int
 	IsStatic bool
+	Type     types.Type
 }
 
 type bindings map[string]Binding
@@ -44,12 +47,12 @@ func (sc *Scope) ReuseBlock() {
 }
 
 // Declare adds a new binding to the current block-scope
-func (sc *Scope) Declare(name string, isStatic bool) (index int, success bool) {
+func (sc *Scope) Declare(name string, isStatic bool, T types.Type) (index int, success bool) {
 	top := sc.blocks[len(sc.blocks)-1]
 	if _, exists := top[name]; exists {
 		return 0, false
 	}
-	top[name] = Binding{Index: sc.index, IsStatic: isStatic}
+	top[name] = Binding{Index: sc.index, IsStatic: isStatic, Type: T}
 	sc.index++
 	return sc.index - 1, true
 }

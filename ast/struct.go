@@ -32,3 +32,7 @@ type FieldAccess struct {
 func (fa FieldAccess) String() string {
 	return fmt.Sprintf("%v.%s", fa.Lhs, fa.Rhs)
 }
+
+func (is IsInstanceOf) String() string {
+	return fmt.Sprintf("%v is %v", is.Lhs, is.Rhs)
+}

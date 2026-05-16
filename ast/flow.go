@@ -62,3 +62,7 @@ func (node Continue) String() string {
 func (node Break) String() string {
 	return "break"
 }
+
+func (node Catch) String() string {
+	return "catch"
+}

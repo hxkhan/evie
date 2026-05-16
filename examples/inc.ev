@@ -1,8 +1,8 @@
 package main
 
-var x := 0
+var x = 0
 
-fn inc(n) {
+fn inc(n: int) {
     while n > 0 {
         x += 1
         n -= 1
@@ -10,8 +10,8 @@ fn inc(n) {
 }
 
 fn main() {
-    a := go inc(10000000)
-    b := go inc(10000000)
+    let a = go inc(10000000)
+    let b = go inc(10000000)
 
     await.all (a, b)
     echo x

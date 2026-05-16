@@ -1,13 +1,13 @@
 package main
 
-fn pow(x, n) {
+fn pow(x: int, n: int) {
     if n == 0 {
         return 1
-    } 
+    }
     return x * pow(x, n-1)
 }
 
-fn clamp(value, min, max) {
+fn clamp(value: int, min: int, max: int) {
     if value < min {
         return min
     } else if value > max {
@@ -16,7 +16,7 @@ fn clamp(value, min, max) {
     return value
 }
 
-fn factorial(n) {
+fn factorial(n: int) {
     if n < 2 {
         return 1
     }

@@ -70,7 +70,13 @@ START:
 	case '+':
 		return lex.simple(lex.option('=', "+=", "+"))
 	case '-':
-		return lex.simple(lex.option('=', "-=", "-"))
+		switch {
+		case lex.option('=', "-=", "-") == "-=":
+			return lex.simple("-=")
+		case lex.option('>', "->", "-") == "->":
+			return lex.simple("->")
+		}
+		return lex.simple("-")
 	case '*':
 		return lex.simple(lex.option('=', "*=", "*"))
 	case '/':

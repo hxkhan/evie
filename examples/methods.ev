@@ -1,7 +1,7 @@
 package main
 
 fn main() {
-    message := "Lorem ipsum dolor sit amet"
+    let message = "Lorem ipsum dolor sit amet"
 
     echo message.split(" ")           // ["Lorem", "ipsum", "dolor", "sit", "amet"]
     echo message.split(" ").join("_") // Lorem_ipsum_dolor_sit_amet
@@ -22,8 +22,8 @@ fn main() {
     echo message.len // <callable>
     echo string.len  // <callable>
 
-    parts := message.split(" ")
-    echo parts.map(fn(v) => v.toUpper()) // ["LOREM", "IPSUM", "DOLOR", "SIT", "AMET"]
+    let parts = message.split(" ")
+    echo parts.map(fn(v: str) => v.toUpper()) // ["LOREM", "IPSUM", "DOLOR", "SIT", "AMET"]
     echo parts.map(string.toUpper)       // ["LOREM", "IPSUM", "DOLOR", "SIT", "AMET"]
     echo parts.map(string.len)           // [5, 5, 5, 3, 4]
 }
@@ -31,3 +31,45 @@ fn main() {
 
 // "john".toUpper => Method{this: "hello", fn: toUpper(self)}
 // string.toUpper => fn(self)
+
+/*
+struct Rectangle(width: float, height: float) {
+    fn area() -> float {
+        return width * height
+    }
+
+    fn perimeter() -> float {
+        return 2.0 * (width + height)
+    }
+}
+
+struct Asset<T>(cost: int, item: T) {
+    invariant(cost >= 0) {
+        throw "cost must be non-negative"
+    }
+
+    fn map<U>(mapper: fn(T) -> U) -> Asset<U> {
+        return Asset(cost, mapper(item))
+    }
+}
+
+
+struct Rectangle(width: float, height: float) {
+    fn area() => width * height
+    fn perimeter() => 2.0 * (width + height)
+}
+
+struct Color(r: int, g: int, b: int) {
+    let black = Color(0, 0, 0)
+    let white = Color(255, 255, 255)
+
+    fn darken(percentage: float | int) -> Color {
+        factor := 1.0 - percentage
+        return Color(
+            Math.max(0, r * factor),
+            Math.max(0, g * factor),
+            Math.max(0, b * factor)
+        )
+    }
+}
+*/

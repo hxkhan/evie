@@ -461,6 +461,32 @@ func (ps *parser) parseObject(main token.Token) ast.Node {
 	return obj
 }
 
+func (ps *parser) parseArrayLiteral(main token.Token) ast.Node {
+	arr := ast.ArrayLiteral{Pos: main.Line}
+
+	// empty array []
+	if ps.consume("]") {
+		return arr
+	}
+
+	for {
+		elem := ps.parse(0, true)
+		arr.Elements = append(arr.Elements, elem)
+
+		if ps.consume("]") {
+			break
+		}
+		if !ps.consume(",") {
+			panic(fmt.Errorf("array expected ',' or ']' on line %v, got '%v'", main.Line, ps.PeekToken().Literal))
+		}
+		if ps.consume("]") {
+			break
+		}
+	}
+
+	return arr
+}
+
 func (ps *parser) parse(precedenceLevel int, asExpr bool) (node ast.Node) {
 	// handle parentheses explicitly
 	if ps.consume("(") {
@@ -491,6 +517,9 @@ func (ps *parser) parse(precedenceLevel int, asExpr bool) (node ast.Node) {
 
 	case main.IsSimple("{"):
 		node = ps.parseObject(ps.NextToken())
+
+	case main.IsSimple("["):
+		node = ps.parseArrayLiteral(ps.NextToken())
 
 	case main.IsSimple("-"):
 		ps.NextToken()

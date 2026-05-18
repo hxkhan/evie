@@ -18,7 +18,7 @@ func decode(v vm.Value) (vm.Value, vm.Exception) {
 		var v any
 		err := json.Unmarshal([]byte(str), &v)
 		if err != nil {
-			return vm.Value{}, vm.CustomError(err.Error())
+			return vm.Value{}, vm.CustomError("%s", err.Error())
 		}
 
 		switch v.(type) {

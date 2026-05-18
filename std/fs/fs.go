@@ -20,7 +20,7 @@ var readFile = vm.BoxGoFunc(&vm.GoFunc{
 		if fileName, ok := fbr.GetLocal(0).AsString(); ok {
 			bytes, err := os.ReadFile(fileName)
 			if err != nil {
-				return vm.Value{}, vm.CustomError(err.Error())
+				return vm.Value{}, vm.CustomError("%s", err.Error())
 			}
 
 			return vm.BoxBuffer(bytes), nil

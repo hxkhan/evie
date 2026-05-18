@@ -55,3 +55,21 @@ type Subscript struct {
 func (node Subscript) String() string {
 	return fmt.Sprintf("%v[%v]", node.Lhs, node.Key)
 }
+
+type ArrayLiteral struct {
+	token.Pos
+	Elements []Node
+}
+
+func (node ArrayLiteral) String() string {
+	var out strings.Builder
+	out.WriteString("[")
+	elements := make([]string, len(node.Elements))
+	for i, elem := range node.Elements {
+		elements[i] = fmt.Sprint(elem)
+	}
+	out.WriteString(strings.Join(elements, ", "))
+	out.WriteString("]")
+	return out.String()
+}
+

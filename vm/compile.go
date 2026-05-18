@@ -212,6 +212,24 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			return BoxBool(false), nil
 		}
 
+	case ast.ArrayLiteral:
+		elements := make([]instruction, len(node.Elements))
+		for i, el := range node.Elements {
+			elements[i] = vm.compile(el)
+		}
+
+		return func(fbr *Fiber) (Value, Exception) {
+			values := make([]Value, len(elements))
+			for i, el := range elements {
+				v, err := el(fbr)
+				if err != nil {
+					return v, err
+				}
+				values[i] = v
+			}
+			return BoxArray(NewArray(values...)), nil
+		}
+
 	case ast.Object:
 		items := make(map[fields.ID]instruction, len(node.Fields))
 		for _, f := range node.Fields {

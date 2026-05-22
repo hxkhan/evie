@@ -275,27 +275,51 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		}
 
 		if sc, isSubscript := node.Value.(ast.Subscript); isSubscript {
-			value := vm.compile(sc.Lhs)
-			if key, isString := sc.Key.(ast.Input[string]); isString {
-				index := fields.Get(key.Value)
-				return func(fbr *Fiber) (Value, Exception) {
-					lhs, err := value(fbr)
-					if err != nil {
-						return lhs, err
-					}
+			target := vm.compile(sc.Lhs)
+			key := vm.compile(sc.Key)
+			return func(fbr *Fiber) (Value, Exception) {
+				lhs, err := target(fbr)
+				if err != nil {
+					return lhs, err
+				}
+				k, err := key(fbr)
+				if err != nil {
+					return k, err
+				}
 
-					if obj, ok := lhs.AsObject(); ok {
-						_, exists := obj[index]
+				if obj, ok := lhs.AsObject(); ok {
+					if keyStr, ok := k.AsString(); ok {
+						_, exists := obj[fields.Get(keyStr)]
 						return BoxBool(exists), nil
 					}
-
-					panic("not an object")
+					return BoxBool(false), nil
 				}
+				if arr, ok := lhs.AsArray(); ok {
+					if idxFloat, ok := k.AsFloat64(); ok {
+						idx := int(idxFloat)
+						arr.MU.RLock()
+						defer arr.MU.RUnlock()
+						length := len(arr.Data)
+						if idx < 0 {
+							idx = length + idx
+						}
+						return BoxBool(idx >= 0 && idx < length), nil
+					}
+					return BoxBool(false), nil
+				}
+				if si, ok := lhs.AsUserStructInstance(); ok {
+					if keyStr, ok := k.AsString(); ok {
+						_, exists := si.Fields[fields.Get(keyStr)]
+						return BoxBool(exists), nil
+					}
+					return BoxBool(false), nil
+				}
+				return BoxBool(false), nil
 			}
-
-			panic("implement non-string key exists")
-
 		}
+
+	case ast.Subscript:
+		return vm.emitSubscript(node)
 	}
 
 	panic(fmt.Errorf("implement %T", node))
@@ -663,6 +687,81 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 
 				panic("implement type")
 			}
+		}
+	}
+
+	// handle subscript assignments: arr[i] = val, obj[key] = val, structInstance[key] = val
+	if sub, isSubscript := node.Lhs.(ast.Subscript); isSubscript {
+		targetCompiled := vm.compile(sub.Lhs)
+		keyCompiled := vm.compile(sub.Key)
+		valCompiled := vm.compile(node.Value)
+
+		return func(fbr *Fiber) (Value, Exception) {
+			target, err := targetCompiled(fbr)
+			if err != nil {
+				return target, err
+			}
+
+			keyVal, err := keyCompiled(fbr)
+			if err != nil {
+				return keyVal, err
+			}
+
+			newVal, err := valCompiled(fbr)
+			if err != nil {
+				return newVal, err
+			}
+
+			// 1. Array index assignment: arr[i] = newVal
+			if arr, ok := target.AsArray(); ok {
+				idxFloat, ok := keyVal.AsFloat64()
+				if !ok {
+					return Value{}, TypeErrorF("array index must be a number, got '%s'", keyVal.TypeOf())
+				}
+				idx := int(idxFloat)
+				if float64(idx) != idxFloat {
+					return Value{}, RuntimeExceptionF("array index must be an integer, got %v", idxFloat)
+				}
+
+				arr.MU.Lock()
+				defer arr.MU.Unlock()
+
+				length := len(arr.Data)
+				if idx < 0 {
+					idx = length + idx
+				}
+
+				if idx < 0 || idx >= length {
+					return Value{}, RuntimeExceptionF("IndexError: index %d out of bounds (length %d)", int(idxFloat), length)
+				}
+
+				arr.Data[idx] = newVal
+				return Value{}, nil
+			}
+
+			// 2. Object key assignment: obj[key] = newVal
+			if obj, ok := target.AsObject(); ok {
+				keyStr, ok := keyVal.AsString()
+				if !ok {
+					return Value{}, TypeErrorF("object key must be a string, got '%s'", keyVal.TypeOf())
+				}
+
+				obj[fields.Get(keyStr)] = newVal
+				return Value{}, nil
+			}
+
+			// 3. Struct instance field assignment: structInst[key] = newVal
+			if si, ok := target.AsUserStructInstance(); ok {
+				keyStr, ok := keyVal.AsString()
+				if !ok {
+					return Value{}, TypeErrorF("struct field key must be a string, got '%s'", keyVal.TypeOf())
+				}
+
+				si.Fields[fields.Get(keyStr)] = newVal
+				return Value{}, nil
+			}
+
+			return Value{}, TypeErrorF("cannot assign to subscript of type '%s'", target.TypeOf())
 		}
 	}
 
@@ -1497,6 +1596,125 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 		}
 
 		return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", node.Rhs, node)
+	}
+}
+
+func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
+	lhs := vm.compile(node.Lhs)
+	key := vm.compile(node.Key)
+
+	return func(fbr *Fiber) (Value, Exception) {
+		target, err := lhs(fbr)
+		if err != nil {
+			return target, err
+		}
+
+		indexVal, err := key(fbr)
+		if err != nil {
+			return indexVal, err
+		}
+
+		// 1. Array indexing: arr[0], arr[-1]
+		if arr, ok := target.AsArray(); ok {
+			idxFloat, ok := indexVal.AsFloat64()
+			if !ok {
+				return Value{}, TypeErrorF("array index must be a number, got '%s'", indexVal.TypeOf())
+			}
+			idx := int(idxFloat)
+			if float64(idx) != idxFloat {
+				return Value{}, RuntimeExceptionF("array index must be an integer, got %v", idxFloat)
+			}
+
+			arr.MU.RLock()
+			defer arr.MU.RUnlock()
+
+			length := len(arr.Data)
+			if idx < 0 {
+				idx = length + idx
+			}
+
+			if idx < 0 || idx >= length {
+				return Value{}, RuntimeExceptionF("IndexError: index %d out of bounds (length %d)", int(idxFloat), length)
+			}
+
+			return arr.Data[idx], nil
+		}
+
+		// 2. Object key access: obj["key"]
+		if obj, ok := target.AsObject(); ok {
+			keyStr, ok := indexVal.AsString()
+			if !ok {
+				return Value{}, TypeErrorF("object key must be a string, got '%s'", indexVal.TypeOf())
+			}
+
+			val, exists := obj[fields.Get(keyStr)]
+			if !exists {
+				return Value{}, nil
+			}
+			return val, nil
+		}
+
+		// 3. Struct instance field access: structInstance["field"]
+		if si, ok := target.AsUserStructInstance(); ok {
+			keyStr, ok := indexVal.AsString()
+			if !ok {
+				return Value{}, TypeErrorF("struct field key must be a string, got '%s'", indexVal.TypeOf())
+			}
+
+			val, exists := si.Fields[fields.Get(keyStr)]
+			if !exists {
+				return Value{}, RuntimeExceptionF("undefined field '%s' in struct", keyStr)
+			}
+			return val, nil
+		}
+
+		// 4. String indexing: "hello"[1] -> "e"
+		if str, ok := target.AsString(); ok {
+			idxFloat, ok := indexVal.AsFloat64()
+			if !ok {
+				return Value{}, TypeErrorF("string index must be a number, got '%s'", indexVal.TypeOf())
+			}
+			idx := int(idxFloat)
+			if float64(idx) != idxFloat {
+				return Value{}, RuntimeExceptionF("string index must be an integer, got %v", idxFloat)
+			}
+
+			length := len(str)
+			if idx < 0 {
+				idx = length + idx
+			}
+
+			if idx < 0 || idx >= length {
+				return Value{}, RuntimeExceptionF("IndexError: string index %d out of bounds (length %d)", int(idxFloat), length)
+			}
+
+			return BoxString(string(str[idx])), nil
+		}
+
+		// 5. Buffer indexing: buf[0] -> byte value as number
+		if buf, ok := target.AsBuffer(); ok {
+			idxFloat, ok := indexVal.AsFloat64()
+			if !ok {
+				return Value{}, TypeErrorF("buffer index must be a number, got '%s'", indexVal.TypeOf())
+			}
+			idx := int(idxFloat)
+			if float64(idx) != idxFloat {
+				return Value{}, RuntimeExceptionF("buffer index must be an integer, got %v", idxFloat)
+			}
+
+			length := len(buf)
+			if idx < 0 {
+				idx = length + idx
+			}
+
+			if idx < 0 || idx >= length {
+				return Value{}, RuntimeExceptionF("IndexError: buffer index %d out of bounds (length %d)", int(idxFloat), length)
+			}
+
+			return BoxNumber(float64(buf[idx])), nil
+		}
+
+		return Value{}, TypeErrorF("cannot index value of type '%s'", target.TypeOf())
 	}
 }
 

@@ -76,6 +76,8 @@ func (vm *Instance) evaluate(node ast.Node) any {
 					}
 				case ast.EqOp:
 					return BoxBool(lhs.Equals(rhs))
+				case ast.NotEqOp:
+					return BoxBool(!lhs.Equals(rhs))
 				case ast.LtOp:
 					if res, ok := lhs.LessThan(rhs); ok {
 						return res
@@ -85,6 +87,18 @@ func (vm *Instance) evaluate(node ast.Node) any {
 						return res
 					}
 				}
+			}
+		}
+
+	case ast.Not:
+		if val, ok := vm.evaluate(node.Value).(Value); ok {
+			return BoxBool(!val.IsTruthy())
+		}
+
+	case ast.Neg:
+		if val, ok := vm.evaluate(node.Value).(Value); ok {
+			if f, ok := val.AsFloat64(); ok {
+				return BoxNumber(-f)
 			}
 		}
 	}

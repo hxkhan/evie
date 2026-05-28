@@ -171,6 +171,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	case ast.Neg:
 		return vm.emitNeg(node)
 
+	case ast.Not:
+		return vm.emitNot(node)
+
 	case ast.BinOp:
 		return vm.emitBinOp(node)
 
@@ -1734,6 +1737,19 @@ func (vm *Instance) emitNeg(node ast.Neg) instruction {
 	}
 }
 
+func (vm *Instance) emitNot(node ast.Not) instruction {
+	value := vm.compile(node.Value)
+
+	return func(fbr *Fiber) (Value, Exception) {
+		value, exc := value(fbr)
+		if exc != nil {
+			return value, exc
+		}
+
+		return BoxBool(!value.IsTruthy()), nil
+	}
+}
+
 func (vm *Instance) emitCatch(node ast.Catch) instruction {
 	action := vm.compile(node.Action)
 
@@ -1818,6 +1834,12 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						return func(fbr *Fiber) (Value, Exception) {
 							lhs, rhs := *fbr.get(lhs), *fbr.get(rhs)
 							return BoxBool(lhs.Equals(rhs)), nil
+						}
+
+					case ast.NotEqOp:
+						return func(fbr *Fiber) (Value, Exception) {
+							lhs, rhs := *fbr.get(lhs), *fbr.get(rhs)
+							return BoxBool(!lhs.Equals(rhs)), nil
 						}
 
 					case ast.LtOp:
@@ -1927,6 +1949,12 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							return BoxBool(lhs.Equals(rhs)), nil
 						}
 
+					case ast.NotEqOp:
+						return func(fbr *Fiber) (Value, Exception) {
+							lhs := fbr.get(lhs)
+							return BoxBool(!lhs.Equals(rhs)), nil
+						}
+
 					case ast.LtOp:
 						return func(fbr *Fiber) (Value, Exception) {
 							lhs := *fbr.get(lhs)
@@ -2019,6 +2047,12 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						return func(fbr *Fiber) (Value, Exception) {
 							rhs := *fbr.get(rhs)
 							return BoxBool(lhs.Equals(rhs)), nil
+						}
+
+					case ast.NotEqOp:
+						return func(fbr *Fiber) (Value, Exception) {
+							rhs := *fbr.get(rhs)
+							return BoxBool(!lhs.Equals(rhs)), nil
 						}
 
 					case ast.LtOp:
@@ -2158,6 +2192,19 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 				return a, err
 			}
 			return BoxBool(a.Equals(b)), nil
+		}
+
+	case ast.NotEqOp:
+		return func(fbr *Fiber) (Value, Exception) {
+			a, err := lhs(fbr)
+			if err != nil {
+				return a, err
+			}
+			b, err := rhs(fbr)
+			if err != nil {
+				return a, err
+			}
+			return BoxBool(!a.Equals(b)), nil
 		}
 
 	case ast.LtOp:

@@ -33,15 +33,15 @@ var keywords = []string{
 
 var operators = map[string]ast.Operator{
 	"+": ast.AddOp, "-": ast.SubOp, "*": ast.MulOp, "/": ast.DivOp, "%": ast.ModOp,
-	"+=": ast.AddOp, "-=": ast.SubOp, "*=": ast.MulOp, "/=": ast.DivOp,
-	"==": ast.EqOp, "<": ast.LtOp, ">": ast.GtOp, "<=": ast.LtEqOp, ">=": ast.GtEqOp,
+	"+=": ast.AddOp, "-=": ast.SubOp, "*=": ast.MulOp, "/=": ast.DivOp, "%=": ast.ModOp,
+	"==": ast.EqOp, "!=": ast.NotEqOp, "<": ast.LtOp, ">": ast.GtOp, "<=": ast.LtEqOp, ">=": ast.GtEqOp,
 	"||": ast.OrOp, "&&": ast.AndOp,
 }
 
 var precedence = map[string]int{
 	"||": 0,
 	"&&": 1,
-	"<":  2, ">": 2, "==": 2, "<=": 2, ">=": 2,
+	"<":  2, ">": 2, "==": 2, "!=": 2, "<=": 2, ">=": 2,
 	"+": 3, "-": 3,
 	"*": 4, "/": 4, "%": 4,
 	".": 5,
@@ -163,7 +163,7 @@ func (ps *parser) parseFloat(literal string) float64 {
 	return num
 }
 
-func (ps *parser) handleWords(main token.Token, asExpr bool) ast.Node {
+func (ps *parser) handleWords(main token.Token, asExpr bool, precedenceLevel int) ast.Node {
 	switch main.Literal {
 	case "echo":
 		return ast.Echo{Pos: main.Line, Value: ps.parse(0, true)}
@@ -176,11 +176,11 @@ func (ps *parser) handleWords(main token.Token, asExpr bool) ast.Node {
 	case "await":
 		return ps.parseAwait(main)
 	case "nil":
-		return ast.Input[struct{}]{Pos: main.Line}
+		return ps.parseInfixExpression(ast.Input[struct{}]{Pos: main.Line}, precedenceLevel)
 	case "true":
-		return ast.Input[bool]{Pos: main.Line, Value: true}
+		return ps.parseInfixExpression(ast.Input[bool]{Pos: main.Line, Value: true}, precedenceLevel)
 	case "false":
-		return ast.Input[bool]{Pos: main.Line, Value: false}
+		return ps.parseInfixExpression(ast.Input[bool]{Pos: main.Line, Value: false}, precedenceLevel)
 	case "if":
 		return ps.parseConditional(main)
 	case "while":
@@ -211,16 +211,19 @@ func (ps *parser) handleWords(main token.Token, asExpr bool) ast.Node {
 		return ast.Synced{Pos: main.Line, Action: ps.parseBlock()}
 
 	case "catch":
+		var node ast.Node
 		if ps.consume("{") {
-			return ast.Catch{Pos: main.Line, Action: ps.parseBlock()}
+			node = ast.Catch{Pos: main.Line, Action: ps.parseBlock()}
 		} else if ps.consume("(") {
 			e := ps.parse(0, true)
 			if !ps.consume(")") {
 				panic(fmt.Errorf("'catch' expected ')' on line %v, got '%v'", ps.PeekToken().Line, ps.PeekToken().Literal))
 			}
-			return ast.Catch{Pos: main.Line, Action: e}
+			node = ast.Catch{Pos: main.Line, Action: e}
+		} else {
+			panic(fmt.Errorf("'catch' expected '(' or '{' on line %v, got '%v'", ps.PeekToken().Line, ps.PeekToken().Literal))
 		}
-		panic(fmt.Errorf("'catch' expected '(' on line %v, got '%v'", ps.PeekToken().Line, ps.PeekToken().Literal))
+		return ps.parseInfixExpression(node, precedenceLevel)
 
 	case "var":
 		name := ps.NextToken()
@@ -233,7 +236,7 @@ func (ps *parser) handleWords(main token.Token, asExpr bool) ast.Node {
 		return ps.parse(0, true)
 
 	default:
-		return ps.parseIdent(main)
+		return ps.parseIdent(main, precedenceLevel)
 	}
 }
 
@@ -276,14 +279,14 @@ func (ps *parser) parseAwait(main token.Token) ast.Node {
 	return ast.Await{Task: ps.parse(0, true)}
 }
 
-func (ps *parser) parseIdent(main token.Token) ast.Node {
+func (ps *parser) parseIdent(main token.Token, precedenceLevel int) ast.Node {
 	// handle const declarations explicitly
 	if ps.consume(":=") {
 		return ast.Decl{Pos: main.Line, Name: main.Literal, IsStatic: true, Value: ps.parse(0, true)}
 	}
 
 	// try infix stuff
-	left := ps.parseInfixExpression(ast.Ident{Pos: main.Line, Name: main.Literal}, 0)
+	left := ps.parseInfixExpression(ast.Ident{Pos: main.Line, Name: main.Literal}, precedenceLevel)
 
 	if ps.consume("=") {
 		return ast.Assign{Pos: main.Line, Lhs: left, Value: ps.parse(0, true)}
@@ -513,7 +516,7 @@ func (ps *parser) parse(precedenceLevel int, asExpr bool) (node ast.Node) {
 		node = ast.Input[float64]{Pos: main.Line, Value: ps.parseFloat(ps.NextToken().Literal)}
 
 	case main.Type == token.Word:
-		return ps.handleWords(ps.NextToken(), asExpr)
+		return ps.handleWords(ps.NextToken(), asExpr, precedenceLevel)
 
 	case main.IsSimple("{"):
 		node = ps.parseObject(ps.NextToken())
@@ -521,13 +524,25 @@ func (ps *parser) parse(precedenceLevel int, asExpr bool) (node ast.Node) {
 	case main.IsSimple("["):
 		node = ps.parseArrayLiteral(ps.NextToken())
 
+	case main.IsSimple("+"):
+		ps.NextToken()
+		if ps.PeekToken().Type == token.Number {
+			node = ast.Input[float64]{Pos: main.Line, Value: ps.parseFloat(ps.NextToken().Literal)}
+		} else {
+			node = ps.parse(4, true)
+		}
+
 	case main.IsSimple("-"):
 		ps.NextToken()
 		if ps.PeekToken().Type == token.Number {
 			node = ast.Input[float64]{Pos: main.Line, Value: -ps.parseFloat(ps.NextToken().Literal)}
 		} else {
-			node = ast.Neg{Pos: main.Line, Value: ps.parse(0, true)}
+			node = ast.Neg{Pos: main.Line, Value: ps.parse(4, true)}
 		}
+
+	case main.IsSimple("!"):
+		ps.NextToken()
+		node = ast.Not{Pos: main.Line, Value: ps.parse(4, true)}
 
 	case main.IsSimple("`"):
 		node = ps.parseStringTemplate(ps.NextToken())

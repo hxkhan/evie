@@ -105,7 +105,9 @@ START:
 	case '?':
 		return lex.simple("?")
 	case '!':
-		return lex.simple("!")
+		return lex.simple(lex.option('=', "!=", "!"))
+	case '%':
+		return lex.simple(lex.option('=', "%=", "%"))
 
 	case '>':
 		return lex.simple(lex.option('=', ">=", ">"))

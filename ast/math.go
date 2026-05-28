@@ -24,6 +24,8 @@ func (op Operator) String() string {
 
 	case EqOp:
 		return "=="
+	case NotEqOp:
+		return "!="
 	case LtOp:
 		return "<"
 	case GtOp:
@@ -50,6 +52,7 @@ const (
 	ModOp
 
 	EqOp
+	NotEqOp
 	LtOp
 	GtOp
 	LtEqOp
@@ -82,6 +85,8 @@ func (node BinOp) String() string {
 
 	case EqOp:
 		return fmt.Sprintf("%v == %v", node.Lhs, node.Rhs)
+	case NotEqOp:
+		return fmt.Sprintf("%v != %v", node.Lhs, node.Rhs)
 	case LtOp:
 		return fmt.Sprintf("%v < %v", node.Lhs, node.Rhs)
 	case GtOp:
@@ -133,3 +138,13 @@ type Neg struct {
 	token.Pos      // [required]
 	Value     Node // [required]
 }
+
+type Not struct {
+	token.Pos      // [required]
+	Value     Node // [required]
+}
+
+func (node Not) String() string {
+	return fmt.Sprintf("!%v", node.Value)
+}
+

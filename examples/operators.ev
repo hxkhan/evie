@@ -1,0 +1,37 @@
+package main imports("io")
+
+fn main() {
+    // Equality and inequality
+    io.println(10 == 10)       // true
+    io.println(10 != 20)       // true
+    io.println("foo" != "bar") // true
+    io.println(true != false)  // true
+
+    // Arithmetic and modulo
+    io.println(10 % 3) // 1
+    io.println(20 % 7) // 6
+
+    // Logical NOT (!)
+    io.println(!true)  // false
+    io.println(!false) // true
+    io.println(!nil)   // true
+    io.println(!0)     // true
+    io.println(!"")    // true
+
+    // Compound logical expressions
+    a := true
+    b := false
+    if !b && (a || b) {
+        io.println("Condition matched: !b && (a || b)")
+    }
+
+    // Dynamic subscript access and assignment on objects
+    user := {name: "Alice", age: 30}
+    io.println(user["name"]) // Alice
+    user["city"] = "Paris"
+    io.println(user["city"]) // Paris
+
+    // Dynamic existence check (?)
+    io.println(user["city"]?)    // true
+    io.println(user["country"]?) // false
+}

@@ -1,0 +1,38 @@
+package main imports("io")
+
+fn main() {
+    // Array literals
+    empty := []
+    io.println(empty)
+
+    fruits := ["apple", "banana", "cherry"]
+    io.println(fruits)
+
+    // Indexing (0-based and negative indexing from the end)
+    io.println(fruits[0])  // apple
+    io.println(fruits[1])  // banana
+    io.println(fruits[-1]) // cherry
+
+    // Mutating elements by index
+    fruits[1] = "blueberry"
+    io.println(fruits) // ["apple", "blueberry", "cherry"]
+
+    fruits[-1] = "mango"
+    io.println(fruits) // ["apple", "blueberry", "mango"]
+
+    // Index existence check (?)
+    io.println(fruits[0]?)  // true
+    io.println(fruits[10]?) // false
+
+    // Nested arrays
+    matrix := [
+        [1, 2, 3],
+        [4, 5, 6],
+    ]
+    io.println(matrix[0][1])  // 2
+    io.println(matrix[1][-1]) // 6
+
+    // Array methods
+    joined := fruits.join(", ")
+    io.println(joined)
+}

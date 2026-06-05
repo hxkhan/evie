@@ -162,6 +162,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	case ast.Return:
 		return vm.emitReturn(node)
 
+	case ast.Throw:
+		return vm.emitThrow(node)
+
 	case ast.Await:
 		return vm.emitAwait(node)
 
@@ -1331,6 +1334,22 @@ func (vm *Instance) emitReturn(node ast.Return) instruction {
 	}
 }
 
+func (vm *Instance) emitThrow(node ast.Throw) instruction {
+	what := vm.compile(node.Value)
+	return func(fbr *Fiber) (Value, Exception) {
+		v, err := what(fbr)
+		if err != nil {
+			return v, err
+		}
+
+		if e, ok := v.AsError(); ok {
+			return Value{}, e
+		}
+
+		return Value{}, CustomError("%s", v.String())
+	}
+}
+
 func (vm *Instance) emitAwait(node ast.Await) instruction {
 	value := vm.compile(node.Task)
 
@@ -1815,7 +1834,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					case ast.DivOp:
 						return func(fbr *Fiber) (Value, Exception) {
 							lhs, rhs := *fbr.get(lhs), *fbr.get(rhs)
-							if result, ok := lhs.Mul(rhs); ok {
+							if result, ok := lhs.Div(rhs); ok {
 								return result, nil
 							}
 							return Value{}, operatorError("/", lhs, rhs)

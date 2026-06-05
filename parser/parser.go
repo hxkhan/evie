@@ -28,7 +28,7 @@ var keywords = []string{
 	"if", "else",
 	"is",
 	"await", "go",
-	"synced", "catch",
+	"synced", "catch", "throw",
 }
 
 var operators = map[string]ast.Operator{
@@ -224,6 +224,15 @@ func (ps *parser) handleWords(main token.Token, asExpr bool, precedenceLevel int
 			panic(fmt.Errorf("'catch' expected '(' or '{' on line %v, got '%v'", ps.PeekToken().Line, ps.PeekToken().Literal))
 		}
 		return ps.parseInfixExpression(node, precedenceLevel)
+
+	case "throw":
+		th := ast.Throw{Pos: main.Line}
+		if ps.PeekToken().Line == main.Line && !ps.PeekToken().IsSimple("}") {
+			th.Value = ps.parse(0, true)
+		} else {
+			th.Value = ast.Input[string]{Pos: main.Line, Value: "error"}
+		}
+		return th
 
 	case "var":
 		name := ps.NextToken()

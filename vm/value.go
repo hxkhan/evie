@@ -481,6 +481,12 @@ func (x Value) TypeOf() string {
 	case kindBuffer:
 		return "buffer"
 	case kindStruct:
+		return "struct"
+	case kindStructInstance:
+		return "struct"
+	case kindBuiltinType:
+		return "type"
+	case kindError:
 		return "error"
 	case kindCustom:
 		cv := (*(*CustomValue)(x.pointer))
@@ -568,6 +574,18 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 			return Value{}, false
 		}
 		return *(value.Value), exists
+
+	case kindError:
+		if f == fields.Get("message") {
+			obj := (*Error)(x.pointer)
+			return BoxString(obj.Message), true
+		}
+		value, exists := typeError.Fields[f]
+		if !exists {
+			return Value{}, false
+		}
+		m := BoundMethod{this: x, fn: value}
+		return boxMethod(m), true
 	}
 
 	return Value{}, false
@@ -583,6 +601,8 @@ func (x Value) dotAccess(f fields.ID) (field Value) {
 		return typeString.Fields[f]
 	case kindArray:
 		return typeArray.Fields[f]
+	case kindError:
+		return typeError.Fields[f]
 	case kindPackage:
 		pkg := (*packageInstance)(x.pointer)
 		value := pkg.globals[f]

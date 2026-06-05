@@ -42,6 +42,11 @@ type Break struct {
 	token.Pos
 }
 
+type Throw struct {
+	token.Pos
+	Value Node
+}
+
 func (node Conditional) String() string {
 	if node.Action == nil {
 		return fmt.Sprintf("if (%v)", node.Condition)
@@ -61,4 +66,8 @@ func (node Continue) String() string {
 
 func (node Break) String() string {
 	return "break"
+}
+
+func (node Throw) String() string {
+	return fmt.Sprintf("throw %v", node.Value)
 }

@@ -28,10 +28,33 @@ var builtins = map[string]*Value{
 var typeError = NewBuiltinType("error", &GoFunc{
 	Name: "error",
 	Fn: func(fbr *Fiber) (Value, Exception) {
-		return BoxString(fbr.GetLocal(0).String()), nil
+		return BoxError(CustomError("%s", fbr.GetLocal(0).String())), nil
 	},
 	Arguments: 1,
-}, nil)
+}, map[fields.ID]Value{
+	fields.Get("message"): BoxGoFunc(&GoFunc{
+		Name:      "message",
+		Arguments: 1,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if this, ok := fbr.GetLocal(0).AsError(); ok {
+				return BoxString(this.Message), nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+	fields.Get("string"): BoxGoFunc(&GoFunc{
+		Name:      "string",
+		Arguments: 1,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if this, ok := fbr.GetLocal(0).AsError(); ok {
+				return BoxString(this.Message), nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+})
 
 var typeString = NewBuiltinType("string", &GoFunc{
 	Name: "string",

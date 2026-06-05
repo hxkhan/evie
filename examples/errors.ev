@@ -1,18 +1,31 @@
-package main
+package main imports("io")
+
+fn divide(a, b) {
+    if b == 0 {
+        throw "division by zero"
+    }
+    return a / b
+}
 
 fn main() {
-    //echo "Hello World"
-    example()
-}
-
-fn example() {
-    //a := 5 + "10" // crash the program
-    //echo a        // we don't make it here
-
+    // 1. Runtime error caught by catch
     b := catch(5 + "10")
-
-    // handle the error
     if b is error {
-        echo "b is definitely an error"
+        io.println("Caught runtime error: " + b.message)
     }
-}
+
+    // 2. User-thrown error via throw statement
+    ok := divide(10, 2)
+    io.println(ok)
+
+    res := catch(divide(10, 0))
+    if res is error {
+        io.println("Caught custom throw: " + res.message)
+    }
+
+    // 3. Error constructor
+    custom := error("constructed error")
+    if custom is error {
+        io.println("Error constructor works: " + custom.string())
+    }
+}

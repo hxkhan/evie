@@ -45,6 +45,13 @@ func (fn UserFn) Synced() bool {
 } */
 
 func (fn *UserFn) Call(fbr *Fiber, args ...Value) (result Value, err Exception) {
+	if fbr == nil {
+		if fn.vm == nil {
+			return Value{}, CustomError("cannot call function without a VM instance")
+		}
+		fbr = fn.vm.NewFiber()
+	}
+
 	if len(fn.args) != len(args) {
 		if fn.name != "λ" {
 			return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(args))
@@ -70,14 +77,25 @@ func (fn *UserFn) Call(fbr *Fiber, args ...Value) (result Value, err Exception) 
 
 	// save current state
 	prevBase := fbr.swapBase(base)
+	prevActive := fbr.swapActive(fn)
 
 	// call the function
-	result, exc := fn.code(fbr)
+	var exc Exception
+	if fn.mode == ast.UndefinedMode || fbr.synced {
+		result, exc = fn.code(fbr)
+	} else {
+		fbr.vm.rt.AcquireGIL()
+		fbr.synced = true
+		result, exc = fn.code(fbr)
+		fbr.synced = false
+		fbr.vm.rt.ReleaseGIL()
+	}
 
 	// restore old state
 	fbr.push(fn.recyclable)
 	fbr.popStack(len(fn.locals))
 	fbr.swapBase(prevBase)
+	fbr.swapActive(prevActive)
 
 	// don't implicitly return the return value of the last executed instruction
 	switch exc {
@@ -213,7 +231,15 @@ func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (result Value, ex
 	prevBase := fbr.swapBase(base)
 
 	// call the function
-	result, exc = fn.Fn(fbr)
+	if fn.Mode == ast.UndefinedMode || fbr.synced {
+		result, exc = fn.Fn(fbr)
+	} else {
+		fbr.vm.rt.AcquireGIL()
+		fbr.synced = true
+		result, exc = fn.Fn(fbr)
+		fbr.synced = false
+		fbr.vm.rt.ReleaseGIL()
+	}
 
 	// restore old state
 	fbr.push(fn.Arguments)
@@ -250,7 +276,15 @@ func (m BoundMethod) Call(fbr *Fiber, args ...Value) (result Value, exc Exceptio
 	prevBase := fbr.swapBase(base)
 
 	// call the function
-	result, exc = fn.Fn(fbr)
+	if fn.Mode == ast.UndefinedMode || fbr.synced {
+		result, exc = fn.Fn(fbr)
+	} else {
+		fbr.vm.rt.AcquireGIL()
+		fbr.synced = true
+		result, exc = fn.Fn(fbr)
+		fbr.synced = false
+		fbr.vm.rt.ReleaseGIL()
+	}
 
 	// restore old state
 	fbr.push(fn.Arguments)
@@ -338,8 +372,16 @@ func (fn *GoFunc) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) 
 	// save current state
 	prevBase := fbr.swapBase(base)
 
-	// call the fucntion
-	result, exc = fn.Fn(fbr)
+	// call the function
+	if fn.Mode == ast.UndefinedMode || fbr.synced {
+		result, exc = fn.Fn(fbr)
+	} else {
+		fbr.vm.rt.AcquireGIL()
+		fbr.synced = true
+		result, exc = fn.Fn(fbr)
+		fbr.synced = false
+		fbr.vm.rt.ReleaseGIL()
+	}
 
 	// restore old state
 	fbr.push(fn.Arguments)

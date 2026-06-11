@@ -26,6 +26,9 @@ fn main() {
     echo parts.map(fn(v) => v.toUpper()) // ["LOREM", "IPSUM", "DOLOR", "SIT", "AMET"]
     echo parts.map(string.toUpper)       // ["LOREM", "IPSUM", "DOLOR", "SIT", "AMET"]
     echo parts.map(string.len)           // [5, 5, 5, 3, 4]
+
+    prefix := "word: "
+    echo parts.map(fn(v) => prefix + v)
 }
 
 

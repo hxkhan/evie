@@ -41,7 +41,7 @@ var operators = map[string]ast.Operator{
 var precedence = map[string]int{
 	"||": 0,
 	"&&": 1,
-	"<":  2, ">": 2, "==": 2, "!=": 2, "<=": 2, ">=": 2,
+	"<":  2, ">": 2, "==": 2, "!=": 2, "<=": 2, ">=": 2, "is": 2,
 	"+": 3, "-": 3,
 	"*": 4, "/": 4, "%": 4,
 	".": 5,
@@ -300,7 +300,7 @@ func (ps *parser) parseIdent(main token.Token, precedenceLevel int) ast.Node {
 	if ps.consume("=") {
 		return ast.Assign{Pos: main.Line, Lhs: left, Value: ps.parse(0, true)}
 	}
-	if ps.consume("+=") || ps.consume("-=") {
+	if ps.consume("+=") || ps.consume("-=") || ps.consume("*=") || ps.consume("/=") || ps.consume("%=") {
 		return ast.MutableBinOp{Pos: main.Line, Operator: operators[ps.last.Literal], Lhs: left, Rhs: ps.parse(0, true)}
 	}
 
@@ -592,13 +592,17 @@ func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) ast.N
 		if next.IsSimple("?") {
 			ps.NextToken() // consume '?'
 			left = ast.Exists{Pos: next.Line, Value: left}
-			break // ? is always the end of an expression
+			continue
 		}
 
 		// instance check
 		if next.IsWord("is") {
+			currentPrec := precedence["is"]
+			if currentPrec < precedenceLevel {
+				break
+			}
 			ps.NextToken() // consume 'is'
-			left = ast.IsInstanceOf{Pos: next.Line, Lhs: left, Rhs: ps.parse(0, true)}
+			left = ast.IsInstanceOf{Pos: next.Line, Lhs: left, Rhs: ps.parse(currentPrec+1, true)}
 			continue
 		}
 

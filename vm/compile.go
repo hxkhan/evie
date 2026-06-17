@@ -1956,7 +1956,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					case ast.ModOp:
 						return func(fbr *Fiber) (Value, Exception) {
 							lhs := *fbr.get(lhs)
-							if result, ok := lhs.Div(rhs); ok {
+							if result, ok := lhs.Mod(rhs); ok {
 								return result, nil
 							}
 							return Value{}, operatorError("%", lhs, rhs)
@@ -2056,7 +2056,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					case ast.ModOp:
 						return func(fbr *Fiber) (Value, Exception) {
 							rhs := *fbr.get(rhs)
-							if result, ok := lhs.Div(rhs); ok {
+							if result, ok := lhs.Mod(rhs); ok {
 								return result, nil
 							}
 							return Value{}, operatorError("%", lhs, rhs)

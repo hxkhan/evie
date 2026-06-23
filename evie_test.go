@@ -281,6 +281,77 @@ func TestArrays(t *testing.T) {
 	return arr.join(", ")
 	`
 	assertString(t, run(t, codeJoin), "apple, banana, cherry")
+
+	// Array is check
+	assertBool(t, run(t, "[1, 2, 3] is array"), true)
+	assertBool(t, run(t, `"hello" is array`), false)
+
+	// Array len
+	assertNumber(t, run(t, "[10, 20, 30, 40].len()"), 4)
+	assertNumber(t, run(t, "[].len()"), 0)
+
+	// Array push and append
+	codePush := `
+	arr := [1, 2]
+	arr.push(3)
+	arr.append(4)
+	return arr.len() == 4 && arr[-1] == 4
+	`
+	assertBool(t, run(t, codePush), true)
+
+	// Array pop
+	codePop := `
+	arr := [10, 20, 30]
+	p := arr.pop()
+	return p == 30 && arr.len() == 2
+	`
+	assertBool(t, run(t, codePop), true)
+
+	// Array pop on empty returns nil
+	codePopEmpty := `
+	arr := []
+	return arr.pop() == nil
+	`
+	assertBool(t, run(t, codePopEmpty), true)
+
+	// Array slice
+	codeSlice := `
+	arr := [10, 20, 30, 40, 50]
+	s1 := arr.slice(1, 4)
+	s2 := arr.slice(1, -1)
+	return s1.len() == 3 && s1[0] == 20 && s1[-1] == 40 && s2.len() == 3 && s2[-1] == 40
+	`
+	assertBool(t, run(t, codeSlice), true)
+
+	// Array filter
+	codeFilter := `
+	arr := [1, 2, 3, 4, 5, 6]
+	evens := arr.filter(fn(x) => x % 2 == 0)
+	return evens.len() == 3 && evens[0] == 2 && evens[1] == 4 && evens[2] == 6
+	`
+	assertBool(t, run(t, codeFilter), true)
+
+	// Array contains
+	codeContains := `
+	arr := ["cat", "dog", "bird"]
+	return arr.contains("dog") && !arr.contains("fish")
+	`
+	assertBool(t, run(t, codeContains), true)
+
+	// Array reverse
+	codeReverse := `
+	arr := [1, 2, 3]
+	r := arr.reverse()
+	return r[0] == 3 && r[1] == 2 && r[2] == 1
+	`
+	assertBool(t, run(t, codeReverse), true)
+
+	// Array constructor
+	codeConstructor := `
+	a := array()
+	return a is array && a.len() == 0
+	`
+	assertBool(t, run(t, codeConstructor), true)
 }
 
 func TestObjects(t *testing.T) {

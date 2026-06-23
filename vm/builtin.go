@@ -23,6 +23,7 @@ func NewBuiltinType(name string, constructor *GoFunc, fields map[fields.ID]Value
 var builtins = map[string]*Value{
 	"string": BoxBuiltinType(typeString).Allocate(),
 	"error":  BoxBuiltinType(typeError).Allocate(),
+	"array":  BoxBuiltinType(typeArray).Allocate(),
 }
 
 var typeError = NewBuiltinType("error", &GoFunc{
@@ -173,7 +174,181 @@ var typeString = NewBuiltinType("string", &GoFunc{
 	}),
 })
 
-var typeArray = NewBuiltinType("array", nil, map[fields.ID]Value{
+var arrayPushFunc = BoxGoFunc(&GoFunc{
+	Name:      "push",
+	Arguments: 2,
+	IsMethod:  true,
+	Fn: func(fbr *Fiber) (Value, Exception) {
+		parts, ok := fbr.GetLocal(0).AsArray()
+		val := fbr.GetLocal(1)
+		if ok {
+			parts.MU.Lock()
+			parts.Data = append(parts.Data, val)
+			parts.MU.Unlock()
+			return BoxArray(parts), nil
+		}
+		return Value{}, ErrTypes
+	},
+})
+
+var typeArray = NewBuiltinType("array", &GoFunc{
+	Name: "array",
+	Fn: func(fbr *Fiber) (Value, Exception) {
+		return BoxArray(NewArray()), nil
+	},
+	Arguments: 0,
+}, map[fields.ID]Value{
+	fields.Get("len"): BoxGoFunc(&GoFunc{
+		Name:      "len",
+		Arguments: 1,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if parts, ok := fbr.GetLocal(0).AsArray(); ok {
+				parts.MU.RLock()
+				defer parts.MU.RUnlock()
+				return BoxNumber(float64(len(parts.Data))), nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+
+	fields.Get("push"):   arrayPushFunc,
+	fields.Get("append"): arrayPushFunc,
+
+	fields.Get("pop"): BoxGoFunc(&GoFunc{
+		Name:      "pop",
+		Arguments: 1,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if parts, ok := fbr.GetLocal(0).AsArray(); ok {
+				parts.MU.Lock()
+				defer parts.MU.Unlock()
+				if len(parts.Data) == 0 {
+					return Value{}, nil
+				}
+				lastIdx := len(parts.Data) - 1
+				val := parts.Data[lastIdx]
+				parts.Data = parts.Data[:lastIdx]
+				return val, nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+
+	fields.Get("slice"): BoxGoFunc(&GoFunc{
+		Name:      "slice",
+		Arguments: 3,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			parts, ok1 := fbr.GetLocal(0).AsArray()
+			startF, ok2 := fbr.GetLocal(1).AsFloat64()
+			endF, ok3 := fbr.GetLocal(2).AsFloat64()
+			if ok1 && ok2 && ok3 {
+				parts.MU.RLock()
+				defer parts.MU.RUnlock()
+
+				n := len(parts.Data)
+				start := int(startF)
+				end := int(endF)
+
+				if start < 0 {
+					start = n + start
+					if start < 0 {
+						start = 0
+					}
+				}
+				if end < 0 {
+					end = n + end
+					if end < 0 {
+						end = 0
+					}
+				}
+				if start > n {
+					start = n
+				}
+				if end > n {
+					end = n
+				}
+				if start > end {
+					return BoxArray(NewArray()), nil
+				}
+
+				sub := make([]Value, end-start)
+				copy(sub, parts.Data[start:end])
+				return BoxArray(NewArray(sub...)), nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+
+	fields.Get("filter"): BoxGoFunc(&GoFunc{
+		Name:      "filter",
+		Arguments: 2,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			parts, ok1 := fbr.GetLocal(0).AsArray()
+			callback := fbr.GetLocal(1)
+			if ok1 {
+				parts.MU.RLock()
+				defer parts.MU.RUnlock()
+
+				var result []Value
+				for _, part := range parts.Data {
+					v, exc := callback.Call(fbr, part)
+					if exc != nil {
+						return v, exc
+					}
+					if v.IsTruthy() {
+						result = append(result, part)
+					}
+				}
+				return BoxArray(NewArray(result...)), nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+
+	fields.Get("contains"): BoxGoFunc(&GoFunc{
+		Name:      "contains",
+		Arguments: 2,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			parts, ok1 := fbr.GetLocal(0).AsArray()
+			target := fbr.GetLocal(1)
+			if ok1 {
+				parts.MU.RLock()
+				defer parts.MU.RUnlock()
+				for _, item := range parts.Data {
+					if item.Equals(target) {
+						return BoxBool(true), nil
+					}
+				}
+				return BoxBool(false), nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+
+	fields.Get("reverse"): BoxGoFunc(&GoFunc{
+		Name:      "reverse",
+		Arguments: 1,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			parts, ok1 := fbr.GetLocal(0).AsArray()
+			if ok1 {
+				parts.MU.RLock()
+				defer parts.MU.RUnlock()
+				n := len(parts.Data)
+				reversed := make([]Value, n)
+				for i, v := range parts.Data {
+					reversed[n-1-i] = v
+				}
+				return BoxArray(NewArray(reversed...)), nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+
 	fields.Get("join"): BoxGoFunc(&GoFunc{
 		Name:      "join",
 		Arguments: 2,

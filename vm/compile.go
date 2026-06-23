@@ -213,6 +213,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			} else if rhs == BoxBuiltinType(typeError) {
 				_, isError := lhs.AsError()
 				return BoxBool(isError), nil
+			} else if rhs == BoxBuiltinType(typeArray) {
+				_, isArray := lhs.AsArray()
+				return BoxBool(isArray), nil
 			}
 
 			return BoxBool(false), nil

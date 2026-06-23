@@ -35,4 +35,26 @@ fn main() {
     // Array methods
     joined := fruits.join(", ")
     io.println(joined)
+
+    // Length
+    io.println(fruits.len()) // 3
+
+    // Push & Pop
+    fruits.push("peach")
+    io.println(fruits) // ["apple", "blueberry", "mango", "peach"]
+    last := fruits.pop()
+    io.println(last) // peach
+
+    // Slicing
+    sliced := fruits.slice(0, 2)
+    io.println(sliced) // ["apple", "blueberry"]
+
+    // Contains & Reverse
+    io.println(fruits.contains("apple")) // true
+    io.println(fruits.reverse())         // ["mango", "blueberry", "apple"]
+
+    // Type checking
+    if fruits is array {
+        io.println("fruits is definitely an array")
+    }
 }

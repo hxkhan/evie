@@ -24,6 +24,10 @@ func (fbr *Fiber) set(binding local, value Value) {
 	*(fbr.active.references[int(binding.index)]) = value
 }
 
+func (fbr *Fiber) ArgCount() int {
+	return len(fbr.stack) - fbr.base
+}
+
 func (fbr *Fiber) GetLocal(index int16) Value {
 	return *(fbr.stack[fbr.base+int(index)])
 }

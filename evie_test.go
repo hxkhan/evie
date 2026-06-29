@@ -462,6 +462,22 @@ func TestConcurrency(t *testing.T) {
 	assertNumber(t, run(t, codeGoAwait), 42)
 }
 
+func TestVariadicIO(t *testing.T) {
+	code := `
+	package main
+	imports("io")
+	fn main() {
+		io.print()
+		io.println()
+		io.print("hello ")
+		io.println("world")
+		io.println("multiple", "arguments", 42, true)
+		return true
+	}
+	`
+	assertBool(t, run(t, code), true)
+}
+
 func TestExamples(t *testing.T) {
 	exampleFiles := []string{
 		"arrays.ev",

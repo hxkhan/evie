@@ -1260,8 +1260,14 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 
 			// try go func
 			if fn, isGoFunc := value.AsGoFunc(); isGoFunc {
-				if fn.Arguments != len(arguments) {
-					return Value{}, CustomError("callable requires %v argument(s), %v provided", fn.Arguments, len(arguments))
+				if fn.IsVariadic {
+					if len(arguments) < fn.Arguments {
+						return Value{}, CustomError("callable requires at least %v argument(s), %v provided", fn.Arguments, len(arguments))
+					}
+				} else {
+					if fn.Arguments != len(arguments) {
+						return Value{}, CustomError("callable requires %v argument(s), %v provided", fn.Arguments, len(arguments))
+					}
 				}
 
 				task := make(chan evaluation, 1)

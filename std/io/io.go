@@ -17,21 +17,36 @@ func Construct() vm.Package {
 }
 
 var print = vm.BoxGoFunc(&vm.GoFunc{
-	Name:      "print",
-	Arguments: 1,
-	IsMethod:  false,
+	Name:       "print",
+	Arguments:  0,
+	IsVariadic: true,
+	IsMethod:   false,
 	Fn: func(fbr *vm.Fiber) (vm.Value, vm.Exception) {
-		fmt.Print(fbr.GetLocal(0))
+		count := fbr.ArgCount()
+		for i := 0; i < count; i++ {
+			if i > 0 {
+				fmt.Print(" ")
+			}
+			fmt.Print(fbr.GetLocal(int16(i)))
+		}
 		return vm.Value{}, nil
 	},
 })
 
 var println = vm.BoxGoFunc(&vm.GoFunc{
-	Name:      "println",
-	Arguments: 1,
-	IsMethod:  false,
+	Name:       "println",
+	Arguments:  0,
+	IsVariadic: true,
+	IsMethod:   false,
 	Fn: func(fbr *vm.Fiber) (vm.Value, vm.Exception) {
-		fmt.Println(fbr.GetLocal(0))
+		count := fbr.ArgCount()
+		for i := 0; i < count; i++ {
+			if i > 0 {
+				fmt.Print(" ")
+			}
+			fmt.Print(fbr.GetLocal(int16(i)))
+		}
+		fmt.Println()
 		return vm.Value{}, nil
 	},
 })

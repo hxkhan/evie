@@ -205,8 +205,14 @@ func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (result Value, ex
 		return Value{}, RuntimeExceptionF("impossible.. how did we get here?")
 	}
 
-	if fn.Arguments-1 != len(arguments) {
-		return Value{}, CustomError("method requires %v argument(s), %v provided", fn.Arguments-1, len(arguments))
+	if fn.IsVariadic {
+		if len(arguments) < fn.Arguments-1 {
+			return Value{}, CustomError("method requires at least %v argument(s), %v provided", fn.Arguments-1, len(arguments))
+		}
+	} else {
+		if fn.Arguments-1 != len(arguments) {
+			return Value{}, CustomError("method requires %v argument(s), %v provided", fn.Arguments-1, len(arguments))
+		}
 	}
 
 	base := len(fbr.stack)
@@ -242,8 +248,9 @@ func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (result Value, ex
 	}
 
 	// restore old state
-	fbr.push(fn.Arguments)
-	fbr.popStack(fn.Arguments)
+	totalPushed := 1 + len(arguments)
+	fbr.push(totalPushed)
+	fbr.popStack(totalPushed)
 	fbr.swapBase(prevBase)
 
 	return result, exc
@@ -255,8 +262,14 @@ func (m BoundMethod) Call(fbr *Fiber, args ...Value) (result Value, exc Exceptio
 		return Value{}, RuntimeExceptionF("impossible.. how did we get here?")
 	}
 
-	if fn.Arguments-1 != len(args) {
-		return Value{}, CustomError("method requires %v argument(s), %v provided", fn.Arguments-1, len(args))
+	if fn.IsVariadic {
+		if len(args) < fn.Arguments-1 {
+			return Value{}, CustomError("method requires at least %v argument(s), %v provided", fn.Arguments-1, len(args))
+		}
+	} else {
+		if fn.Arguments-1 != len(args) {
+			return Value{}, CustomError("method requires %v argument(s), %v provided", fn.Arguments-1, len(args))
+		}
 	}
 
 	base := len(fbr.stack)
@@ -287,8 +300,9 @@ func (m BoundMethod) Call(fbr *Fiber, args ...Value) (result Value, exc Exceptio
 	}
 
 	// restore old state
-	fbr.push(fn.Arguments)
-	fbr.popStack(fn.Arguments)
+	totalPushed := 1 + len(args)
+	fbr.push(totalPushed)
+	fbr.popStack(totalPushed)
 	fbr.swapBase(prevBase)
 
 	return result, exc
@@ -297,11 +311,12 @@ func (m BoundMethod) Call(fbr *Fiber, args ...Value) (result Value, exc Exceptio
 type GoFuncSignature = func(fbr *Fiber) (Value, Exception)
 
 type GoFunc struct {
-	Name      string
-	Arguments int
-	IsMethod  bool
-	Mode      ast.SyncMode
-	Fn        GoFuncSignature
+	Name       string
+	Arguments  int
+	IsVariadic bool
+	IsMethod   bool
+	Mode       ast.SyncMode
+	Fn         GoFuncSignature
 }
 
 func (fn GoFunc) Synced() bool {
@@ -309,8 +324,14 @@ func (fn GoFunc) Synced() bool {
 }
 
 func (fn *GoFunc) call(fbr *Fiber, arguments []instruction) (result Value, exc Exception) {
-	if fn.Arguments != len(arguments) {
-		return Value{}, CustomError("callable requires %v argument(s), %v provided", fn.Arguments, len(arguments))
+	if fn.IsVariadic {
+		if len(arguments) < fn.Arguments {
+			return Value{}, CustomError("callable requires at least %v argument(s), %v provided", fn.Arguments, len(arguments))
+		}
+	} else {
+		if fn.Arguments != len(arguments) {
+			return Value{}, CustomError("callable requires %v argument(s), %v provided", fn.Arguments, len(arguments))
+		}
 	}
 
 	// no transition
@@ -349,8 +370,8 @@ func (fn *GoFunc) invoke(fbr *Fiber, arguments []instruction) (result Value, exc
 	result, exc = fn.Fn(fbr)
 
 	// restore old state
-	fbr.push(fn.Arguments)
-	fbr.popStack(fn.Arguments)
+	fbr.push(len(arguments))
+	fbr.popStack(len(arguments))
 	fbr.swapBase(prevBase)
 
 	return result, exc
@@ -358,8 +379,14 @@ func (fn *GoFunc) invoke(fbr *Fiber, arguments []instruction) (result Value, exc
 
 // mostly only used when calling from Go -> GoFunc
 func (fn *GoFunc) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) {
-	if fn.Arguments != len(args) {
-		return Value{}, CustomError("callable requires %v argument(s), %v provided", fn.Arguments, len(args))
+	if fn.IsVariadic {
+		if len(args) < fn.Arguments {
+			return Value{}, CustomError("callable requires at least %v argument(s), %v provided", fn.Arguments, len(args))
+		}
+	} else {
+		if fn.Arguments != len(args) {
+			return Value{}, CustomError("callable requires %v argument(s), %v provided", fn.Arguments, len(args))
+		}
 	}
 
 	base := len(fbr.stack)
@@ -384,8 +411,8 @@ func (fn *GoFunc) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) 
 	}
 
 	// restore old state
-	fbr.push(fn.Arguments)
-	fbr.popStack(fn.Arguments)
+	fbr.push(len(args))
+	fbr.popStack(len(args))
 	fbr.swapBase(prevBase)
 
 	return result, exc

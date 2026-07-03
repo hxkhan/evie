@@ -23,6 +23,7 @@ func (c capture) String() string {
 type funcInfoStatic struct {
 	name       string       // name of the function
 	args       []string     // argument names
+	isVariadic bool         // variadic function (...args)
 	locals     []bool       // all locals & true for those that escape
 	captures   []capture    // captured references
 	recyclable int          // number of non-escaping locals
@@ -52,11 +53,21 @@ func (fn *UserFn) Call(fbr *Fiber, args ...Value) (result Value, err Exception) 
 		fbr = fn.vm.NewFiber()
 	}
 
-	if len(fn.args) != len(args) {
-		if fn.name != "λ" {
-			return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(args))
+	if fn.isVariadic {
+		minArgs := len(fn.args) - 1
+		if len(args) < minArgs {
+			if fn.name != "λ" {
+				return Value{}, CustomError("function '%v' requires at least %v argument(s), %v provided", fn.name, minArgs, len(args))
+			}
+			return Value{}, CustomError("callable requires at least %v argument(s), %v provided", minArgs, len(args))
 		}
-		return Value{}, CustomError("callable requires %v argument(s), %v provided", len(fn.args), len(args))
+	} else {
+		if len(fn.args) != len(args) {
+			if fn.name != "λ" {
+				return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(args))
+			}
+			return Value{}, CustomError("callable requires %v argument(s), %v provided", len(fn.args), len(args))
+		}
 	}
 
 	base := len(fbr.stack)
@@ -70,8 +81,20 @@ func (fn *UserFn) Call(fbr *Fiber, args ...Value) (result Value, err Exception) 
 		}
 
 		// assign arguments
-		if idx < len(args) {
-			*fbr.stack[base+idx] = args[idx]
+		if !fn.isVariadic {
+			if idx < len(args) {
+				*fbr.stack[base+idx] = args[idx]
+			}
+		} else {
+			variadicIdx := len(fn.args) - 1
+			if idx < variadicIdx {
+				*fbr.stack[base+idx] = args[idx]
+			} else if idx == variadicIdx {
+				tailCount := len(args) - variadicIdx
+				tail := make([]Value, tailCount)
+				copy(tail, args[variadicIdx:])
+				*fbr.stack[base+idx] = BoxArray(&Array{Data: tail})
+			}
 		}
 	}
 
@@ -109,6 +132,10 @@ func (fn *UserFn) Call(fbr *Fiber, args ...Value) (result Value, err Exception) 
 }
 
 func (fn *UserFn) SaveInto(ptr any) (err error) {
+	if fn.isVariadic {
+		return CustomError("cannot reflect variadic function")
+	}
+
 	fun := reflect.ValueOf(ptr).Elem()
 
 	if len(fn.args) != fun.Type().NumIn() {

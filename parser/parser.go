@@ -352,7 +352,7 @@ func (ps *parser) parseFn(main token.Token, asExpr bool) ast.Node {
 	if ps.PeekToken().Type == token.Word {
 		fn.Name = ps.NextToken().Literal
 	}
-	fn.Args = ps.parseNamesList(main)
+	fn.Args, fn.IsVariadic = ps.parseNamesList(main)
 
 	// sync mode
 	switch {
@@ -376,7 +376,11 @@ func (ps *parser) parseStruct(main token.Token) ast.Node {
 	if ps.PeekToken().Type == token.Word {
 		str.Name = ps.NextToken().Literal
 	}
-	str.Args = ps.parseNamesList(main)
+	var isVariadic bool
+	str.Args, isVariadic = ps.parseNamesList(main)
+	if isVariadic {
+		ps.panic(main, "struct fields cannot be variadic")
+	}
 
 	if ps.consume("{") {
 		str.Action = ps.parseBlock()
@@ -388,17 +392,30 @@ func (ps *parser) parseStruct(main token.Token) ast.Node {
 }
 
 // helper to parse names surrounded by parentheses
-func (ps *parser) parseNamesList(main token.Token) []string {
+func (ps *parser) parseNamesList(main token.Token) ([]string, bool) {
 	if !ps.consume("(") {
 		ps.panic(main, "'('")
 	}
 
 	var args []string
 	if ps.consume(")") {
-		return args
+		return args, false
 	}
 
+	isVariadic := false
 	for {
+		if ps.consume("...") {
+			isVariadic = true
+			if ps.PeekToken().Type != token.Word {
+				ps.panic(main, "parameter name after '...'")
+			}
+			args = append(args, ps.NextToken().Literal)
+			if !ps.consume(")") {
+				ps.panic(main, "')' after variadic parameter")
+			}
+			break
+		}
+
 		if ps.PeekToken().Type != token.Word {
 			ps.panic(main, "names in parentheses")
 		}
@@ -411,7 +428,7 @@ func (ps *parser) parseNamesList(main token.Token) []string {
 			ps.panic(main, "',' or ')'")
 		}
 	}
-	return args
+	return args, isVariadic
 }
 
 func (ps *parser) parseArgsList() []ast.Node {

@@ -22,7 +22,17 @@ func run(t *testing.T, code string) vm.Value {
 }
 
 // Helper to evaluate Evie code and return the result value or error
-func runCode(code string) (vm.Value, error) {
+func runCode(code string) (resVal vm.Value, retErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if e, ok := r.(error); ok {
+				retErr = e
+			} else {
+				retErr = fmt.Errorf("%v", r)
+			}
+		}
+	}()
+
 	evm := vm.New(evie.Defaults)
 	trimmed := strings.TrimSpace(code)
 	script := code
@@ -478,6 +488,126 @@ func TestVariadicIO(t *testing.T) {
 	assertBool(t, run(t, code), true)
 }
 
+func TestVariadicUserFunctions(t *testing.T) {
+	// Variadic function with no fixed args
+	code1 := `
+	package main
+	fn sum(...nums) {
+		var i := 0
+		var total := 0
+		while i < nums.len() {
+			total = total + nums[i]
+			i += 1
+		}
+		return total
+	}
+	fn main() {
+		return sum(1, 2, 3, 4, 5)
+	}
+	`
+	assertNumber(t, run(t, code1), 15)
+
+	// Variadic function called with 0 args
+	code2 := `
+	package main
+	fn countArgs(...args) {
+		return args.len()
+	}
+	fn main() {
+		return countArgs()
+	}
+	`
+	assertNumber(t, run(t, code2), 0)
+
+	// Variadic function with fixed args
+	code3 := `
+	package main
+	fn format(prefix, sep, ...items) {
+		var res := prefix
+		var i := 0
+		while i < items.len() {
+			if i > 0 {
+				res = res + sep
+			}
+			res = res + items[i]
+			i += 1
+		}
+		return res
+	}
+	fn main() {
+		return format("Values: ", ", ", "a", "b", "c")
+	}
+	`
+	assertString(t, run(t, code3), "Values: a, b, c")
+
+	// Variadic function with fixed args called with 0 variadic args
+	code4 := `
+	package main
+	fn tag(name, ...items) {
+		return items.len()
+	}
+	fn main() {
+		return tag("title")
+	}
+	`
+	assertNumber(t, run(t, code4), 0)
+
+	// Anonymous / lambda variadic function
+	code5 := `
+	package main
+	fn main() {
+		f := fn(...args) => args.len()
+		return f(10, 20, 30)
+	}
+	`
+	assertNumber(t, run(t, code5), 3)
+
+	// Variadic function in goroutine (go / await)
+	code6 := `
+	package main
+	fn sumAsync(...nums) {
+		var i := 0
+		var total := 0
+		while i < nums.len() {
+			total = total + nums[i]
+			i += 1
+		}
+		return total
+	}
+	fn main() {
+		task := go sumAsync(10, 20, 30)
+		return await task
+	}
+	`
+	assertNumber(t, run(t, code6), 60)
+
+	// Variadic function with insufficient arguments raises error
+	code7 := `
+	package main
+	fn required(a, b, ...rest) {
+		return a + b
+	}
+	fn main() {
+		return required(1)
+	}
+	`
+	_, err := runCode(code7)
+	if err == nil {
+		t.Fatal("expected error when calling variadic function with insufficient args")
+	}
+
+	// Variadic function passed to array filter
+	code8 := `
+	package main
+	fn main() {
+		nums := [1, 2, 3, 4, 5]
+		evens := nums.filter(fn(...args) => args[0] > 2)
+		return evens.len()
+	}
+	`
+	assertNumber(t, run(t, code8), 3)
+}
+
 func TestExamples(t *testing.T) {
 	exampleFiles := []string{
 		"arrays.ev",
@@ -491,6 +621,7 @@ func TestExamples(t *testing.T) {
 		"counter.ev",
 		"captures.ev",
 		"objects.ev",
+		"variadic.ev",
 	}
 
 	for _, file := range exampleFiles {

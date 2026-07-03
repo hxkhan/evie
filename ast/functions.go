@@ -31,6 +31,7 @@ type Fn struct {
 	token.Pos
 	Name       string
 	Args       []string
+	IsVariadic bool
 	SyncMode   SyncMode
 	Action     Node
 	IsPublic   bool
@@ -80,6 +81,9 @@ func (fn Fn) String() string {
 	// args
 	b.WriteByte('(')
 	for i, name := range fn.Args {
+		if fn.IsVariadic && i == len(fn.Args)-1 {
+			b.WriteString("...")
+		}
 		b.WriteString(name)
 		if i != len(fn.Args)-1 {
 			b.WriteByte(',')

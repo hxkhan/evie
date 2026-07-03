@@ -393,10 +393,11 @@ func (vm *Instance) runPackage(node ast.Package) (Value, Exception) {
 			// create a stub for now
 			fn := BoxUserFn(UserFn{
 				funcInfoStatic: &funcInfoStatic{
-					name: fn.Name,
-					args: fn.Args,
-					mode: fn.SyncMode,
-					vm:   vm,
+					name:       fn.Name,
+					args:       fn.Args,
+					isVariadic: fn.IsVariadic,
+					mode:       fn.SyncMode,
+					vm:         vm,
 				},
 			})
 			this.globals[index] = Global{Value: &fn, IsStatic: true}
@@ -787,10 +788,11 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 
 	// create static info object
 	info := &funcInfoStatic{
-		name: node.Name,
-		args: node.Args,
-		mode: mode,
-		vm:   vm,
+		name:       node.Name,
+		args:       node.Args,
+		isVariadic: node.IsVariadic,
+		mode:       mode,
+		vm:         vm,
 	}
 
 	vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: info})
@@ -887,11 +889,21 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 	if value, ok := vm.evaluate(node.Fn).(Value); ok {
 		// try evie fn
 		if fn, isUserFn := value.AsUserFn(); isUserFn {
-			if len(fn.args) != len(arguments) {
-				if fn.name != "λ" {
-					panic(CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments)))
+			if fn.isVariadic {
+				minArgs := len(fn.args) - 1
+				if len(arguments) < minArgs {
+					if fn.name != "λ" {
+						panic(CustomError("function '%v' requires at least %v argument(s), %v provided", fn.name, minArgs, len(arguments)))
+					}
+					panic(CustomError("callable requires at least %v argument(s), %v provided", minArgs, len(arguments)))
 				}
-				panic(CustomError("callable requires %v argument(s), %v provided", len(fn.args), len(arguments)))
+			} else {
+				if len(fn.args) != len(arguments) {
+					if fn.name != "λ" {
+						panic(CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments)))
+					}
+					panic(CustomError("callable requires %v argument(s), %v provided", len(fn.args), len(arguments)))
+				}
 			}
 
 			// optimise: call to ourselves (recursion)
@@ -907,13 +919,36 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 						}
 
 						// evaluate arguments
-						if idx < len(arguments) {
-							arg, exc := arguments[idx](fbr)
-							if exc != nil {
-								return arg, exc
-							}
+						if !fn.isVariadic {
+							if idx < len(arguments) {
+								arg, exc := arguments[idx](fbr)
+								if exc != nil {
+									return arg, exc
+								}
 
-							*(fbr.stack[base+idx]) = arg
+								*(fbr.stack[base+idx]) = arg
+							}
+						} else {
+							variadicIdx := len(fn.args) - 1
+							if idx < variadicIdx {
+								arg, exc := arguments[idx](fbr)
+								if exc != nil {
+									return arg, exc
+								}
+
+								*(fbr.stack[base+idx]) = arg
+							} else if idx == variadicIdx {
+								tailCount := len(arguments) - variadicIdx
+								tail := make([]Value, tailCount)
+								for t := 0; t < tailCount; t++ {
+									arg, exc := arguments[variadicIdx+t](fbr)
+									if exc != nil {
+										return arg, exc
+									}
+									tail[t] = arg
+								}
+								*(fbr.stack[base+idx]) = BoxArray(&Array{Data: tail})
+							}
 						}
 					}
 
@@ -961,13 +996,36 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					}
 
 					// evaluate arguments
-					if idx < len(arguments) {
-						arg, exc := arguments[idx](fbr)
-						if exc != nil {
-							return arg, exc
-						}
+					if !fn.isVariadic {
+						if idx < len(arguments) {
+							arg, exc := arguments[idx](fbr)
+							if exc != nil {
+								return arg, exc
+							}
 
-						*(fbr.stack[base+idx]) = arg
+							*(fbr.stack[base+idx]) = arg
+						}
+					} else {
+						variadicIdx := len(fn.args) - 1
+						if idx < variadicIdx {
+							arg, exc := arguments[idx](fbr)
+							if exc != nil {
+								return arg, exc
+							}
+
+							*(fbr.stack[base+idx]) = arg
+						} else if idx == variadicIdx {
+							tailCount := len(arguments) - variadicIdx
+							tail := make([]Value, tailCount)
+							for t := 0; t < tailCount; t++ {
+								arg, exc := arguments[variadicIdx+t](fbr)
+								if exc != nil {
+									return arg, exc
+								}
+								tail[t] = arg
+							}
+							*(fbr.stack[base+idx]) = BoxArray(&Array{Data: tail})
+						}
 					}
 				}
 
@@ -1093,11 +1151,21 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 		// check if it is a user function
 		if fn, isUserFn := value.AsUserFn(); isUserFn {
-			if len(fn.args) != len(arguments) {
-				if fn.name != "λ" {
-					return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments))
+			if fn.isVariadic {
+				minArgs := len(fn.args) - 1
+				if len(arguments) < minArgs {
+					if fn.name != "λ" {
+						return Value{}, CustomError("function '%v' requires at least %v argument(s), %v provided", fn.name, minArgs, len(arguments))
+					}
+					return Value{}, CustomError("callable requires at least %v argument(s), %v provided", minArgs, len(arguments))
 				}
-				return Value{}, CustomError("callable requires %v argument(s), %v provided", len(fn.args), len(arguments))
+			} else {
+				if len(fn.args) != len(arguments) {
+					if fn.name != "λ" {
+						return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments))
+					}
+					return Value{}, CustomError("callable requires %v argument(s), %v provided", len(fn.args), len(arguments))
+				}
 			}
 
 			// setup stack locals
@@ -1110,13 +1178,36 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				}
 
 				// evaluate arguments
-				if idx < len(arguments) {
-					arg, exc := arguments[idx](fbr)
-					if exc != nil {
-						return arg, exc
-					}
+				if !fn.isVariadic {
+					if idx < len(arguments) {
+						arg, exc := arguments[idx](fbr)
+						if exc != nil {
+							return arg, exc
+						}
 
-					*(fbr.stack[base+idx]) = arg
+						*(fbr.stack[base+idx]) = arg
+					}
+				} else {
+					variadicIdx := len(fn.args) - 1
+					if idx < variadicIdx {
+						arg, exc := arguments[idx](fbr)
+						if exc != nil {
+							return arg, exc
+						}
+
+						*(fbr.stack[base+idx]) = arg
+					} else if idx == variadicIdx {
+						tailCount := len(arguments) - variadicIdx
+						tail := make([]Value, tailCount)
+						for t := 0; t < tailCount; t++ {
+							arg, exc := arguments[variadicIdx+t](fbr)
+							if exc != nil {
+								return arg, exc
+							}
+							tail[t] = arg
+						}
+						*(fbr.stack[base+idx]) = BoxArray(&Array{Data: tail})
+					}
 				}
 			}
 
@@ -1185,11 +1276,21 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 
 			// check if it is a user function
 			if fn, isUserFn := value.AsUserFn(); isUserFn {
-				if len(fn.args) != len(arguments) {
-					if fn.name != "λ" {
-						return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments))
+				if fn.isVariadic {
+					minArgs := len(fn.args) - 1
+					if len(arguments) < minArgs {
+						if fn.name != "λ" {
+							return Value{}, CustomError("function '%v' requires at least %v argument(s), %v provided", fn.name, minArgs, len(arguments))
+						}
+						return Value{}, CustomError("callable requires at least %v argument(s), %v provided", minArgs, len(arguments))
 					}
-					return Value{}, CustomError("callable requires %v argument(s), %v provided", len(fn.args), len(arguments))
+				} else {
+					if len(fn.args) != len(arguments) {
+						if fn.name != "λ" {
+							return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(arguments))
+						}
+						return Value{}, CustomError("callable requires %v argument(s), %v provided", len(fn.args), len(arguments))
+					}
 				}
 
 				// evaluate arguments
@@ -1224,8 +1325,20 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 						}
 
 						// assign arguments
-						if idx < len(params) {
-							*(fbr.stack[idx]) = params[idx]
+						if !fn.isVariadic {
+							if idx < len(params) {
+								*(fbr.stack[idx]) = params[idx]
+							}
+						} else {
+							variadicIdx := len(fn.args) - 1
+							if idx < variadicIdx {
+								*(fbr.stack[idx]) = params[idx]
+							} else if idx == variadicIdx {
+								tailCount := len(params) - variadicIdx
+								tail := make([]Value, tailCount)
+								copy(tail, params[variadicIdx:])
+								*(fbr.stack[idx]) = BoxArray(&Array{Data: tail})
+							}
 						}
 					}
 

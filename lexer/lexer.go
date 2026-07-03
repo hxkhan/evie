@@ -122,6 +122,12 @@ START:
 	case ',':
 		return lex.simple(",")
 	case '.':
+		if next1, ns1 := lex.peek(); next1 == '.' {
+			if next2, ns2 := lex.get(lex.cursor + ns1); next2 == '.' {
+				lex.cursor += ns1 + ns2
+				return lex.simple("...")
+			}
+		}
 		return lex.simple(".")
 	case ':':
 		return lex.simple(lex.option('=', ":=", ":"))

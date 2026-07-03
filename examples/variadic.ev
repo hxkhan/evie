@@ -1,0 +1,41 @@
+package main
+
+imports("io")
+
+fn sum(...nums) {
+    var total := 0
+    var i := 0
+    while i < nums.len() {
+        total = total + nums[i]
+        i += 1
+    }
+    return total
+}
+
+fn logMessage(level, prefix, ...parts) {
+    var msg := prefix + " "
+    var i := 0
+    while i < parts.len() {
+        if i > 0 {
+            msg = msg + " "
+        }
+        msg = msg + parts[i]
+        i += 1
+    }
+    io.println("[" + level + "]", msg)
+}
+
+fn main() {
+    // Variadic std/io functions
+    io.println("Hello", "from", "variadic", "println!", 1, 2, 3)
+
+    // User-defined variadic functions
+    echo sum(1, 2, 3, 4, 5)
+    echo sum()
+
+    logMessage("INFO", "app:", "Server", "started", "on", "port", "8080")
+
+    // Anonymous variadic function
+    count := fn(...items) => items.len()
+    echo count("a", "b", "c", "d")
+}

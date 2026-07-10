@@ -227,6 +227,31 @@ type BoundMethod struct {
 }
 
 func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (result Value, exc Exception) {
+	if ufn, isUserFn := m.fn.AsUserFn(); isUserFn {
+		if ufn.isVariadic {
+			minArgs := len(ufn.args) - 2
+			if len(arguments) < minArgs {
+				return Value{}, CustomError("method '%v' requires at least %v argument(s), %v provided", ufn.name, minArgs, len(arguments))
+			}
+		} else {
+			if len(ufn.args)-1 != len(arguments) {
+				return Value{}, CustomError("method '%v' requires %v argument(s), %v provided", ufn.name, len(ufn.args)-1, len(arguments))
+			}
+		}
+
+		args := make([]Value, 1+len(arguments))
+		args[0] = m.this
+		for i, arg := range arguments {
+			v, exc := arg(fbr)
+			if exc != nil {
+				return v, exc
+			}
+			args[1+i] = v
+		}
+
+		return ufn.Call(fbr, args...)
+	}
+
 	fn, ok := m.fn.AsGoFunc()
 	if !ok {
 		return Value{}, RuntimeExceptionF("impossible.. how did we get here?")
@@ -284,6 +309,24 @@ func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (result Value, ex
 }
 
 func (m BoundMethod) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) {
+	if ufn, isUserFn := m.fn.AsUserFn(); isUserFn {
+		if ufn.isVariadic {
+			minArgs := len(ufn.args) - 2
+			if len(args) < minArgs {
+				return Value{}, CustomError("method '%v' requires at least %v argument(s), %v provided", ufn.name, minArgs, len(args))
+			}
+		} else {
+			if len(ufn.args)-1 != len(args) {
+				return Value{}, CustomError("method '%v' requires %v argument(s), %v provided", ufn.name, len(ufn.args)-1, len(args))
+			}
+		}
+
+		allArgs := make([]Value, 1+len(args))
+		allArgs[0] = m.this
+		copy(allArgs[1:], args)
+		return ufn.Call(fbr, allArgs...)
+	}
+
 	fn, ok := m.fn.AsGoFunc()
 	if !ok {
 		return Value{}, RuntimeExceptionF("impossible.. how did we get here?")

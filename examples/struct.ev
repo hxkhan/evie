@@ -1,6 +1,14 @@
 package main
 
-struct person(name, age) {}
+struct person(name, age) {
+    fn greet(prefix) {
+        return prefix + ", I am " + this.name
+    }
+
+    fn haveBirthday() {
+        this.age = this.age + 1
+    }
+}
 
 fn main() {
     echo person
@@ -12,5 +20,7 @@ fn main() {
         echo "p is definitely a person"
     }
 
+    echo p.greet("Hello")
+    p.haveBirthday()
     echo p
 }

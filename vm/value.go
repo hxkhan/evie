@@ -561,11 +561,16 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 		obj := (*UserStructInstance)(x.pointer)
 
 		value, exists := obj.Fields[f]
-		if !exists {
-			return Value{}, false
+		if exists {
+			return value, true
 		}
 
-		return value, true
+		if method, ok := obj.InstanceOf.Methods[f]; ok {
+			m := BoundMethod{this: x, fn: BoxUserFn(*method)}
+			return boxMethod(m), true
+		}
+
+		return Value{}, false
 
 	case kindPackage:
 		pkg := (*packageInstance)(x.pointer)
@@ -610,6 +615,12 @@ func (x Value) dotAccess(f fields.ID) (field Value) {
 			return Value{}
 		}
 		return *value.Value
+	case kindStructInstance:
+		usi := (*UserStructInstance)(x.pointer)
+		if fn, ok := usi.InstanceOf.Methods[f]; ok {
+			return BoxUserFn(*fn)
+		}
+		return Value{}
 	}
 
 	panic("add more types?")

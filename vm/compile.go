@@ -416,8 +416,9 @@ func (vm *Instance) runPackage(node ast.Package) (Value, Exception) {
 
 			// create a stub for now
 			v := BoxUserStruct(&UserStruct{
-				Name:   str.Name,
-				Fields: args,
+				Name:    str.Name,
+				Fields:  args,
+				Methods: make(map[fields.ID]*UserFn),
 			})
 			this.globals[index] = Global{Value: &v, IsStatic: true}
 		}
@@ -482,6 +483,26 @@ func (vm *Instance) runPackage(node ast.Package) (Value, Exception) {
 				}
 			}
 			ufn.recyclable = recyclable
+		}
+	}
+
+	// 4. initialize struct methods
+	for _, node := range node.Code {
+		if str, isStruct := node.(ast.StructDefinition); isStruct {
+			global := this.globals[fields.Get(str.Name)]
+			ustruct := (*UserStruct)(global.pointer)
+
+			if block, ok := str.Action.(ast.Block); ok {
+				for _, stmt := range block.Code {
+					if mFn, isFn := stmt.(ast.Fn); isFn {
+						if mFn.Name == "" {
+							panic(CustomError("struct method must have a name"))
+						}
+						methodFn := vm.compileStructMethod(ustruct, mFn)
+						ustruct.Methods[fields.Get(mFn.Name)] = methodFn
+					}
+				}
+			}
 		}
 	}
 	return Value{}, nil
@@ -875,6 +896,56 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 		}
 		fbr.setLocal(index, BoxUserFn(fn))
 		return Value{}, nil
+	}
+}
+
+func (vm *Instance) compileStructMethod(ustruct *UserStruct, node ast.Fn) *UserFn {
+	mode := node.SyncMode
+	if mode == ast.UndefinedMode {
+		mode = ast.SyncedMode
+	}
+	vm.cp.modes.Push(mode)
+
+	methodArgs := make([]string, 1+len(node.Args))
+	methodArgs[0] = "this"
+	copy(methodArgs[1:], node.Args)
+
+	info := &funcInfoStatic{
+		name:       node.Name,
+		args:       methodArgs,
+		isVariadic: node.IsVariadic,
+		mode:       mode,
+		vm:         vm,
+	}
+
+	vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: info})
+	vm.cp.closures.Last(0).scope.OpenBlock()
+
+	// declare arguments: "this" is declared first as a static local at slot 0
+	vm.cp.closures.Last(0).scope.Declare("this", true)
+	for _, arg := range node.Args {
+		vm.cp.closures.Last(0).scope.Declare(arg, false)
+	}
+
+	info.code = vm.compile(node.Action)
+	closure := vm.cp.closures.Pop()
+	vm.cp.modes.Pop()
+	info.captures = closure.captures
+	capacity := closure.scope.Capacity()
+
+	info.locals = make([]bool, capacity)
+	info.recyclable = 0
+	for index := range capacity {
+		if closure.freeVars.Has(index) {
+			info.locals[index] = true
+			vm.log.escapesf("CT: method %v.%v => Local(%v) escapes\n", ustruct.Name, node.Name, index)
+		} else {
+			info.recyclable++
+		}
+	}
+
+	return &UserFn{
+		funcInfoStatic: info,
 	}
 }
 

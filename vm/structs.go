@@ -7,8 +7,9 @@ import (
 )
 
 type UserStruct struct {
-	Name   string
-	Fields []fields.ID
+	Name    string
+	Fields  []fields.ID
+	Methods map[fields.ID]*UserFn
 }
 
 type UserStructInstance struct {

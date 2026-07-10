@@ -405,6 +405,104 @@ func TestStructs(t *testing.T) {
 	}
 	`
 	assertBool(t, run(t, codeIsInstance), true)
+
+	// Struct method with this
+	codeMethod := `
+	package main
+	struct Person(name, title) {
+		fn greet(prefix) {
+			return prefix + " " + this.name
+		}
+		fn getTitle() => this.title
+	}
+	fn main() {
+		p := Person("Alice", "Engineer")
+		return p.greet("Hello") + ", title: " + p.getTitle()
+	}
+	`
+	assertString(t, run(t, codeMethod), "Hello Alice, title: Engineer")
+
+	// Struct method mutating fields
+	codeMutate := `
+	package main
+	struct Counter(count) {
+		fn increment() {
+			this.count = this.count + 1
+		}
+	}
+	fn main() {
+		c := Counter(10)
+		c.increment()
+		c.increment()
+		return c.count
+	}
+	`
+	assertNumber(t, run(t, codeMutate), 12)
+
+	// Method calling another method on this
+	codeMethodCallMethod := `
+	package main
+	struct Greeter(name) {
+		fn base() => "Hello " + this.name
+		fn excited() => this.base() + "!"
+	}
+	fn main() {
+		g := Greeter("Bob")
+		return g.excited()
+	}
+	`
+	assertString(t, run(t, codeMethodCallMethod), "Hello Bob!")
+
+	// Variadic struct method
+	codeVariadicMethod := `
+	package main
+	struct Formatter(prefix) {
+		fn format(...items) {
+			var res := this.prefix
+			var i := 0
+			while i < items.len() {
+				res = res + " " + items[i]
+				i += 1
+			}
+			return res
+		}
+	}
+	fn main() {
+		f := Formatter("Log:")
+		return f.format("test", "one", "two")
+	}
+	`
+	assertString(t, run(t, codeVariadicMethod), "Log: test one two")
+
+	// Bound method extracted and invoked
+	codeBoundMethod := `
+	package main
+	struct Greeter(name) {
+		fn greet(greeting) => greeting + ", " + this.name
+	}
+	fn main() {
+		g := Greeter("Charlie")
+		fnRef := g.greet
+		return fnRef("Good morning")
+	}
+	`
+	assertString(t, run(t, codeBoundMethod), "Good morning, Charlie")
+
+	// Calling method with missing argument raises error
+	codeInvalidArgCount := `
+	package main
+	struct Dog(name) {
+		fn bark(sound) => this.name + " says " + sound
+	}
+	fn main() {
+		d := Dog("Rex")
+		return d.bark()
+	}
+	`
+	_, err := runCode(codeInvalidArgCount)
+	if err == nil {
+		t.Fatal("expected error when calling method with missing arguments")
+	}
 }
 
 func TestStrings(t *testing.T) {

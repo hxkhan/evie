@@ -15,6 +15,7 @@ type IsInstanceOf struct {
 type StructDefinition struct {
 	token.Pos
 	Name   string
+	Parent string
 	Args   []string
 	Action Node
 }

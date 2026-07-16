@@ -8,6 +8,7 @@ import (
 
 type UserStruct struct {
 	Name    string
+	Parent  *UserStruct
 	Fields  []fields.ID
 	Methods map[fields.ID]*UserFn
 }

@@ -565,9 +565,11 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 			return value, true
 		}
 
-		if method, ok := obj.InstanceOf.Methods[f]; ok {
-			m := BoundMethod{this: x, fn: BoxUserFn(*method)}
-			return boxMethod(m), true
+		for cur := obj.InstanceOf; cur != nil; cur = cur.Parent {
+			if method, ok := cur.Methods[f]; ok {
+				m := BoundMethod{this: x, fn: BoxUserFn(*method)}
+				return boxMethod(m), true
+			}
 		}
 
 		return Value{}, false
@@ -617,8 +619,10 @@ func (x Value) dotAccess(f fields.ID) (field Value) {
 		return *value.Value
 	case kindStructInstance:
 		usi := (*UserStructInstance)(x.pointer)
-		if fn, ok := usi.InstanceOf.Methods[f]; ok {
-			return BoxUserFn(*fn)
+		for cur := usi.InstanceOf; cur != nil; cur = cur.Parent {
+			if fn, ok := cur.Methods[f]; ok {
+				return BoxUserFn(*fn)
+			}
 		}
 		return Value{}
 	}

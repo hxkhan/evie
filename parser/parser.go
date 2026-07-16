@@ -382,10 +382,17 @@ func (ps *parser) parseStruct(main token.Token) ast.Node {
 		ps.panic(main, "struct fields cannot be variadic")
 	}
 
+	if ps.consume(":") {
+		if ps.PeekToken().Type != token.Word {
+			ps.panic(main, "parent struct name after ':'")
+		}
+		str.Parent = ps.NextToken().Literal
+	}
+
 	if ps.consume("{") {
 		str.Action = ps.parseBlock()
 	} else {
-		ps.panic(main, "'{' or '=>'")
+		ps.panic(main, "'{'")
 	}
 
 	return str

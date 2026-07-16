@@ -201,7 +201,12 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			// structs
 			if us, isUserStruct := rhs.AsUserStruct(); isUserStruct {
 				if usi, isUserStructInstance := lhs.AsUserStructInstance(); isUserStructInstance {
-					return BoxBool(usi.InstanceOf == us), nil
+					for cur := usi.InstanceOf; cur != nil; cur = cur.Parent {
+						if cur == us {
+							return BoxBool(true), nil
+						}
+					}
+					return BoxBool(false), nil
 				}
 				return BoxBool(false), nil
 			}
@@ -486,11 +491,28 @@ func (vm *Instance) runPackage(node ast.Package) (Value, Exception) {
 		}
 	}
 
-	// 4. initialize struct methods
+	// 4. initialize struct methods and inheritance
 	for _, node := range node.Code {
 		if str, isStruct := node.(ast.StructDefinition); isStruct {
 			global := this.globals[fields.Get(str.Name)]
 			ustruct := (*UserStruct)(global.pointer)
+
+			if str.Parent != "" {
+				parentGlobal, exists := this.globals[fields.Get(str.Parent)]
+				if !exists {
+					panic(CustomError("undefined parent struct '%v'", str.Parent))
+				}
+				parentStruct, ok := parentGlobal.Value.AsUserStruct()
+				if !ok {
+					panic(CustomError("'%v' is not a struct", str.Parent))
+				}
+				for p := parentStruct; p != nil; p = p.Parent {
+					if p == ustruct {
+						panic(CustomError("cyclical inheritance detected between '%v' and '%v'", str.Name, str.Parent))
+					}
+				}
+				ustruct.Parent = parentStruct
+			}
 
 			if block, ok := str.Action.(ast.Block); ok {
 				for _, stmt := range block.Code {

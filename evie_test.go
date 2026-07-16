@@ -505,6 +505,93 @@ func TestStructs(t *testing.T) {
 	}
 }
 
+func TestStructInheritance(t *testing.T) {
+	codeInheritance := `
+	package main
+	struct Animal(name) {
+		fn speak() => this.name + " makes a sound"
+	}
+	struct Dog(name, breed) : Animal {
+		fn bark() => "Woof! I am " + this.name
+	}
+	struct Cat(name) : Animal {
+		fn speak() => "Meow! I am " + this.name
+	}
+	fn main() {
+		d := Dog("Buddy", "Golden")
+		c := Cat("Whiskers")
+		a := Animal("Creature")
+
+		// Method inheritance
+		dogSpeak := d.speak()
+		dogBark := d.bark()
+
+		// Method overriding
+		catSpeak := c.speak()
+
+		// Polymorphic is operator
+		dIsDog := d is Dog
+		dIsAnimal := d is Animal
+		cIsCat := c is Cat
+		cIsAnimal := c is Animal
+		cIsDog := c is Dog
+		aIsAnimal := a is Animal
+		aIsDog := a is Dog
+
+		return dogSpeak == "Buddy makes a sound" &&
+			dogBark == "Woof! I am Buddy" &&
+			catSpeak == "Meow! I am Whiskers" &&
+			dIsDog && dIsAnimal &&
+			cIsCat && cIsAnimal && !cIsDog &&
+			aIsAnimal && !aIsDog
+	}
+	`
+	assertBool(t, run(t, codeInheritance), true)
+
+	// Multi-level inheritance
+	codeMultiLevel := `
+	package main
+	struct Animal(name) {
+		fn kind() => "animal: " + this.name
+	}
+	struct Mammal(name) : Animal {
+		fn warmBlooded() => true
+	}
+	struct Dog(name) : Mammal {
+		fn bark() => "woof"
+	}
+	fn main() {
+		d := Dog("Rex")
+		return (d is Dog) && (d is Mammal) && (d is Animal) &&
+			d.warmBlooded() && (d.kind() == "animal: Rex")
+	}
+	`
+	assertBool(t, run(t, codeMultiLevel), true)
+
+	// Undefined parent struct error
+	codeUndefinedParent := `
+	package main
+	struct Child() : NonExistentParent {}
+	fn main() {}
+	`
+	_, err := runCode(codeUndefinedParent)
+	if err == nil {
+		t.Fatal("expected error for undefined parent struct")
+	}
+
+	// Cyclical inheritance error
+	codeCycle := `
+	package main
+	struct Alpha() : Beta {}
+	struct Beta() : Alpha {}
+	fn main() {}
+	`
+	_, err = runCode(codeCycle)
+	if err == nil {
+		t.Fatal("expected error for cyclical inheritance")
+	}
+}
+
 func TestStrings(t *testing.T) {
 	assertString(t, run(t, `"hello " + "world"`), "hello world")
 	assertString(t, run(t, `"abc"[1]`), "b")
@@ -720,6 +807,7 @@ func TestExamples(t *testing.T) {
 		"captures.ev",
 		"objects.ev",
 		"variadic.ev",
+		"inheritance.ev",
 	}
 
 	for _, file := range exampleFiles {

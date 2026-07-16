@@ -1,0 +1,64 @@
+package main
+
+imports("io")
+
+struct Animal(name) {
+    fn speak() {
+        return this.name + " makes a generic animal sound"
+    }
+
+    fn describe() {
+        return "Animal named " + this.name
+    }
+}
+
+struct Dog(name, breed) : Animal {
+    // Method override
+    fn speak() {
+        return this.name + " barks: Woof! Woof!"
+    }
+
+    // Subclass-specific method
+    fn fetch(item) {
+        return this.name + " fetched the " + item
+    }
+}
+
+struct Cat(name) : Animal {
+    // Method override
+    fn speak() {
+        return this.name + " purrs: Meow"
+    }
+}
+
+fn main() {
+    a := Animal("Creature")
+    d := Dog("Rex", "German Shepherd")
+    c := Cat("Luna")
+
+    // Polymorphic method calls
+    echo a.speak()
+    echo d.speak()
+    echo c.speak()
+
+    // Inherited method from Animal
+    echo d.describe()
+    echo c.describe()
+
+    // Subclass specific method
+    echo d.fetch("ball")
+
+    // Polymorphic type checking with 'is'
+    if d is Dog {
+        io.println("d is a Dog")
+    }
+    if d is Animal {
+        io.println("d is also an Animal (inherited)")
+    }
+    if c is Animal {
+        io.println("c is an Animal")
+    }
+    if !(c is Dog) {
+        io.println("c is not a Dog")
+    }
+}

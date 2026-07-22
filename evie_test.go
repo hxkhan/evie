@@ -383,6 +383,70 @@ func TestObjects(t *testing.T) {
 	return user["name"]? && !user["age"]?
 	`
 	assertBool(t, run(t, codeObjExistence), true)
+
+	// Object methods: keys, values, len
+	codeMethods := `
+	user := {name: "Alice", age: 30}
+	keys := user.keys()
+	vals := user.values()
+	return keys.len() == 2 && keys[0] == "age" && keys[1] == "name" && vals[0] == 30 && vals[1] == "Alice" && user.len() == 2
+	`
+	assertBool(t, run(t, codeMethods), true)
+
+	// Object methods: has, contains
+	codeHas := `
+	user := {name: "Alice", age: 30}
+	return user.has("name") && user.contains("age") && !user.has("city")
+	`
+	assertBool(t, run(t, codeHas), true)
+
+	// Object methods: remove, delete
+	codeRemove := `
+	user := {name: "Alice", age: 30, city: "Paris"}
+	val1 := user.remove("age")
+	val2 := user.delete("city")
+	return val1 == 30 && val2 == "Paris" && user.len() == 1 && !user.has("age") && !user.has("city")
+	`
+	assertBool(t, run(t, codeRemove), true)
+
+	// Object methods: clear
+	codeClear := `
+	user := {name: "Alice", age: 30}
+	user.clear()
+	return user.len() == 0 && !user.has("name")
+	`
+	assertBool(t, run(t, codeClear), true)
+
+	// object() constructor and is object
+	codeConstructorAndType := `
+	obj := object()
+	obj["key"] = "value"
+	isObj1 := obj is object
+	isObj2 := {a: 1} is object
+	isNotObj1 := [1, 2] is object
+	isNotObj2 := "string" is object
+	return isObj1 && isObj2 && !isNotObj1 && !isNotObj2 && obj["key"] == "value"
+	`
+	assertBool(t, run(t, codeConstructorAndType), true)
+
+	// First-class method reference extraction
+	codeBoundMethod := `
+	user := {b: 2, a: 1}
+	kFn := user.keys
+	keys := kFn()
+	return keys[0] == "a" && keys[1] == "b"
+	`
+	assertBool(t, run(t, codeBoundMethod), true)
+
+	// Function stored inside object property
+	codeObjFunction := `
+	calc := {
+		multiplier: 3,
+		double: fn(x) { return x * 2 }
+	}
+	return calc.double(21)
+	`
+	assertNumber(t, run(t, codeObjFunction), 42)
 }
 
 func TestStructs(t *testing.T) {

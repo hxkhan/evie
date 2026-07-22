@@ -9,4 +9,28 @@ fn main() {
     obj.email = "john03@gmail.com"
     io.println(obj)
     io.println(obj.email?) // true
+
+    // Built-in methods
+    io.println("Object keys:", obj.keys())
+    io.println("Object values:", obj.values())
+    io.println("Object count:", obj.len())
+
+    // Existence checks
+    io.println("Has email?", obj.has("email"))
+    io.println("Has phone?", obj.contains("phone"))
+
+    // Remove field
+    removed := obj.remove("email")
+    io.println("Removed email:", removed)
+    io.println("New count:", obj.len())
+
+    // Type checking
+    if obj is object {
+        io.println("obj is verified as an object")
+    }
+
+    // Dynamic object constructor
+    empty := object()
+    empty["dynamic"] = true
+    io.println("Constructed object:", empty)
 }

@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/hxkhan/evie/vm/fields"
@@ -24,6 +25,7 @@ var builtins = map[string]*Value{
 	"string": BoxBuiltinType(typeString).Allocate(),
 	"error":  BoxBuiltinType(typeError).Allocate(),
 	"array":  BoxBuiltinType(typeArray).Allocate(),
+	"object": BoxBuiltinType(typeObject).Allocate(),
 }
 
 var typeError = NewBuiltinType("error", &GoFunc{
@@ -404,3 +406,159 @@ var typeArray = NewBuiltinType("array", &GoFunc{
 		},
 	}),
 })
+
+var typeObject = NewBuiltinType("object", &GoFunc{
+	Name: "object",
+	Fn: func(fbr *Fiber) (Value, Exception) {
+		return BoxObject(make(map[fields.ID]Value)), nil
+	},
+	Arguments: 0,
+}, map[fields.ID]Value{
+	fields.Get("keys"): BoxGoFunc(&GoFunc{
+		Name:      "keys",
+		Arguments: 1,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
+				keys := make([]string, 0, len(obj))
+				for k := range obj {
+					keys = append(keys, fields.Lookup(k))
+				}
+				sort.Strings(keys)
+				arr := make([]Value, len(keys))
+				for i, k := range keys {
+					arr[i] = BoxString(k)
+				}
+				return BoxArray(NewArray(arr...)), nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+
+	fields.Get("values"): BoxGoFunc(&GoFunc{
+		Name:      "values",
+		Arguments: 1,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
+				keys := make([]string, 0, len(obj))
+				for k := range obj {
+					keys = append(keys, fields.Lookup(k))
+				}
+				sort.Strings(keys)
+				arr := make([]Value, len(keys))
+				for i, k := range keys {
+					arr[i] = obj[fields.Get(k)]
+				}
+				return BoxArray(NewArray(arr...)), nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+
+	fields.Get("len"): BoxGoFunc(&GoFunc{
+		Name:      "len",
+		Arguments: 1,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
+				return BoxNumber(float64(len(obj))), nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+
+	fields.Get("has"): BoxGoFunc(&GoFunc{
+		Name:      "has",
+		Arguments: 2,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
+				keyStr, ok := fbr.GetLocal(1).AsString()
+				if !ok {
+					return BoxBool(false), nil
+				}
+				_, exists := obj[fields.Get(keyStr)]
+				return BoxBool(exists), nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+
+	fields.Get("contains"): BoxGoFunc(&GoFunc{
+		Name:      "contains",
+		Arguments: 2,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
+				keyStr, ok := fbr.GetLocal(1).AsString()
+				if !ok {
+					return BoxBool(false), nil
+				}
+				_, exists := obj[fields.Get(keyStr)]
+				return BoxBool(exists), nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+
+	fields.Get("remove"): BoxGoFunc(&GoFunc{
+		Name:      "remove",
+		Arguments: 2,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
+				keyStr, ok := fbr.GetLocal(1).AsString()
+				if !ok {
+					return Value{}, nil
+				}
+				fid := fields.Get(keyStr)
+				val, exists := obj[fid]
+				if exists {
+					delete(obj, fid)
+					return val, nil
+				}
+				return Value{}, nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+
+	fields.Get("delete"): BoxGoFunc(&GoFunc{
+		Name:      "delete",
+		Arguments: 2,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
+				keyStr, ok := fbr.GetLocal(1).AsString()
+				if !ok {
+					return Value{}, nil
+				}
+				fid := fields.Get(keyStr)
+				val, exists := obj[fid]
+				if exists {
+					delete(obj, fid)
+					return val, nil
+				}
+				return Value{}, nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+
+	fields.Get("clear"): BoxGoFunc(&GoFunc{
+		Name:      "clear",
+		Arguments: 1,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
+				for k := range obj {
+					delete(obj, k)
+				}
+				return fbr.GetLocal(0), nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+})
+

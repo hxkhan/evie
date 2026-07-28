@@ -224,6 +224,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			} else if rhs == BoxBuiltinType(typeObject) {
 				_, isObj := lhs.AsObject()
 				return BoxBool(isObj), nil
+			} else if rhs == BoxBuiltinType(typeBuffer) {
+				_, isBuf := lhs.AsBuffer()
+				return BoxBool(isBuf), nil
 			}
 
 			return BoxBool(false), nil

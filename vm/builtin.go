@@ -26,6 +26,7 @@ var builtins = map[string]*Value{
 	"error":  BoxBuiltinType(typeError).Allocate(),
 	"array":  BoxBuiltinType(typeArray).Allocate(),
 	"object": BoxBuiltinType(typeObject).Allocate(),
+	"buffer": BoxBuiltinType(typeBuffer).Allocate(),
 }
 
 var typeError = NewBuiltinType("error", &GoFunc{
@@ -62,7 +63,11 @@ var typeError = NewBuiltinType("error", &GoFunc{
 var typeString = NewBuiltinType("string", &GoFunc{
 	Name: "string",
 	Fn: func(fbr *Fiber) (Value, Exception) {
-		return BoxString(fbr.GetLocal(0).String()), nil
+		arg := fbr.GetLocal(0)
+		if buf, ok := arg.AsBuffer(); ok {
+			return BoxString(string(buf)), nil
+		}
+		return BoxString(arg.String()), nil
 	},
 	Arguments: 1,
 }, map[fields.ID]Value{
@@ -561,4 +566,37 @@ var typeObject = NewBuiltinType("object", &GoFunc{
 		},
 	}),
 })
+
+var typeBuffer = NewBuiltinType("buffer", &GoFunc{
+	Name: "buffer",
+	Fn: func(fbr *Fiber) (Value, Exception) {
+		return BoxBuffer([]byte{}), nil
+	},
+	Arguments: 0,
+}, map[fields.ID]Value{
+	fields.Get("string"): BoxGoFunc(&GoFunc{
+		Name:      "string",
+		Arguments: 1,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if buf, ok := fbr.GetLocal(0).AsBuffer(); ok {
+				return BoxString(string(buf)), nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+
+	fields.Get("len"): BoxGoFunc(&GoFunc{
+		Name:      "len",
+		Arguments: 1,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if buf, ok := fbr.GetLocal(0).AsBuffer(); ok {
+				return BoxNumber(float64(len(buf))), nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+})
+
 

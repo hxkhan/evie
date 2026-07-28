@@ -666,6 +666,22 @@ func TestStrings(t *testing.T) {
 	assertBool(t, run(t, `"hello".contains("ell")`), true)
 }
 
+func TestBuffers(t *testing.T) {
+	codeBuffer := `
+	package main imports("fs")
+	fn main() {
+		buf := fs.readFile("go.mod")
+		isBuf := buf is buffer
+		isNotBuf := "hello" is buffer
+		s1 := buf.string()
+		s2 := string(buf)
+		l := buf.len()
+		return isBuf && !isNotBuf && s1 == s2 && l > 0 && s1.startsWith("module")
+	}
+	`
+	assertBool(t, run(t, codeBuffer), true)
+}
+
 func TestErrorHandling(t *testing.T) {
 	codeCatchRuntime := `
 	b := catch(5 + "10")

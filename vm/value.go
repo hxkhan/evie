@@ -70,6 +70,7 @@ var boolType = unsafe.Pointer(new(byte))
 var strTypeID = unsafe.Pointer(new(byte))
 var arrayTypeID = unsafe.Pointer(new(byte))
 var objectTypeID = unsafe.Pointer(new(byte))
+var bufferTypeID = unsafe.Pointer(new(byte))
 
 // CustomValue is an interface for evie hosts to add their own custom values to the language
 type CustomValue interface {
@@ -509,6 +510,8 @@ func (x Value) TypeID() unsafe.Pointer {
 		return arrayTypeID
 	case kindObject:
 		return objectTypeID
+	case kindBuffer:
+		return bufferTypeID
 	case kindPackage:
 		return x.pointer
 	}
@@ -533,6 +536,15 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 
 	case kindArray:
 		value, exists := typeArray.Fields[f]
+		if !exists {
+			return Value{}, false
+		}
+
+		m := BoundMethod{this: x, fn: value}
+		return boxMethod(m), true
+
+	case kindBuffer:
+		value, exists := typeBuffer.Fields[f]
 		if !exists {
 			return Value{}, false
 		}
@@ -616,6 +628,8 @@ func (x Value) dotAccess(f fields.ID) (field Value) {
 		return typeString.Fields[f]
 	case kindArray:
 		return typeArray.Fields[f]
+	case kindBuffer:
+		return typeBuffer.Fields[f]
 	case kindObject:
 		obj := *(*map[fields.ID]Value)(x.pointer)
 		if value, exists := obj[f]; exists {

@@ -27,6 +27,7 @@ var builtins = map[string]*Value{
 	"array":  BoxBuiltinType(typeArray).Allocate(),
 	"object": BoxBuiltinType(typeObject).Allocate(),
 	"buffer": BoxBuiltinType(typeBuffer).Allocate(),
+	"task":   BoxBuiltinType(typeTask).Allocate(),
 }
 
 var typeError = NewBuiltinType("error", &GoFunc{
@@ -598,5 +599,79 @@ var typeBuffer = NewBuiltinType("buffer", &GoFunc{
 		},
 	}),
 })
+
+var typeTask = NewBuiltinType("task", &GoFunc{
+	Name: "task",
+	Fn: func(fbr *Fiber) (Value, Exception) {
+		return BoxTask(NewTaskInstance()), nil
+	},
+	Arguments: 0,
+}, map[fields.ID]Value{
+	fields.Get("done"): BoxGoFunc(&GoFunc{
+		Name:      "done",
+		Arguments: 1,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if t, ok := fbr.GetLocal(0).AsTask(); ok {
+				return BoxBool(t.IsDone()), nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+
+	fields.Get("isDone"): BoxGoFunc(&GoFunc{
+		Name:      "isDone",
+		Arguments: 1,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if t, ok := fbr.GetLocal(0).AsTask(); ok {
+				return BoxBool(t.IsDone()), nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+
+	fields.Get("result"): BoxGoFunc(&GoFunc{
+		Name:      "result",
+		Arguments: 1,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if t, ok := fbr.GetLocal(0).AsTask(); ok {
+				res, _ := t.Result()
+				return res, nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+
+	fields.Get("error"): BoxGoFunc(&GoFunc{
+		Name:      "error",
+		Arguments: 1,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if t, ok := fbr.GetLocal(0).AsTask(); ok {
+				_, err := t.Result()
+				if err != nil {
+					return BoxError(CustomError("%s", err.Error())), nil
+				}
+				return Value{}, nil
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+
+	fields.Get("await"): BoxGoFunc(&GoFunc{
+		Name:      "await",
+		Arguments: 1,
+		IsMethod:  true,
+		Fn: func(fbr *Fiber) (Value, Exception) {
+			if t, ok := fbr.GetLocal(0).AsTask(); ok {
+				return t.Await(fbr)
+			}
+			return Value{}, ErrTypes
+		},
+	}),
+})
+
 
 

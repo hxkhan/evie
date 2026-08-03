@@ -71,6 +71,7 @@ var strTypeID = unsafe.Pointer(new(byte))
 var arrayTypeID = unsafe.Pointer(new(byte))
 var objectTypeID = unsafe.Pointer(new(byte))
 var bufferTypeID = unsafe.Pointer(new(byte))
+var taskTypeID = unsafe.Pointer(new(byte))
 
 // CustomValue is an interface for evie hosts to add their own custom values to the language
 type CustomValue interface {
@@ -134,8 +135,8 @@ func BoxUserStructInstance(obj *UserStructInstance) Value {
 }
 
 // BoxTask boxes an evie task
-func BoxTask(task chan evaluation) Value {
-	return Value{scalar: kindTask, pointer: unsafe.Pointer(&task)}
+func BoxTask(task *Task) Value {
+	return Value{scalar: kindTask, pointer: unsafe.Pointer(task)}
 }
 
 // BoxPackage boxes an evie package
@@ -240,11 +241,11 @@ func (x Value) AsBuiltinType() (obj *BuiltinType, ok bool) {
 	return (*BuiltinType)(x.pointer), true
 }
 
-func (x Value) AsTask() (task <-chan evaluation, ok bool) {
+func (x Value) AsTask() (task *Task, ok bool) {
 	if x.scalar != kindTask || isKnown(x.pointer) {
 		return nil, false
 	}
-	return *(*chan evaluation)(x.pointer), true
+	return (*Task)(x.pointer), true
 }
 
 func (x Value) asPackage() (pkg *packageInstance, ok bool) {
@@ -325,8 +326,7 @@ func (x Value) IsTruthy() bool {
 		obj := *(*map[fields.ID]Value)(x.pointer)
 		return len(obj) != 0
 	case kindTask:
-		task := *(*chan evaluation)(x.pointer)
-		return len(task) != 0
+		return true
 	case kindBuffer:
 		buffer := *(*[]byte)(x.pointer)
 		return len(buffer) != 0
@@ -431,7 +431,14 @@ func (x Value) String() string {
 		obj := (*UserStruct)(x.pointer)
 		return fmt.Sprintf("<type %v>", obj.Name)
 	case kindTask:
-		return "<task>"
+		t := (*Task)(x.pointer)
+		if t.IsDone() {
+			if t.err != nil {
+				return "<task failed>"
+			}
+			return "<task completed>"
+		}
+		return "<task pending>"
 	case kindPackage:
 		return "<package>"
 	case kindBoundMethod:
@@ -512,6 +519,8 @@ func (x Value) TypeID() unsafe.Pointer {
 		return objectTypeID
 	case kindBuffer:
 		return bufferTypeID
+	case kindTask:
+		return taskTypeID
 	case kindPackage:
 		return x.pointer
 	}
@@ -545,6 +554,15 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 
 	case kindBuffer:
 		value, exists := typeBuffer.Fields[f]
+		if !exists {
+			return Value{}, false
+		}
+
+		m := BoundMethod{this: x, fn: value}
+		return boxMethod(m), true
+
+	case kindTask:
+		value, exists := typeTask.Fields[f]
 		if !exists {
 			return Value{}, false
 		}
@@ -630,6 +648,8 @@ func (x Value) dotAccess(f fields.ID) (field Value) {
 		return typeArray.Fields[f]
 	case kindBuffer:
 		return typeBuffer.Fields[f]
+	case kindTask:
+		return typeTask.Fields[f]
 	case kindObject:
 		obj := *(*map[fields.ID]Value)(x.pointer)
 		if value, exists := obj[f]; exists {

@@ -227,6 +227,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			} else if rhs == BoxBuiltinType(typeBuffer) {
 				_, isBuf := lhs.AsBuffer()
 				return BoxBool(isBuf), nil
+			} else if rhs == BoxBuiltinType(typeTask) {
+				_, isTask := lhs.AsTask()
+				return BoxBool(isTask), nil
 			}
 
 			return BoxBool(false), nil
@@ -1402,7 +1405,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					params[i] = arg
 				}
 
-				task := make(chan evaluation, 1)
+				task := NewTaskInstance()
 				vm.rt.wg.Go(func() {
 					// setup new fiber
 					fbr := vm.rt.fibers.Get().(*Fiber)
@@ -1460,11 +1463,8 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					case nil:
 					case signalReturn:
 						exc = nil
-					default:
-						panic(exc)
 					}
-					task <- evaluation{result: result, err: exc}
-					close(task)
+					task.Finish(result, exc)
 				})
 
 				return BoxTask(task), nil
@@ -1482,7 +1482,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					}
 				}
 
-				task := make(chan evaluation, 1)
+				task := NewTaskInstance()
 				vm.rt.wg.Go(func() {
 					var result Value
 					var exc Exception
@@ -1501,8 +1501,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 						vm.rt.ReleaseGIL()
 					}
 
-					task <- evaluation{result: result, err: exc}
-					close(task)
+					task.Finish(result, exc)
 				})
 
 				return BoxTask(task), nil
@@ -1581,23 +1580,11 @@ func (vm *Instance) emitAwait(node ast.Await) instruction {
 		}
 
 		if task, ok := v.AsTask(); ok {
-			if fbr.synced {
-				vm.rt.ReleaseGIL()
-			}
-
-			response, ok := <-task
-
-			if fbr.synced {
-				vm.rt.AcquireGIL()
-			}
-
-			if !ok {
-				return Value{}, CustomError("cannot await on a finished task")
-			}
-
-			return response.result, response.err
+			return task.Await(fbr)
 		}
-		return Value{}, CustomError("cannot await on a value of type '%s'", v.TypeOf())
+
+		// Awaiting a non-task value returns the value directly (identity await)
+		return v, nil
 	}
 }
 
@@ -1608,53 +1595,26 @@ func (vm *Instance) emitAwaitAll(node ast.AwaitAll) instruction {
 	}
 
 	return func(fbr *Fiber) (Value, Exception) {
-		tasks := make([]<-chan evaluation, len(values))
+		evaluated := make([]Value, len(values))
 		for i, value := range values {
 			v, exc := value(fbr)
 			if exc != nil {
 				return v, exc
-
 			}
+			evaluated[i] = v
+		}
 
+		results := make([]Value, len(evaluated))
+		for i, v := range evaluated {
 			if task, ok := v.AsTask(); ok {
-				tasks[i] = task
-				continue
-			}
-
-			return Value{}, RuntimeExceptionF("cannot await on a value of type '%s'", v.TypeOf())
-		}
-
-		// release GIL if synced
-		if fbr.synced {
-			vm.rt.ReleaseGIL()
-		}
-
-		results := make([]Value, len(values))
-		for i, task := range tasks {
-			response, ok := <-task
-
-			if !ok {
-				// acquire GIL if synced
-				if fbr.synced {
-					vm.rt.AcquireGIL()
+				res, err := task.Await(fbr)
+				if err != nil {
+					return res, err
 				}
-				return Value{}, CustomError("cannot await on a finished task")
+				results[i] = res
+			} else {
+				results[i] = v
 			}
-
-			if response.err != nil {
-				// acquire GIL if synced
-				if fbr.synced {
-					vm.rt.AcquireGIL()
-				}
-				return response.result, response.err
-			}
-
-			results[i] = response.result
-		}
-
-		// acquire GIL if synced
-		if fbr.synced {
-			vm.rt.AcquireGIL()
 		}
 
 		return BoxArray(NewArray(results...)), nil

@@ -735,6 +735,66 @@ func TestConcurrency(t *testing.T) {
 	}
 	`
 	assertNumber(t, run(t, codeGoAwait), 42)
+
+	// Multiple awaits on the same task (memoization)
+	codeMultiAwait := `
+	package main
+	fn compute() {
+		return 100
+	}
+	fn main() {
+		t := go compute()
+		r1 := await t
+		r2 := await t
+		r3 := t.await()
+		return r1 == 100 && r2 == 100 && r3 == 100
+	}
+	`
+	assertBool(t, run(t, codeMultiAwait), true)
+
+	// Identity await on non-task values
+	codeIdentityAwait := `
+	package main
+	fn main() {
+		n := await 42
+		s := await "hello"
+		arr := await [1, 2, 3]
+		return n == 42 && s == "hello" && arr.len() == 3
+	}
+	`
+	assertBool(t, run(t, codeIdentityAwait), true)
+
+	// Task methods and is task type check
+	codeTaskMethods := `
+	package main
+	fn work() {
+		return "done"
+	}
+	fn main() {
+		t := go work()
+		isT := t is task
+		isNotT := "not a task" is task
+		res := await t
+		isFinished := t.done() && t.isDone()
+		taskResult := t.result()
+		return isT && !isNotT && res == "done" && isFinished && taskResult == "done"
+	}
+	`
+	assertBool(t, run(t, codeTaskMethods), true)
+
+	// Error propagation through task
+	codeTaskError := `
+	package main
+	fn failing() {
+		throw "task failed"
+	}
+	fn main() {
+		t := go failing()
+		err := catch(await t)
+		return err is error && err.message == "task failed"
+	}
+	`
+	assertBool(t, run(t, codeTaskError), true)
 }
 
 func TestVariadicIO(t *testing.T) {

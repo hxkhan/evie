@@ -69,6 +69,11 @@ type AwaitAny struct {
 	Tasks []Node
 }
 
+type AwaitRace struct {
+	token.Pos
+	Tasks []Node
+}
+
 func (fn Fn) String() string {
 	b := strings.Builder{}
 	b.WriteString("fn")

@@ -171,6 +171,12 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	case ast.AwaitAll:
 		return vm.emitAwaitAll(node)
 
+	case ast.AwaitAny:
+		return vm.emitAwaitAny(node)
+
+	case ast.AwaitRace:
+		return vm.emitAwaitRace(node)
+
 	case ast.Neg:
 		return vm.emitNeg(node)
 
@@ -1588,6 +1594,32 @@ func (vm *Instance) emitAwait(node ast.Await) instruction {
 	}
 }
 
+func extractTasks(evaluated []Value) ([]*Task, []Value) {
+	if len(evaluated) == 1 {
+		if arr, ok := evaluated[0].AsArray(); ok {
+			arr.MU.RLock()
+			defer arr.MU.RUnlock()
+			tasks := make([]*Task, len(arr.Data))
+			raw := make([]Value, len(arr.Data))
+			for i, item := range arr.Data {
+				raw[i] = item
+				if t, ok := item.AsTask(); ok {
+					tasks[i] = t
+				}
+			}
+			return tasks, raw
+		}
+	}
+
+	tasks := make([]*Task, len(evaluated))
+	for i, item := range evaluated {
+		if t, ok := item.AsTask(); ok {
+			tasks[i] = t
+		}
+	}
+	return tasks, evaluated
+}
+
 func (vm *Instance) emitAwaitAll(node ast.AwaitAll) instruction {
 	values := make([]instruction, len(node.Tasks))
 	for i, task := range node.Tasks {
@@ -1604,20 +1636,156 @@ func (vm *Instance) emitAwaitAll(node ast.AwaitAll) instruction {
 			evaluated[i] = v
 		}
 
-		results := make([]Value, len(evaluated))
-		for i, v := range evaluated {
-			if task, ok := v.AsTask(); ok {
-				res, err := task.Await(fbr)
+		tasks, raw := extractTasks(evaluated)
+		results := make([]Value, len(tasks))
+		for i, t := range tasks {
+			if t != nil {
+				res, err := t.Await(fbr)
 				if err != nil {
 					return res, err
 				}
 				results[i] = res
 			} else {
-				results[i] = v
+				results[i] = raw[i]
 			}
 		}
 
 		return BoxArray(NewArray(results...)), nil
+	}
+}
+
+func (vm *Instance) emitAwaitAny(node ast.AwaitAny) instruction {
+	values := make([]instruction, len(node.Tasks))
+	for i, task := range node.Tasks {
+		values[i] = vm.compile(task)
+	}
+
+	return func(fbr *Fiber) (Value, Exception) {
+		evaluated := make([]Value, len(values))
+		for i, value := range values {
+			v, exc := value(fbr)
+			if exc != nil {
+				return v, exc
+			}
+			evaluated[i] = v
+		}
+
+		tasks, raw := extractTasks(evaluated)
+		if len(tasks) == 0 {
+			return Value{}, CustomError("await.any called with empty list of tasks")
+		}
+
+		// Check if any item is already a resolved non-task or completed task without error
+		for i, t := range tasks {
+			if t == nil {
+				return raw[i], nil
+			}
+			if t.IsDone() {
+				res, err := t.Result()
+				if err == nil {
+					return res, nil
+				}
+			}
+		}
+
+		type outcome struct {
+			res Value
+			err Exception
+		}
+
+		outcomes := make(chan outcome, len(tasks))
+		for _, t := range tasks {
+			go func(task *Task) {
+				<-task.Done()
+				res, err := task.Result()
+				outcomes <- outcome{res: res, err: err}
+			}(t)
+		}
+
+		if fbr.synced && fbr.vm != nil {
+			fbr.vm.rt.ReleaseGIL()
+		}
+
+		var firstSuccess *outcome
+		failedCount := 0
+		for failedCount < len(tasks) {
+			out := <-outcomes
+			if out.err == nil {
+				firstSuccess = &out
+				break
+			}
+			failedCount++
+		}
+
+		if fbr.synced && fbr.vm != nil {
+			fbr.vm.rt.AcquireGIL()
+		}
+
+		if firstSuccess != nil {
+			return firstSuccess.res, nil
+		}
+
+		return Value{}, CustomError("all tasks failed in await.any")
+	}
+}
+
+func (vm *Instance) emitAwaitRace(node ast.AwaitRace) instruction {
+	values := make([]instruction, len(node.Tasks))
+	for i, task := range node.Tasks {
+		values[i] = vm.compile(task)
+	}
+
+	return func(fbr *Fiber) (Value, Exception) {
+		evaluated := make([]Value, len(values))
+		for i, value := range values {
+			v, exc := value(fbr)
+			if exc != nil {
+				return v, exc
+			}
+			evaluated[i] = v
+		}
+
+		tasks, raw := extractTasks(evaluated)
+		if len(tasks) == 0 {
+			return Value{}, CustomError("await.race called with empty list of tasks")
+		}
+
+		// Check if any item is already a non-task or completed task
+		for i, t := range tasks {
+			if t == nil {
+				return raw[i], nil
+			}
+			if t.IsDone() {
+				res, err := t.Result()
+				return res, err
+			}
+		}
+
+		type outcome struct {
+			res Value
+			err Exception
+		}
+
+		outcomes := make(chan outcome, len(tasks))
+		for _, t := range tasks {
+			go func(task *Task) {
+				<-task.Done()
+				res, err := task.Result()
+				outcomes <- outcome{res: res, err: err}
+			}(t)
+		}
+
+		if fbr.synced && fbr.vm != nil {
+			fbr.vm.rt.ReleaseGIL()
+		}
+
+		first := <-outcomes
+
+		if fbr.synced && fbr.vm != nil {
+			fbr.vm.rt.AcquireGIL()
+		}
+
+		return first.res, first.err
 	}
 }
 

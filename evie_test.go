@@ -795,6 +795,57 @@ func TestConcurrency(t *testing.T) {
 	}
 	`
 	assertBool(t, run(t, codeTaskError), true)
+
+	// await.all with variadic and array form
+	codeAwaitAll := `
+	package main
+	fn add(a, b) => a + b
+	fn main() {
+		t1 := go add(10, 20)
+		t2 := go add(30, 40)
+		res1 := await.all(t1, t2)
+		tasks := [go add(1, 2), go add(3, 4)]
+		res2 := await.all(tasks)
+		return res1[0] == 30 && res1[1] == 70 && res2[0] == 3 && res2[1] == 7
+	}
+	`
+	assertBool(t, run(t, codeAwaitAll), true)
+
+	// await.any returns first successful task (even if another fails)
+	codeAwaitAny := `
+	package main
+	fn slowSuccess() {
+		return "winner"
+	}
+	fn failure() {
+		throw "failed"
+	}
+	fn main() {
+		t1 := go failure()
+		t2 := go slowSuccess()
+		res := await.any(t1, t2)
+		tasks := [go failure(), go slowSuccess()]
+		resArr := await.any(tasks)
+		return res == "winner" && resArr == "winner"
+	}
+	`
+	assertBool(t, run(t, codeAwaitAny), true)
+
+	// await.race returns first settled task
+	codeAwaitRace := `
+	package main
+	fn fast() => "first"
+	fn slow() => "second"
+	fn main() {
+		t1 := go fast()
+		t2 := go slow()
+		res := await.race(t1, t2)
+		tasks := [go fast(), go slow()]
+		resArr := await.race(tasks)
+		return (res == "first" || res == "second") && (resArr == "first" || resArr == "second")
+	}
+	`
+	assertBool(t, run(t, codeAwaitRace), true)
 }
 
 func TestVariadicIO(t *testing.T) {

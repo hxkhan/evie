@@ -60,7 +60,7 @@
 				{
 					"comment": "Await and variants",
 					"name": "keyword.control.await.evie",
-					"match": "\\bawait(\\.(all|any))?\\b"
+					"match": "\\bawait(\\.(all|any|race))?\\b"
 				}
 			]
 		},

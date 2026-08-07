@@ -274,7 +274,7 @@ func (ps *parser) parseStringTemplate(main token.Token) (st ast.StringTemplate) 
 }
 
 func (ps *parser) parseAwait(main token.Token) ast.Node {
-	// await.all(x, y, z) or await.any(x, y, z)
+	// await.all(x, y, z), await.any(x, y, z), or await.race(x, y, z)
 	if !ps.consume(".") {
 		return ast.Await{Task: ps.parse(0, true)}
 	}
@@ -284,6 +284,9 @@ func (ps *parser) parseAwait(main token.Token) ast.Node {
 	}
 	if ps.consumeName("any") {
 		return ast.AwaitAny{Pos: main.Line, Tasks: ps.parseArgsList()}
+	}
+	if ps.consumeName("race") {
+		return ast.AwaitRace{Pos: main.Line, Tasks: ps.parseArgsList()}
 	}
 	return ast.Await{Task: ps.parse(0, true)}
 }

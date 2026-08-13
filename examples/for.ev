@@ -1,0 +1,38 @@
+package main imports("io")
+
+fn main() {
+    // 1. Array iteration
+    var fruits := ["apple", "banana", "cherry"]
+    for fruit in fruits {
+        io.println(fruit)
+    }
+
+    // 2. Array iteration with index
+    for i, fruit in fruits {
+        io.println(i, fruit)
+    }
+
+    // 3. Object iteration
+    var scores := { alice: 95, bob: 88, charlie: 92 }
+    for name, score in scores {
+        io.println(name, score)
+    }
+
+    // 4. String iteration
+    var word := "Evie"
+    for ch in word {
+        io.println(ch)
+    }
+
+    // 5. Break and continue
+    var numbers := [1, 2, 3, 4, 5, 6]
+    for num in numbers {
+        if num == 2 {
+            continue
+        }
+        if num == 5 {
+            break
+        }
+        io.println(num)
+    }
+}

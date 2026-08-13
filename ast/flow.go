@@ -19,6 +19,14 @@ type While struct {
 	Action    Node // [required]
 }
 
+type For struct {
+	token.Pos
+	IndexVar   string // optional, "" if none
+	ItemVar    string // [required]
+	Collection Node   // [required]
+	Action     Node   // [required]
+}
+
 type Unsynced struct {
 	token.Pos
 	Action Node // [required]
@@ -58,6 +66,13 @@ func (node Conditional) String() string {
 
 func (node While) String() string {
 	return fmt.Sprintf("while (%v) %v", node.Condition, node.Action)
+}
+
+func (node For) String() string {
+	if node.IndexVar != "" {
+		return fmt.Sprintf("for %v, %v in %v %v", node.IndexVar, node.ItemVar, node.Collection, node.Action)
+	}
+	return fmt.Sprintf("for %v in %v %v", node.ItemVar, node.Collection, node.Action)
 }
 
 func (node Continue) String() string {

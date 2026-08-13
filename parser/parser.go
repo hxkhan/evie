@@ -29,6 +29,8 @@ var keywords = []string{
 	"is",
 	"await", "go",
 	"synced", "catch", "throw",
+	"while", "break", "continue",
+	"for", "in",
 }
 
 var operators = map[string]ast.Operator{
@@ -147,6 +149,8 @@ func (ps *parser) panic(main token.Token, expected string) {
 		"else":   "else statement",
 		".":      "operator '.'",
 		"struct": "struct definition",
+		"for":    "for loop",
+		"while":  "while loop",
 	}
 	what := context[main.Literal]
 	if what == "" {
@@ -185,6 +189,8 @@ func (ps *parser) handleWords(main token.Token, asExpr bool, precedenceLevel int
 		return ps.parseConditional(main)
 	case "while":
 		return ps.parseWhile(main)
+	case "for":
+		return ps.parseFor(main)
 	case "break":
 		return ast.Break{Pos: main.Line}
 	case "continue":
@@ -338,6 +344,55 @@ func (ps *parser) parseWhile(main token.Token) ast.Node {
 	}
 	node.Action = ps.parseBlock()
 	return node
+}
+
+func (ps *parser) parseFor(main token.Token) ast.Node {
+	hasParen := ps.consume("(")
+	first := ps.NextToken()
+	if first.Type != token.Word {
+		panic(fmt.Errorf("for loop on line %v expected variable name, got '%v'", main.Line, first.Literal))
+	}
+
+	var indexVar, itemVar string
+	if ps.consume(",") {
+		indexVar = first.Literal
+		second := ps.NextToken()
+		if second.Type != token.Word {
+			panic(fmt.Errorf("for loop on line %v expected variable name after ',', got '%v'", main.Line, second.Literal))
+		}
+		itemVar = second.Literal
+	} else {
+		itemVar = first.Literal
+	}
+
+	varsClosedParen := false
+	if hasParen && ps.consume(")") {
+		varsClosedParen = true
+	}
+
+	if !ps.consume("in") {
+		panic(fmt.Errorf("for loop on line %v expected 'in', got '%v'", main.Line, ps.PeekToken().Literal))
+	}
+
+	col := ps.parse(0, true)
+	if hasParen && !varsClosedParen {
+		if !ps.consume(")") {
+			ps.panic(main, "')'")
+		}
+	}
+
+	if !ps.consume("{") {
+		ps.panic(main, "'{'")
+	}
+	body := ps.parseBlock()
+
+	return ast.For{
+		Pos:        main.Line,
+		IndexVar:   indexVar,
+		ItemVar:    itemVar,
+		Collection: col,
+		Action:     body,
+	}
 }
 
 // helper to parse a block or single statement

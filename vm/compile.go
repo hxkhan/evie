@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/ds"
@@ -89,6 +90,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 	case ast.While:
 		return vm.emitWhile(node)
+
+	case ast.For:
+		return vm.emitFor(node)
 
 	case ast.Break:
 		return func(fbr *Fiber) (Value, Exception) {
@@ -1853,6 +1857,134 @@ func (vm *Instance) emitWhile(node ast.While) instruction {
 	}
 }
 
+func (vm *Instance) emitFor(node ast.For) instruction {
+	collInst := vm.compile(node.Collection)
+
+	if vm.cp.closures.Len() == 0 {
+		vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: &funcInfoStatic{name: "main"}})
+		vm.cp.closures.Last(0).scope.OpenBlock()
+	}
+
+	vm.cp.closures.Last(0).scope.OpenBlock()
+	defer vm.cp.closures.Last(0).scope.CloseBlock()
+
+	var idxIndex int = -1
+	if node.IndexVar != "" {
+		idx, ok := vm.cp.closures.Last(0).scope.Declare(node.IndexVar, false)
+		if !ok {
+			panic(fmt.Errorf("double declaration of %s in for loop", node.IndexVar))
+		}
+		idxIndex = idx
+	}
+
+	itemIndex, ok := vm.cp.closures.Last(0).scope.Declare(node.ItemVar, false)
+	if !ok {
+		panic(fmt.Errorf("double declaration of %s in for loop", node.ItemVar))
+	}
+
+	bodyInst := vm.compile(node.Action)
+
+	return func(fbr *Fiber) (Value, Exception) {
+		collVal, err := collInst(fbr)
+		if err != nil {
+			return collVal, err
+		}
+
+		if arr, ok := collVal.AsArray(); ok {
+			for i, item := range arr.Data {
+				if idxIndex >= 0 {
+					fbr.setLocal(idxIndex, BoxNumber(float64(i)))
+				}
+				fbr.setLocal(itemIndex, item)
+
+				v, err := bodyInst(fbr)
+				if err != nil {
+					if err == signalContinue {
+						continue
+					} else if err == signalBreak {
+						break
+					}
+					return v, err
+				}
+			}
+			return Value{}, nil
+		}
+
+		if obj, ok := collVal.AsObject(); ok {
+			keys := make([]string, 0, len(obj))
+			for k := range obj {
+				keys = append(keys, fields.Lookup(k))
+			}
+			sort.Strings(keys)
+
+			for _, k := range keys {
+				keyVal := BoxString(k)
+				if idxIndex >= 0 {
+					fbr.setLocal(idxIndex, keyVal)
+					fbr.setLocal(itemIndex, obj[fields.Get(k)])
+				} else {
+					fbr.setLocal(itemIndex, keyVal)
+				}
+
+				v, err := bodyInst(fbr)
+				if err != nil {
+					if err == signalContinue {
+						continue
+					} else if err == signalBreak {
+						break
+					}
+					return v, err
+				}
+			}
+			return Value{}, nil
+		}
+
+		if str, ok := collVal.AsString(); ok {
+			i := 0
+			for _, r := range str {
+				if idxIndex >= 0 {
+					fbr.setLocal(idxIndex, BoxNumber(float64(i)))
+				}
+				fbr.setLocal(itemIndex, BoxString(string(r)))
+				i++
+
+				v, err := bodyInst(fbr)
+				if err != nil {
+					if err == signalContinue {
+						continue
+					} else if err == signalBreak {
+						break
+					}
+					return v, err
+				}
+			}
+			return Value{}, nil
+		}
+
+		if buf, ok := collVal.AsBuffer(); ok {
+			for i, b := range buf {
+				if idxIndex >= 0 {
+					fbr.setLocal(idxIndex, BoxNumber(float64(i)))
+				}
+				fbr.setLocal(itemIndex, BoxNumber(float64(b)))
+
+				v, err := bodyInst(fbr)
+				if err != nil {
+					if err == signalContinue {
+						continue
+					} else if err == signalBreak {
+						break
+					}
+					return v, err
+				}
+			}
+			return Value{}, nil
+		}
+
+		return Value{}, TypeErrorF("cannot iterate over %s", collVal.TypeOf())
+	}
+}
+
 func (vm *Instance) emitBlock(node ast.Block) instruction {
 	vm.cp.closures.Last(0).scope.OpenBlock()
 	defer vm.cp.closures.Last(0).scope.CloseBlock()
@@ -2677,13 +2809,13 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 	if lhs := vm.evaluate(node.Lhs); lhs != nil {
-		if rhs := vm.evaluate(node.Rhs); rhs != nil {
-			// optimise: lhs being a local
-			if lhs, ok := lhs.(local); ok {
-				if lhs.isStatic {
-					panic(fmt.Sprintf("Assignment to constant binding on line '%v'.", node.Line()))
-				}
+		// optimise: lhs being a local
+		if lhs, ok := lhs.(local); ok {
+			if lhs.isStatic {
+				panic(fmt.Sprintf("Assignment to constant binding on line '%v'.", node.Line()))
+			}
 
+			if rhs := vm.evaluate(node.Rhs); rhs != nil {
 				// optimise: rhs being a local
 				if rhs, ok := rhs.(local); ok {
 					switch node.Operator {
@@ -2797,6 +2929,80 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 							return Value{}, operatorError("%", *lhs, rhs)
 						}
 					}
+				}
+			}
+
+			// generic rhs compilation for local lhs
+			rhs := vm.compile(node.Rhs)
+			switch node.Operator {
+			case ast.AddOp:
+				return func(fbr *Fiber) (Value, Exception) {
+					rhs, err := rhs(fbr)
+					if err != nil {
+						return rhs, err
+					}
+					lhs := fbr.get(lhs)
+					if result, ok := lhs.Add(rhs); ok {
+						*lhs = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError("+", *lhs, rhs)
+				}
+
+			case ast.SubOp:
+				return func(fbr *Fiber) (Value, Exception) {
+					rhs, err := rhs(fbr)
+					if err != nil {
+						return rhs, err
+					}
+					lhs := fbr.get(lhs)
+					if result, ok := lhs.Sub(rhs); ok {
+						*lhs = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError("-", *lhs, rhs)
+				}
+
+			case ast.MulOp:
+				return func(fbr *Fiber) (Value, Exception) {
+					rhs, err := rhs(fbr)
+					if err != nil {
+						return rhs, err
+					}
+					lhs := fbr.get(lhs)
+					if result, ok := lhs.Mul(rhs); ok {
+						*lhs = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError("*", *lhs, rhs)
+				}
+
+			case ast.DivOp:
+				return func(fbr *Fiber) (Value, Exception) {
+					rhs, err := rhs(fbr)
+					if err != nil {
+						return rhs, err
+					}
+					lhs := fbr.get(lhs)
+					if result, ok := lhs.Div(rhs); ok {
+						*lhs = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError("/", *lhs, rhs)
+				}
+
+			case ast.ModOp:
+				return func(fbr *Fiber) (Value, Exception) {
+					rhs, err := rhs(fbr)
+					if err != nil {
+						return rhs, err
+					}
+					lhs := fbr.get(lhs)
+					if result, ok := lhs.Mod(rhs); ok {
+						*lhs = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError("%", *lhs, rhs)
 				}
 			}
 		}

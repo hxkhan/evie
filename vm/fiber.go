@@ -11,6 +11,9 @@ type Fiber struct {
 
 func (fbr *Fiber) get(binding local) *Value {
 	if !binding.isCaptured {
+		for len(fbr.stack) <= fbr.base+int(binding.index) {
+			fbr.stack = append(fbr.stack, &Value{})
+		}
 		return fbr.stack[fbr.base+int(binding.index)]
 	}
 	return fbr.active.references[binding.index]
@@ -18,6 +21,9 @@ func (fbr *Fiber) get(binding local) *Value {
 
 func (fbr *Fiber) set(binding local, value Value) {
 	if !binding.isCaptured {
+		for len(fbr.stack) <= fbr.base+int(binding.index) {
+			fbr.stack = append(fbr.stack, &Value{})
+		}
 		*(fbr.stack[fbr.base+int(binding.index)]) = value
 		return
 	}
@@ -29,10 +35,16 @@ func (fbr *Fiber) ArgCount() int {
 }
 
 func (fbr *Fiber) GetLocal(index int16) Value {
-	return *(fbr.stack[fbr.base+int(index)])
+	if fbr.base+int(index) < len(fbr.stack) {
+		return *(fbr.stack[fbr.base+int(index)])
+	}
+	return Value{}
 }
 
 func (fbr *Fiber) setLocal(index int, value Value) {
+	for len(fbr.stack) <= fbr.base+index {
+		fbr.stack = append(fbr.stack, &Value{})
+	}
 	*(fbr.stack[fbr.base+index]) = value
 }
 
@@ -41,6 +53,9 @@ func (fbr *Fiber) getCaptured(index int16) Value {
 }
 
 func (fbr *Fiber) getLocalByRef(index int) *Value {
+	for len(fbr.stack) <= fbr.base+index {
+		fbr.stack = append(fbr.stack, &Value{})
+	}
 	return fbr.stack[fbr.base+index]
 }
 

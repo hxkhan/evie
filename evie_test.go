@@ -984,6 +984,147 @@ func TestVariadicUserFunctions(t *testing.T) {
 	assertNumber(t, run(t, code8), 3)
 }
 
+func TestForLoops(t *testing.T) {
+	// 1. Basic array iteration
+	code1 := `
+	var sum := 0
+	for x in [10, 20, 30, 40] {
+		sum += x
+	}
+	return sum
+	`
+	assertNumber(t, run(t, code1), 100)
+
+	// 2. Array iteration with index
+	code2 := `
+	var sum := 0
+	for i, x in [10, 20, 30] {
+		sum += i * x
+	}
+	return sum
+	`
+	// 0*10 + 1*20 + 2*30 = 0 + 20 + 60 = 80
+	assertNumber(t, run(t, code2), 80)
+
+	// 3. Parentheses around header
+	code3 := `
+	var sum := 0
+	for (x in [1, 2, 3, 4]) {
+		sum += x
+	}
+	return sum
+	`
+	assertNumber(t, run(t, code3), 10)
+
+	// 4. Object iteration: keys only
+	code4 := `
+	obj := { a: 1, b: 2, c: 3 }
+	var count := 0
+	for k in obj {
+		count += 1
+	}
+	return count
+	`
+	assertNumber(t, run(t, code4), 3)
+
+	// 5. Object iteration: key and val
+	code5 := `
+	obj := { a: 10, b: 20, c: 30 }
+	var sum := 0
+	for k, v in obj {
+		sum += v
+	}
+	return sum
+	`
+	assertNumber(t, run(t, code5), 60)
+
+	// 6. String iteration
+	code6 := `
+	var res := ""
+	for ch in "hello" {
+		res += ch + "-"
+	}
+	return res
+	`
+	assertString(t, run(t, code6), "h-e-l-l-o-")
+
+	// 7. String iteration with index
+	code7 := `
+	var idxSum := 0
+	for i, ch in "abc" {
+		idxSum += i
+	}
+	return idxSum
+	`
+	// 0 + 1 + 2 = 3
+	assertNumber(t, run(t, code7), 3)
+
+	// 8. Break in for loop
+	code8 := `
+	var sum := 0
+	for x in [1, 2, 3, 4, 5] {
+		if x == 4 {
+			break
+		}
+		sum += x
+	}
+	return sum
+	`
+	// 1 + 2 + 3 = 6
+	assertNumber(t, run(t, code8), 6)
+
+	// 9. Continue in for loop
+	code9 := `
+	var sum := 0
+	for x in [1, 2, 3, 4, 5] {
+		if x == 3 {
+			continue
+		}
+		sum += x
+	}
+	return sum
+	`
+	// 1 + 2 + 4 + 5 = 12
+	assertNumber(t, run(t, code9), 12)
+
+	// 10. Nested for loops
+	code10 := `
+	var total := 0
+	for i in [1, 2, 3] {
+		for j in [10, 20] {
+			total += i * j
+		}
+	}
+	return total
+	`
+	// 1*(10+20) + 2*(10+20) + 3*(10+20) = 30 + 60 + 90 = 180
+	assertNumber(t, run(t, code10), 180)
+
+	// 11. Early return from inside for loop
+	code11 := `
+	for x in [10, 20, 30] {
+		if x == 20 {
+			return x * 2
+		}
+	}
+	return 0
+	`
+	assertNumber(t, run(t, code11), 40)
+
+	// 12. Non-iterable type error
+	code12 := `
+	var sum := 0
+	for x in 123 {
+		sum += x
+	}
+	return sum
+	`
+	_, err := runCode(fmt.Sprintf("package main\nfn main() {\n%s\n}", code12))
+	if err == nil {
+		t.Fatalf("expected error iterating over number, got nil")
+	}
+}
+
 func TestExamples(t *testing.T) {
 	exampleFiles := []string{
 		"arrays.ev",
@@ -994,6 +1135,7 @@ func TestExamples(t *testing.T) {
 		"methods.ev",
 		"struct.ev",
 		"while.ev",
+		"for.ev",
 		"counter.ev",
 		"captures.ev",
 		"objects.ev",

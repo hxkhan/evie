@@ -35,3 +35,22 @@ func StandardLibraryResolver(name string) vm.Package {
 	}
 	panic(fmt.Errorf("constructor not found for '%v'", name))
 }
+
+// New creates a new VM instance with the standard library pre-configured.
+func New() *vm.Instance {
+	return vm.New(Defaults)
+}
+
+// Run executes an Evie script using a new default VM instance and returns the result Value.
+func Run(script string) (vm.Value, error) {
+	return New().Run(script)
+}
+
+// Eval executes an Evie script and returns the unboxed native Go value.
+func Eval(script string) (any, error) {
+	val, err := Run(script)
+	if err != nil {
+		return nil, err
+	}
+	return val.ToGo(), nil
+}

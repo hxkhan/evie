@@ -844,7 +844,11 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 	mode := node.SyncMode
 	// inherit from parent (if not specified)
 	if mode == ast.UndefinedMode {
-		mode = vm.cp.modes.Last(0)
+		if vm.cp.modes.Len() > 0 {
+			mode = vm.cp.modes.Last(0)
+		} else {
+			mode = ast.SyncedMode
+		}
 	}
 	vm.cp.modes.Push(mode)
 
@@ -1986,6 +1990,11 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 }
 
 func (vm *Instance) emitBlock(node ast.Block) instruction {
+	if vm.cp.closures.Len() == 0 {
+		vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: &funcInfoStatic{name: "anonymous"}})
+		vm.cp.closures.Last(0).scope.OpenBlock()
+	}
+
 	vm.cp.closures.Last(0).scope.OpenBlock()
 	defer vm.cp.closures.Last(0).scope.CloseBlock()
 

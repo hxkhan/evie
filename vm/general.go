@@ -120,6 +120,17 @@ func (vm *Instance) EvalNode(node ast.Node) (result Value, err error) {
 		fbr.base = 0
 		fbr.stack = fbr.stack[:0]
 
+		hasClosure := vm.cp.closures.Len() > 0
+		if !hasClosure {
+			vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: fbr.active.funcInfoStatic})
+			vm.cp.closures.Last(0).scope.OpenBlock()
+			defer func() {
+				if vm.cp.closures.Len() > 0 {
+					vm.cp.closures.Pop()
+				}
+			}()
+		}
+
 		v, exc := vm.compile(node)(fbr)
 		if exc != nil {
 			err = exc
@@ -216,8 +227,10 @@ func (cp *compiler) reach(name string) (v any, err error) {
 	}
 
 	// 2. check package globals
-	if ref, exists := cp.pkg.globals[fields.Get(name)]; exists {
-		return ref, nil
+	if cp.pkg != nil {
+		if ref, exists := cp.pkg.globals[fields.Get(name)]; exists {
+			return ref, nil
+		}
 	}
 
 	// 3. check universal statics

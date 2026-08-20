@@ -63,13 +63,13 @@ func main() {
 	// get a reference to the main symbol
 	symAdd, exists := pkgMain.GetSymbol("add")
 	if !exists {
-		panic("symbol fib not found")
+		panic("symbol add not found")
 	}
 
 	// type assert it
 	add, ok := symAdd.AsUserFn()
 	if !ok {
-		panic("symbol fib is not a function")
+		panic("symbol add is not a function")
 	}
 
 	fbr := evm.NewFiber()

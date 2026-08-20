@@ -1125,6 +1125,226 @@ func TestForLoops(t *testing.T) {
 	}
 }
 
+func TestTypeMarshaling(t *testing.T) {
+	// Primitives
+	bVal, err := vm.BoxAny(true)
+	if err != nil || !bVal.Bool() {
+		t.Fatalf("BoxAny bool failed: %v, %v", bVal, err)
+	}
+	if bVal.ToGo() != true {
+		t.Fatalf("ToGo bool failed")
+	}
+
+	nVal, err := vm.BoxAny(42)
+	if err != nil || nVal.Int() != 42 {
+		t.Fatalf("BoxAny int failed: %v, %v", nVal, err)
+	}
+	if nVal.ToGo() != float64(42) {
+		t.Fatalf("ToGo int failed")
+	}
+
+	sVal, err := vm.BoxAny("hello")
+	if err != nil || sVal.String() != "hello" {
+		t.Fatalf("BoxAny string failed: %v, %v", sVal, err)
+	}
+
+	bufVal, err := vm.BoxAny([]byte("world"))
+	if err != nil {
+		t.Fatalf("BoxAny buffer failed: %v", err)
+	}
+	if string(bufVal.ToGo().([]byte)) != "world" {
+		t.Fatalf("ToGo buffer failed")
+	}
+
+	// Slices
+	sliceVal, err := vm.BoxAny([]int{1, 2, 3})
+	if err != nil {
+		t.Fatalf("BoxAny slice failed: %v", err)
+	}
+	arr, ok := sliceVal.AsArray()
+	if !ok || len(arr.Data) != 3 {
+		t.Fatalf("expected array of len 3")
+	}
+	sliceToGo := sliceVal.ToGo().([]any)
+	if len(sliceToGo) != 3 || sliceToGo[0] != float64(1) {
+		t.Fatalf("slice ToGo failed: %v", sliceToGo)
+	}
+
+	// Maps
+	mapVal, err := vm.BoxAny(map[string]any{
+		"name": "Alice",
+		"age":  30,
+	})
+	if err != nil {
+		t.Fatalf("BoxAny map failed: %v", err)
+	}
+	mapToGo := mapVal.ToGo().(map[string]any)
+	if mapToGo["name"] != "Alice" || mapToGo["age"] != float64(30) {
+		t.Fatalf("map ToGo failed: %v", mapToGo)
+	}
+
+	// Structs
+	type Person struct {
+		Name string `json:"name"`
+		Age  int    `json:"age"`
+	}
+	p := Person{Name: "Bob", Age: 25}
+	structVal, err := vm.BoxAny(p)
+	if err != nil {
+		t.Fatalf("BoxAny struct failed: %v", err)
+	}
+	pMap := structVal.ToGo().(map[string]any)
+	if pMap["name"] != "Bob" || pMap["age"] != float64(25) {
+		t.Fatalf("struct ToGo failed: %v", pMap)
+	}
+
+	// Typed Unmarshaling
+	var p2 Person
+	if err := structVal.Unmarshal(&p2); err != nil {
+		t.Fatalf("Unmarshal struct failed: %v", err)
+	}
+	if p2.Name != "Bob" || p2.Age != 25 {
+		t.Fatalf("unmarshaled person mismatch: %+v", p2)
+	}
+}
+
+func TestGoHostEmbedding(t *testing.T) {
+	// evie.New() and vm.Run()
+	env := evie.New()
+
+	// Inject variable
+	err := env.Set("taxRate", 0.15)
+	if err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+
+	// Use injected variable in Evie
+	val, err := env.Run(`
+	var price := 100
+	return price + (price * taxRate)
+	`)
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if val.Float64() != 115 {
+		t.Fatalf("expected 115, got %v", val.Float64())
+	}
+
+	// Get variable
+	taxVal, ok := env.Get("taxRate")
+	if !ok || taxVal.Float64() != 0.15 {
+		t.Fatalf("Get failed: %v, %v", taxVal, ok)
+	}
+
+	// Package definition and Calling Evie function from Go
+	_, err = env.Run(`
+	package main
+	fn multiply(a, b) {
+		return a * b
+	}
+	`)
+	if err != nil {
+		t.Fatalf("defining multiply failed: %v", err)
+	}
+
+	mulVal, err := env.Call("multiply", 7, 8)
+	if err != nil {
+		t.Fatalf("Call failed: %v", err)
+	}
+	if mulVal.Int() != 56 {
+		t.Fatalf("expected 56, got %v", mulVal.Int())
+	}
+
+	// Package with main() auto-execution
+	mainRes, err := env.Run(`
+	package main
+	fn main() {
+		return "executed main successfully"
+	}
+	`)
+	if err != nil {
+		t.Fatalf("Run main failed: %v", err)
+	}
+	if mainRes.String() != "executed main successfully" {
+		t.Fatalf("expected main return, got %v", mainRes.String())
+	}
+
+	// evie.Eval convenience helper
+	res, err := evie.Eval("return 10 * 10")
+	if err != nil {
+		t.Fatalf("evie.Eval failed: %v", err)
+	}
+	if res != float64(100) {
+		t.Fatalf("expected 100, got %v", res)
+	}
+}
+
+func TestGoFuncWrapping(t *testing.T) {
+	env := evie.New()
+
+	// 1. Basic function
+	env.Set("add", func(a, b int) int {
+		return a + b
+	})
+
+	val, err := env.Run(`return add(20, 22)`)
+	if err != nil {
+		t.Fatalf("add call failed: %v", err)
+	}
+	if val.Int() != 42 {
+		t.Fatalf("expected 42, got %v", val.Int())
+	}
+
+	// 2. String manipulation function
+	env.Set("greet", func(name string) string {
+		return "Hello, " + name + "!"
+	})
+
+	val, err = env.Run(`return greet("Evie")`)
+	if err != nil {
+		t.Fatalf("greet call failed: %v", err)
+	}
+	if val.String() != "Hello, Evie!" {
+		t.Fatalf("expected 'Hello, Evie!', got %v", val.String())
+	}
+
+	// 3. Function returning error
+	env.Set("divide", func(a, b float64) (float64, error) {
+		if b == 0 {
+			return 0, fmt.Errorf("division by zero in Go")
+		}
+		return a / b, nil
+	})
+
+	val, err = env.Run(`return divide(10, 2)`)
+	if err != nil || val.Float64() != 5 {
+		t.Fatalf("expected 5, got %v (err: %v)", val, err)
+	}
+
+	// Test error returned from Go caught in Evie or reported
+	_, err = env.Run(`return divide(10, 0)`)
+	if err == nil {
+		t.Fatalf("expected error from division by zero, got nil")
+	}
+
+	// 4. Variadic Go function
+	env.Set("sumAll", func(nums ...int) int {
+		total := 0
+		for _, n := range nums {
+			total += n
+		}
+		return total
+	})
+
+	val, err = env.Run(`return sumAll(1, 2, 3, 4, 5)`)
+	if err != nil {
+		t.Fatalf("sumAll call failed: %v", err)
+	}
+	if val.Int() != 15 {
+		t.Fatalf("expected 15, got %v", val.Int())
+	}
+}
+
 func TestExamples(t *testing.T) {
 	exampleFiles := []string{
 		"arrays.ev",

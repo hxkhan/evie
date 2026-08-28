@@ -1361,6 +1361,7 @@ func TestExamples(t *testing.T) {
 		"objects.ev",
 		"variadic.ev",
 		"inheritance.ev",
+		"await.ev",
 	}
 
 	for _, file := range exampleFiles {

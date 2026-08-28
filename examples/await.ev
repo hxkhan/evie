@@ -1,0 +1,75 @@
+package main imports("io")
+
+fn compute(id, value) {
+    return "Task " + id + ": " + value
+}
+
+fn failingTask() {
+    throw error("network error")
+}
+
+fn fallbackTask() {
+    return "Fallback response"
+}
+
+fn main() {
+    io.println("=== 1. Basic Await & Memoization ===")
+    t1 := go compute("A", "100")
+    t2 := go compute("B", "200")
+
+    // Await pauses until task completes and extracts the result
+    res1 := await t1
+    res2 := await t2
+    io.println("res1:", res1)
+    io.println("res2:", res2)
+
+    // Multi-await memoization: awaiting again returns cached result instantly
+    res1Cached := await t1
+    io.println("res1 cached:", res1Cached)
+
+    // Identity await: awaiting non-tasks is a safe no-op
+    direct := await 42
+    io.println("identity await:", direct)
+
+    // Task introspection methods
+    io.println("t1 is task:", t1 is task)
+    io.println("t1 isDone:", t1.isDone())
+    io.println("t1 result:", t1.result())
+
+    io.println("")
+    io.println("=== 2. await.all (Variadic & Array) ===")
+    // Waits for all tasks to succeed; returns an array of results
+    task1 := go compute("1", "alpha")
+    task2 := go compute("2", "beta")
+    task3 := go compute("3", "gamma")
+
+    allResults := await.all(task1, task2, task3)
+    io.println("await.all variadic:", allResults)
+
+    // Array form: await.all([task1, task2])
+    taskBatch := [go compute("X", "first"), go compute("Y", "second")]
+    batchResults := await.all(taskBatch)
+    io.println("await.all array:", batchResults)
+
+    io.println("")
+    io.println("=== 3. await.any (First Successful Task) ===")
+    // Returns first successful result, ignoring failed tasks
+    firstSuccess := await.any(go failingTask(), go fallbackTask())
+    io.println("await.any result:", firstSuccess)
+
+    io.println("")
+    io.println("=== 4. await.race (First Settled Task) ===")
+    // Returns the result of whichever task settles first
+    r1 := go compute("Fast", "winner")
+    r2 := go compute("Slow", "runner-up")
+    winner := await.race(r1, r2)
+    io.println("await.race winner:", winner)
+
+    io.println("")
+    io.println("=== 5. Error Handling with catch ===")
+    failedTask := go failingTask()
+    err := catch(await failedTask)
+    if err is error {
+        io.println("Caught task error:", err.message)
+    }
+}

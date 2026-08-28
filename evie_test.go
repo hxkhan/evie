@@ -846,6 +846,66 @@ func TestConcurrency(t *testing.T) {
 	}
 	`
 	assertBool(t, run(t, codeAwaitRace), true)
+
+	// Synced blocks eliminating data race
+	codeSyncedBlock := `
+	package main
+	var count := 0
+	fn worker(n) {
+		while n > 0 {
+			synced {
+				count += 1
+			}
+			n -= 1
+		}
+	}
+	fn main() {
+		t1 := go worker(500)
+		t2 := go worker(500)
+		await.all(t1, t2)
+		return count
+	}
+	`
+	assertNumber(t, run(t, codeSyncedBlock), 1000)
+
+	// Nested / re-entrant synced block and return inside synced
+	codeNestedSynced := `
+	package main
+	var x := 10
+	fn update() synced {
+		synced {
+			x += 5
+			synced {
+				x += 5
+			}
+			return x
+		}
+	}
+	fn main() {
+		res := update()
+		return res == 20 && x == 20
+	}
+	`
+	assertBool(t, run(t, codeNestedSynced), true)
+
+	// Error handling inside synced block properly releases GIL
+	codeSyncedError := `
+	package main
+	var reached := false
+	fn failing() {
+		synced {
+			throw error("failed inside synced")
+		}
+	}
+	fn main() {
+		err := catch(failing())
+		synced {
+			reached = true
+		}
+		return err is error && err.message == "failed inside synced" && reached
+	}
+	`
+	assertBool(t, run(t, codeSyncedError), true)
 }
 
 func TestVariadicIO(t *testing.T) {

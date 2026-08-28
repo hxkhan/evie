@@ -908,6 +908,113 @@ func TestConcurrency(t *testing.T) {
 	assertBool(t, run(t, codeSyncedError), true)
 }
 
+func TestStructConcurrency(t *testing.T) {
+	// 1. Parallel execution across independent struct instances (no GIL contention)
+	codeParallel := `
+	package main
+	struct Worker(id, iterations) {
+		fn run() {
+			var sum := 0
+			var i := 0
+			while i < this.iterations {
+				sum += i
+				i += 1
+			}
+			return sum
+		}
+	}
+	fn main() {
+		w1 := Worker(1, 1000)
+		w2 := Worker(2, 1000)
+		t1 := go w1.run()
+		t2 := go w2.run()
+		res := await.all(t1, t2)
+		return res[0] == 499500 && res[1] == 499500
+	}
+	`
+	assertBool(t, run(t, codeParallel), true)
+
+	// 2. Concurrent field reads and mutations on the same struct instance
+	// Verifies fine-grained per-instance mutex avoids Go runtime map race panic
+	codeConcurrentAccess := `
+	package main
+	struct Counter(val) {
+		fn bump() {
+			this.val = this.val + 1
+		}
+	}
+	fn worker(c, n) {
+		var i := 0
+		var v := 0
+		while i < n {
+			c.bump()
+			v = c.val
+			v = c.val?
+			v = c["val"]
+			v = c["val"]?
+			i += 1
+		}
+	}
+	fn main() {
+		c := Counter(0)
+		t1 := go worker(c, 200)
+		t2 := go worker(c, 200)
+		t3 := go worker(c, 200)
+		await.all(t1, t2, t3)
+		return c.val > 0
+	}
+	`
+	assertBool(t, run(t, codeConcurrentAccess), true)
+
+	// 3. Explicit synced struct method serializes updates via GIL
+	codeSyncedMethod := `
+	package main
+	struct SafeCounter(count) {
+		fn inc() synced {
+			this.count = this.count + 1
+		}
+	}
+	fn worker(c, n) {
+		while n > 0 {
+			c.inc()
+			n -= 1
+		}
+	}
+	fn main() {
+		c := SafeCounter(0)
+		t1 := go worker(c, 500)
+		t2 := go worker(c, 500)
+		await.all(t1, t2)
+		return c.count
+	}
+	`
+	assertNumber(t, run(t, codeSyncedMethod), 1000)
+
+	// 4. Concurrent dynamic field and subscript assignments
+	codeDynamicSubscript := `
+	package main
+	struct Item(name) {}
+	fn worker(item, key, n) {
+		var i := 0
+		var v := 0
+		while i < n {
+			item[key] = i
+			v = item[key]
+			v = item[key]?
+			i += 1
+		}
+	}
+	fn main() {
+		item := Item("shared")
+		t1 := go worker(item, "fieldA", 150)
+		t2 := go worker(item, "fieldB", 150)
+		await.all(t1, t2)
+		return item["fieldA"]? && item["fieldB"]?
+	}
+	`
+	assertBool(t, run(t, codeDynamicSubscript), true)
+}
+
 func TestVariadicIO(t *testing.T) {
 	code := `
 	package main

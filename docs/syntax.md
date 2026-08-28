@@ -430,6 +430,19 @@ c is Animal  // true
 !(c is Dog)  // true
 ```
 
+### Struct Concurrency & Thread-Safety
+Struct instances in Evie are internally thread-safe and struct methods run in parallel by default:
+- **Parallel by Default**: Struct methods run unsynced (`UndefinedMode`) without acquiring the runtime GIL. Distinct struct instances execute their methods simultaneously across CPU cores with zero lock contention.
+- **Internal Synchronization**: Struct field reads and writes (`p.field`, `p.field = val`, `p[key]`, `p[key] = val`, `p.field?`, `p[key]?`) are protected by a fine-grained per-instance read-write mutex (`sync.RWMutex`). Concurrent field reads execute concurrently, and field mutations are safely serialized per-instance without risking Go map panics.
+- **Opt-in `synced` Methods**: When a struct method needs to coordinate across global variables or synchronize with other fibers using the GIL, declare it with `synced`:
+  ```go
+  struct SafeCounter(count) {
+      fn inc() synced {
+          this.count = this.count + 1 // acquires GIL before running
+      }
+  }
+  ```
+
 ---
 
 ## 8. Built-in Collection Methods
@@ -572,6 +585,7 @@ fn deposit(amount) synced {
 
 - **Re-entrant**: Calling a `synced` block or function from within an already synchronized execution is a safe pass-through and will not deadlock.
 - **Cooperative Await**: Awaiting a task inside `synced` code automatically releases the lock while blocked and re-acquires it once the task settles.
+- **Struct Thread-Safety**: Struct methods run parallel (unsynced) by default, while struct instances protect field access internally with fine-grained per-instance mutexes. Declare struct methods with `synced` only when GIL-level serialization is needed.
 
 ---
 

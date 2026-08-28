@@ -104,49 +104,26 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			return Value{}, signalContinue
 		}
 
-	/* case ast.Unsynced:
-		vm.cp.modes.Push(ast.UnsyncedMode)
-		action := vm.compile(node.Action)
-		vm.cp.modes.Pop()
-
-		return func(fbr *fiber) (Value, Exception) {
-			// check if already unsynchronized
-			if fbr.unsynced() {
-				res, err := action(fbr)
-				return res, err
-			}
-
-			// change mode
-			vm.rt.ReleaseGIL()
-			fbr.unsynchronized = true
-			res, err := action(fbr)
-			fbr.unsynchronized = false
-			vm.rt.AcquireGIL()
-
-			return res, err
-		}
-
 	case ast.Synced:
 		vm.cp.modes.Push(ast.SyncedMode)
 		action := vm.compile(node.Action)
 		vm.cp.modes.Pop()
 
-		return func(fbr *fiber) (Value, Exception) {
-			// check if already synced
-			if fbr.synced() {
-				res, err := action(fbr)
-				return res, err
+		return func(fbr *Fiber) (Value, Exception) {
+			// check if already synced (re-entrant pass-through)
+			if fbr.synced {
+				return action(fbr)
 			}
 
-			// change mode
+			// transition unsynced -> synced
 			vm.rt.AcquireGIL()
-			fbr.unsynchronized = false
-			res, err := action(fbr)
-			fbr.unsynchronized = true
+			fbr.synced = true
+			res, exc := action(fbr)
+			fbr.synced = false
 			vm.rt.ReleaseGIL()
 
-			return res, err
-		} */
+			return res, exc
+		}
 
 	case ast.Catch:
 		return vm.emitCatch(node)

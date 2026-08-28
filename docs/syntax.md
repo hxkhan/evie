@@ -548,6 +548,31 @@ t.error()      // returns error (or nil)
 t.await()      // method form of await
 ```
 
+### Shared State & Synchronization (`synced`)
+By default, Evie fibers run in true multi-threaded parallel execution across CPU cores without a Global Interpreter Lock. When multiple tasks access shared mutable variables, use `synced` blocks or `synced` functions to create mutually exclusive critical sections:
+
+```go
+var counter := 0
+
+// 1. Synced block for fine-grained critical sections:
+fn worker(n) {
+    while n > 0 {
+        synced {
+            counter += 1 // Thread-safe mutation via runtime GIL
+        }
+        n -= 1
+    }
+}
+
+// 2. Synced function:
+fn deposit(amount) synced {
+    counter += amount
+}
+```
+
+- **Re-entrant**: Calling a `synced` block or function from within an already synchronized execution is a safe pass-through and will not deadlock.
+- **Cooperative Await**: Awaiting a task inside `synced` code automatically releases the lock while blocked and re-acquires it once the task settles.
+
 ---
 
 ## 11. Go Host Embedding

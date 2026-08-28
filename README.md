@@ -1,65 +1,162 @@
 # The Evie Programming Language
 
-Evie is a dynamically typed programming language written in Go. The goal is to provide Go developers with a blazingly fast embeddable scripting language that does *not* depend on CGO. Preliminary micro-benchmarks show Evie to be faster than PUC [Lua 5.4.2](https://lua.org/)  and also Google's [V8 Ignition](https://v8.dev/docs/ignition) JavaScript interpreter. See [here](#benchmarks).
+Evie is a lightweight, dynamically typed, multi-threaded scripting language written in pure Go without CGO. Combining the dynamic ergonomics of JavaScript and Python with Go's simplicity and Rust's safe-by-default immutability, Evie features true multi-core parallel concurrency, cooperative fibers, first-class OOP with structs and inheritance, and seamless Go host embedding.
+
+Preliminary micro-benchmarks show Evie to be faster than PUC [Lua 5.4.2](https://lua.org/) and Google's [V8 Ignition](https://v8.dev/docs/ignition) JavaScript interpreter. See [here](#benchmarks).
+
+---
 
 ## Showcase
-#### Here is some example code from [examples/fib.ev](./examples/fib.ev)
+
+#### Recursive Fibonacci ([examples/fib.ev](./examples/fib.ev))
+<!-- TODO: Replace this image -->
 <a href="./examples/fib.ev">
     <img src="./docs/images/fib.png" width="500" alt="A snippet of Evie code">
 </a>
 
-#### Here is a string interpolation example from [examples/input.ev](./examples/input.ev)
+#### String Interpolation & I/O ([examples/input.ev](./examples/input.ev))
+<!-- TODO: Replace this image -->
 <a href="./examples/input.ev">
     <img src="./docs/images/interpolation.png" width="600" alt="A snippet of Evie code">
 </a>
 
-#### Also a concurrency example from [examples/go.ev](./examples/go.ev)
+#### Concurrent Tasks with `go` ([examples/go.ev](./examples/go.ev))
+<!-- TODO: Replace this image -->
 <a href="./examples/go.ev">
     <img src="./docs/images/go.png" width="500" alt="A snippet of Evie code">
 </a>
 
-To test this exact program, run `go run ./evie -t ./examples/go.ev`. Then remove all of the `go` keywords infront of the `print` calls and re-run to see the difference. This is still single threaded by the way. It is concurrent yes. But single threaded and safe. The `go` keyword just schedules it for execution, but they only run when `main` returns or yields via `await`. You can say Evie by default has a [GIL](https://en.wikipedia.org/wiki/Global_interpreter_lock) (Global Interpreter Lock).
+Evie fibers run in true parallel multi-threading across OS threads and CPU cores without a Global Interpreter Lock by default (`UndefinedMode`). Tasks spawned with `go` return stateful, memoized `Task` handles that can be awaited (`await task`, `await.all`, `await.any`, `await.race`).
 
-> The flag `-t` prints the execution time of just Evie, i.e. total time `-` the time it took to compile Evie itself. You could alternatively build Evie first by doing `go build ./evie`, as shown at the bottom of this page.
+To test this program, run `go run ./evie -t ./examples/go.ev`.
 
-> Also you need Go installed of course. But don't worry as it is probably the simplest language to setup. See [here](https://go.dev/doc/install).
+> The flag `-t` prints the execution time of just Evie, i.e. total time minus the time it took to compile Evie itself.
 
-#### What about true parallelism?
-I did not want to make the same mistake as Python. That is, not providing a means to do true multi-threading by default. So here it is, [examples/unsynced.ev](./examples/unsynced.ev).
-
+#### Multi-Core Parallelism & Synchronization ([examples/unsynced.ev](./examples/unsynced.ev))
 <a href="./examples/unsynced.ev">
     <img src="./docs/images/unsynced.png" width="500" alt="A snippet of Evie code">
 </a>
 
-## Goals
-- Highly performant
-- Builtin concurrency
-- Very similar to existing languages
-- Easily embeddable
-- Provide a standalone mode for non-embedded use
-- No CGO
+Unlike Python's default GIL, Evie executes CPU-bound fibers simultaneously across multiple CPU cores out of the box. When mutual exclusion is required for shared mutable state, Evie provides fine-grained `synced` blocks (`synced { ... }`) and `synced` functions (`fn foo() synced { ... }`) to serialize critical sections under the runtime GIL without serializing unaffected code.
 
-> This language is in an early state. I have been hard at work optimising and improving the core language. The standard library only contains some basic methods for testing purposes.
+---
 
-## Docs
-- [Language Syntax](https://github.com/hxkhan/evie/tree/main/docs/syntax.md)
+## Key Features
 
-## Features checklist
-- Package management ⏳
-- Variables ✅
-- Functions ✅
-- Primative types (`number` `bool` `nil`) ✅
-- Reference types (`string` `function` `object`) ✅
-- Control flow (`if` `else` `while` `break` `continue`) ✅
-- Control flow (`for` `switch`) ❌
-- Operators (`+` `-` `*` `/` `%` `==` `<` `>`, `?`) ✅
-- Operators (`!`, `&&`, `||`) ❌
-- Concurrency (basics work but needs *polishing*) ⏳
-- Scoping (global, function, block) ✅
-- Error handling (exceptions) ⏳
-- Interoperability (call into Go) ✅
+- **Parallel by Default**: Multi-threaded fibers execute simultaneously across CPU cores with zero GIL contention by default.
+- **Cooperative & Expressive Concurrency**:
+  - `go` spawns concurrent fibers returning stateful `Task` instances.
+  - `await` pauses the fiber until task resolution with multi-await memoization.
+  - Multi-task coordination via `await.all()`, `await.any()`, and `await.race()`.
+- **Fine-Grained Critical Sections (`synced`)**:
+  - Re-entrant `synced { ... }` blocks and `fn ... synced` functions for thread-safe mutations.
+  - Cooperative lock-releasing: awaiting a task inside `synced` code automatically releases the GIL while waiting and re-acquires it on resume.
+- **Internal Struct Thread-Safety**:
+  - Struct instances are internally synchronized using per-instance `sync.RWMutex` locks, preventing low-level data races on field reads and mutations.
+  - Struct methods run in parallel by default across CPU cores.
+- **Safe-by-Default Immutability**:
+  - `x := 10` creates an immutable binding.
+  - `var x := 10` is explicitly required for mutability.
+- **First-Class Structs & OOP**:
+  - Encapsulated methods with implicit `this`.
+  - Classical single inheritance (`struct Sub : Super { ... }`).
+  - Dynamic instance fields (`p.email = "..."`).
+  - First-class bound methods (`fnVal := p.greet`).
+  - Polymorphic type checks (`p is Person`, `dog is Animal`).
+- **Modern Control Flow & Iteration**:
+  - `if`, `else`, `while`, `break`, and `continue`.
+  - `for item in collection` and `for idx, item in collection` over arrays, objects, and strings.
+- **Robust Error Handling**:
+  - `throw error("...")` and `catch(expr)` semantics with first-class `error` values.
+- **High-Performance NaN-Boxing**:
+  - 64-bit NaN-boxed `Value` representation (`number`, `bool`, `string`, `buffer`, `array`, `object`, `struct`, `task`, `error`, `function`, `nil`).
+- **Seamless Go Host Embedding**:
+  - Automatic Go function reflection wrapping (`env.Set("fn", goFunc)`).
+  - Bidirectional marshaling and unmarshaling into native Go structs (`val.Unmarshal(&struct)`).
+  - One-line script execution (`evie.Eval(...)`).
+- **Pure Go (Zero CGO)**:
+  - 100% Go codebase, fast builds, effortless cross-compilation, and zero external dependencies.
+
+---
+
+## Go Host Embedding Example
+
+Embedding Evie in your Go application requires no CGO or complicated bindings:
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/hxkhan/evie"
+)
+
+func main() {
+    // 1. Create a new Evie environment
+    env := evie.New()
+
+    // 2. Expose Go functions directly via reflection
+    env.Set("fetchData", func(id float64) map[string]any {
+        return map[string]any{
+            "id":     id,
+            "status": "active",
+        }
+    })
+
+    // 3. Execute Evie script
+    val, err := env.Run(`
+        package main
+        fn main() {
+            data := fetchData(42)
+            return data["status"]
+        }
+    `)
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Println(val.ToGo()) // "active"
+
+    // 4. One-line evaluation
+    result, _ := evie.Eval("return [1, 2, 3].len() * 10")
+    fmt.Println(result.ToGo()) // 30
+}
+```
+
+---
+
+## Features Checklist
+
+- [x] Variables & Immutability (`:=` vs `var :=`)
+- [x] Functions, Closures & Variadic Arguments (`...args`)
+- [x] Primitive types (`number`, `bool`, `nil`)
+- [x] Reference types (`string`, `buffer`, `array`, `object`, `function`, `task`, `error`)
+- [x] Structs & OOP (methods, `this`, single inheritance, dynamic fields, bound methods)
+- [x] Struct thread-safety (per-instance `sync.RWMutex`, parallel methods by default)
+- [x] Control flow (`if`, `else`, `while`, `break`, `continue`)
+- [x] For loops (`for item in col`, `for idx, item in col`)
+- [x] Operators (`+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `?`)
+- [x] Logical operators (`!`, `&&`, `||`)
+- [x] Type checking (`is` operator)
+- [x] Concurrency (`go`, `await`, `await.all`, `await.any`, `await.race`, `Task`)
+- [x] Synchronization (`synced` blocks, `synced` functions, re-entrancy, cooperative await)
+- [x] Scoping (global, package, function, block, captured closures)
+- [x] Error handling (`throw`, `catch(expr)`, `error` type)
+- [x] Go Host Embedding (bidirectional marshaling, function reflection, struct unmarshaling)
+- [ ] Package management / module imports ⏳
+- [ ] Standard library expansion (`std/json`, `std/math`, `std/fs`) ⏳
+
+---
+
+## Documentation
+
+For a comprehensive guide covering grammar, types, standard methods, and concurrency patterns, see:
+- [Language Reference (docs/syntax.md)](./docs/syntax.md)
+
+---
 
 ## Benchmarks
+
 | Language | fib(35)  | Host Language |
 | :-       | :-       | :-            |
 | [**Evie**](https://github.com/hxkhan/evie) | `392ms` | Go |
@@ -70,29 +167,36 @@ I did not want to make the same mistake as Python. That is, not providing a mean
 | [Wren](https://wren.io/) | `893ms` | C |
 | [Tengo](https://github.com/d5/tengo) | `1603ms` | Go |
 
-> These benchmarks were ran on an Intel i5-13400F. Each language 10 times and the average was taken.
+> Benchmarks ran on an Intel i5-13400F. Each language was executed 10 times and the average was recorded.
 
-Why `fib(35)`? Because Evie barely has a standard library so micro-benchmarks is all I rely on. And also because `fib(35)` does measure:
-- Function calls (invocation) overhead as it does `29860703` of them afterall 
-- Instruction dispatch overhead
-- Number crunching (primative math)
-- Conditional logic
+Why `fib(35)`? Because micro-benchmarks measure fundamental VM metrics:
+- Function invocation and call-frame overhead (`29,860,703` recursive calls)
+- Bytecode instruction dispatch performance
+- Primitive number crunching
+- Conditional branch prediction
 
-# Setup
-All of these exist in the [examples](./examples) directory. To build evie you can do:
-1. First install go from [here](https://go.dev/doc/install)
-2. Then git clone this repo
-3. Build evie
-4. Use it like any other language
-```
+---
+
+## Setup & Quick Start
+
+### Prerequisites
+- Go 1.20+ installed ([go.dev/doc/install](https://go.dev/doc/install))
+
+### Build & Run
+```bash
+# Clone the repository
 git clone https://github.com/hxkhan/evie.git
 cd evie
+
+# Build the CLI executable
 go build ./evie
-time ./evie ./examples/fib.ev
+
+# Run an example
+./evie ./examples/fib.ev
 ```
 
-To benchmark the other languages, you can grab your own versions from their respective websites. For example; if you have python installed then just do `time python ./examples/fib.py`, you might have to change `python` for `python3`.
-
-The easiest way to test [V8's Ignition](https://v8.dev/docs/ignition) interpreter is to have [nodejs](https://nodejs.org/en) installed and then run `time node --jitless --no-expose_wasm ./examples/fib.js`. The `--jitless` disables the JIT compiler. The `--no-expose_wasm` has to be done alongside becuase wasm depends on the JIT.
-
-> Keep in mind, `time` exists only on linux, use `Measure-Command` on Windows powershell like `Measure-Command { python ./examples/fib.py }`
+### Run Tests
+```bash
+go test -v .
+go vet ./...
+```

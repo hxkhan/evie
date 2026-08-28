@@ -276,7 +276,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 				}
 
 				if obj, ok := lhs.AsUserStructInstance(); ok {
+					obj.MU.RLock()
 					_, exists := obj.Fields[index]
+					obj.MU.RUnlock()
 					return BoxBool(exists), nil
 				}
 
@@ -319,7 +321,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 				}
 				if si, ok := lhs.AsUserStructInstance(); ok {
 					if keyStr, ok := k.AsString(); ok {
+						si.MU.RLock()
 						_, exists := si.Fields[fields.Get(keyStr)]
+						si.MU.RUnlock()
 						return BoxBool(exists), nil
 					}
 					return BoxBool(false), nil
@@ -656,7 +660,9 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 						return value, err
 					}
 
+					obj.MU.Lock()
 					obj.Fields[index] = value
+					obj.MU.Unlock()
 					return Value{}, nil
 				}
 
@@ -730,7 +736,9 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 						return value, err
 					}
 
+					obj.MU.Lock()
 					obj.Fields[index] = value
+					obj.MU.Unlock()
 					return Value{}, nil
 				}
 
@@ -806,7 +814,9 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 					return Value{}, TypeErrorF("struct field key must be a string, got '%s'", keyVal.TypeOf())
 				}
 
+				si.MU.Lock()
 				si.Fields[fields.Get(keyStr)] = newVal
+				si.MU.Unlock()
 				return Value{}, nil
 			}
 
@@ -923,9 +933,6 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 
 func (vm *Instance) compileStructMethod(ustruct *UserStruct, node ast.Fn) *UserFn {
 	mode := node.SyncMode
-	if mode == ast.UndefinedMode {
-		mode = ast.SyncedMode
-	}
 	vm.cp.modes.Push(mode)
 
 	methodArgs := make([]string, 1+len(node.Args))
@@ -1177,7 +1184,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			}
 
 			return func(fbr *Fiber) (Value, Exception) {
-				usi := UserStructInstance{InstanceOf: us}
+				usi := &UserStructInstance{InstanceOf: us}
 				usi.Fields = make(map[fields.ID]Value, len(us.Fields))
 
 				for i, f := range us.Fields {
@@ -1189,7 +1196,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					usi.Fields[f] = v
 				}
 
-				return BoxUserStructInstance(&usi), nil
+				return BoxUserStructInstance(usi), nil
 			}
 
 		}
@@ -1359,6 +1366,106 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 			arguments[i] = vm.compile(arg)
 		}
 
+		spawnUserFnTask := func(fn *UserFn, params []Value) *Task {
+			task := NewTaskInstance()
+			vm.rt.wg.Go(func() {
+				// setup new fiber
+				fbr := vm.rt.fibers.Get().(*Fiber)
+				fbr.active = fn
+				fbr.base = 0
+				fbr.stack = fbr.stack[:0]
+				fbr.synced = fn.mode == ast.SyncedMode
+
+				// unique locals
+				var result Value
+				var exc Exception
+
+				// setup stack locals
+				for idx, escapes := range fn.locals {
+					if !escapes {
+						fbr.stack = append(fbr.stack, fbr.pop())
+					} else {
+						fbr.stack = append(fbr.stack, &Value{})
+					}
+
+					// assign arguments
+					if !fn.isVariadic {
+						if idx < len(params) {
+							*(fbr.stack[idx]) = params[idx]
+						}
+					} else {
+						variadicIdx := len(fn.args) - 1
+						if idx < variadicIdx {
+							*(fbr.stack[idx]) = params[idx]
+						} else if idx == variadicIdx {
+							tailCount := len(params) - variadicIdx
+							tail := make([]Value, tailCount)
+							copy(tail, params[variadicIdx:])
+							*(fbr.stack[idx]) = BoxArray(&Array{Data: tail})
+						}
+					}
+				}
+
+				// run code
+				if fn.mode == ast.UndefinedMode {
+					result, exc = fn.code(fbr)
+				} else {
+					vm.rt.AcquireGIL()
+					result, exc = fn.code(fbr)
+					vm.rt.ReleaseGIL()
+				}
+
+				// cleanup fiber and release
+				fbr.push(fn.recyclable)
+				fbr.popStack(len(fn.locals))
+				vm.rt.fibers.Put(fbr)
+
+				// return result but catch relevant signals
+				switch exc {
+				case nil:
+				case signalReturn:
+					exc = nil
+				}
+				task.Finish(result, exc)
+			})
+			return task
+		}
+
+		spawnGoFuncTask := func(fn *GoFunc, params []Value) *Task {
+			task := NewTaskInstance()
+			vm.rt.wg.Go(func() {
+				var result Value
+				var exc Exception
+
+				// setup new fiber
+				fbr := vm.rt.fibers.Get().(*Fiber)
+				fbr.base = 0
+				fbr.stack = fbr.stack[:0]
+
+				for _, p := range params {
+					box := fbr.pop()
+					*box = p
+					fbr.stack = append(fbr.stack, box)
+				}
+
+				// run code
+				if fn.Mode == ast.UndefinedMode {
+					result, exc = fn.Fn(fbr)
+				} else {
+					vm.rt.AcquireGIL()
+					result, exc = fn.Fn(fbr)
+					vm.rt.ReleaseGIL()
+				}
+
+				fbr.push(len(params))
+				fbr.popStack(len(params))
+				vm.rt.fibers.Put(fbr)
+
+				task.Finish(result, exc)
+			})
+			return task
+		}
+
 		// generic compilation
 		value := vm.compile(node.Fn)
 		return func(fbr *Fiber) (result Value, exc Exception) {
@@ -1396,69 +1503,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					params[i] = arg
 				}
 
-				task := NewTaskInstance()
-				vm.rt.wg.Go(func() {
-					// setup new fiber
-					fbr := vm.rt.fibers.Get().(*Fiber)
-					fbr.active = fn
-					fbr.base = 0
-					fbr.stack = fbr.stack[:0]
-					fbr.synced = fn.mode == ast.SyncedMode
-
-					// unique locals
-					var result Value
-					var exc Exception
-
-					// setup stack locals
-					for idx, escapes := range fn.locals {
-						if !escapes {
-							fbr.stack = append(fbr.stack, fbr.pop())
-						} else {
-							fbr.stack = append(fbr.stack, &Value{})
-						}
-
-						// assign arguments
-						if !fn.isVariadic {
-							if idx < len(params) {
-								*(fbr.stack[idx]) = params[idx]
-							}
-						} else {
-							variadicIdx := len(fn.args) - 1
-							if idx < variadicIdx {
-								*(fbr.stack[idx]) = params[idx]
-							} else if idx == variadicIdx {
-								tailCount := len(params) - variadicIdx
-								tail := make([]Value, tailCount)
-								copy(tail, params[variadicIdx:])
-								*(fbr.stack[idx]) = BoxArray(&Array{Data: tail})
-							}
-						}
-					}
-
-					// run code
-					if fn.mode == ast.UndefinedMode {
-						result, exc = fn.code(fbr)
-					} else {
-						vm.rt.AcquireGIL()
-						result, exc = fn.code(fbr)
-						vm.rt.ReleaseGIL()
-					}
-
-					// cleanup fiber and release
-					fbr.push(fn.recyclable)
-					fbr.popStack(len(fn.locals))
-					vm.rt.fibers.Put(fbr)
-
-					// return result but catch relevant signals
-					switch exc {
-					case nil:
-					case signalReturn:
-						exc = nil
-					}
-					task.Finish(result, exc)
-				})
-
-				return BoxTask(task), nil
+				return BoxTask(spawnUserFnTask(fn, params)), nil
 			}
 
 			// try go func
@@ -1473,29 +1518,100 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					}
 				}
 
-				task := NewTaskInstance()
-				vm.rt.wg.Go(func() {
-					var result Value
-					var exc Exception
+				// evaluate arguments
+				params := make([]Value, len(arguments))
+				for i, argument := range arguments {
+					arg, exc := argument(fbr)
+					if exc != nil {
+						return arg, exc
+					}
+					params[i] = arg
+				}
 
-					// setup new fiber
-					fbr := vm.rt.fibers.Get().(*Fiber)
-					fbr.base = 0
-					fbr.stack = fbr.stack[:0]
+				return BoxTask(spawnGoFuncTask(fn, params)), nil
+			}
 
-					// run code
-					if fn.Mode == ast.UndefinedMode {
-						result, exc = fn.invoke(fbr, arguments)
+			// try method
+			if m, isMethod := value.asMethod(); isMethod {
+				if ufn, isUserFn := m.fn.AsUserFn(); isUserFn {
+					isMethodDef := len(ufn.args) > 0 && ufn.args[0] == "this"
+					if isMethodDef {
+						if ufn.isVariadic {
+							minArgs := len(ufn.args) - 2
+							if len(arguments) < minArgs {
+								return Value{}, CustomError("method '%v' requires at least %v argument(s), %v provided", ufn.name, minArgs, len(arguments))
+							}
+						} else {
+							if len(ufn.args)-1 != len(arguments) {
+								return Value{}, CustomError("method '%v' requires %v argument(s), %v provided", ufn.name, len(ufn.args)-1, len(arguments))
+							}
+						}
+
+						params := make([]Value, 1+len(arguments))
+						params[0] = m.this
+						for i, argument := range arguments {
+							arg, exc := argument(fbr)
+							if exc != nil {
+								return arg, exc
+							}
+							params[1+i] = arg
+						}
+
+						return BoxTask(spawnUserFnTask(ufn, params)), nil
 					} else {
-						vm.rt.AcquireGIL()
-						result, exc = fn.invoke(fbr, arguments)
-						vm.rt.ReleaseGIL()
+						if ufn.isVariadic {
+							minArgs := len(ufn.args) - 1
+							if len(arguments) < minArgs {
+								if ufn.name != "λ" {
+									return Value{}, CustomError("function '%v' requires at least %v argument(s), %v provided", ufn.name, minArgs, len(arguments))
+								}
+								return Value{}, CustomError("callable requires at least %v argument(s), %v provided", minArgs, len(arguments))
+							}
+						} else {
+							if len(ufn.args) != len(arguments) {
+								if ufn.name != "λ" {
+									return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", ufn.name, len(ufn.args), len(arguments))
+								}
+								return Value{}, CustomError("callable requires %v argument(s), %v provided", len(ufn.args), len(arguments))
+							}
+						}
+
+						params := make([]Value, len(arguments))
+						for i, argument := range arguments {
+							arg, exc := argument(fbr)
+							if exc != nil {
+								return arg, exc
+							}
+							params[i] = arg
+						}
+
+						return BoxTask(spawnUserFnTask(ufn, params)), nil
+					}
+				}
+
+				if fn, isGoFunc := m.fn.AsGoFunc(); isGoFunc {
+					if fn.IsVariadic {
+						if len(arguments) < fn.Arguments-1 {
+							return Value{}, CustomError("method requires at least %v argument(s), %v provided", fn.Arguments-1, len(arguments))
+						}
+					} else {
+						if fn.Arguments-1 != len(arguments) {
+							return Value{}, CustomError("method requires %v argument(s), %v provided", fn.Arguments-1, len(arguments))
+						}
 					}
 
-					task.Finish(result, exc)
-				})
+					params := make([]Value, 1+len(arguments))
+					params[0] = m.this
+					for i, argument := range arguments {
+						arg, exc := argument(fbr)
+						if exc != nil {
+							return arg, exc
+						}
+						params[1+i] = arg
+					}
 
-				return BoxTask(task), nil
+					return BoxTask(spawnGoFuncTask(fn, params)), nil
+				}
 			}
 
 			return Value{}, CustomError("cannot call a non-function '%v'", value)
@@ -2150,7 +2266,9 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 				return Value{}, TypeErrorF("struct field key must be a string, got '%s'", indexVal.TypeOf())
 			}
 
+			si.MU.RLock()
 			val, exists := si.Fields[fields.Get(keyStr)]
+			si.MU.RUnlock()
 			if !exists {
 				return Value{}, RuntimeExceptionF("undefined field '%s' in struct", keyStr)
 			}

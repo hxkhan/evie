@@ -2,6 +2,7 @@ package vm
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/hxkhan/evie/vm/fields"
 )
@@ -14,11 +15,15 @@ type UserStruct struct {
 }
 
 type UserStructInstance struct {
+	MU         sync.RWMutex
 	InstanceOf *UserStruct
 	Fields     map[fields.ID]Value
 }
 
-func (usi UserStructInstance) String() string {
+func (usi *UserStructInstance) String() string {
+	usi.MU.RLock()
+	defer usi.MU.RUnlock()
+
 	builder := strings.Builder{}
 	builder.WriteString(usi.InstanceOf.Name)
 	builder.WriteByte('{')

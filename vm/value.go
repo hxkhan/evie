@@ -598,7 +598,9 @@ func (x Value) getField(f fields.ID) (field Value, ok bool) {
 	case kindStructInstance:
 		obj := (*UserStructInstance)(x.pointer)
 
+		obj.MU.RLock()
 		value, exists := obj.Fields[f]
+		obj.MU.RUnlock()
 		if exists {
 			return value, true
 		}

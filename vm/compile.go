@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/hxkhan/evie/ast"
@@ -1008,8 +1009,56 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 			// optimise: call to ourselves (recursion)
 			if vm.cp.closures.Len() > 0 && fn.funcInfoStatic == vm.cp.closures.Last(0).info {
+				if !fn.isVariadic {
+					return func(fbr *Fiber) (result Value, exc Exception) {
+						base := len(fbr.stack)
+						for _, escapes := range fn.locals {
+							if !escapes {
+								fbr.stack = append(fbr.stack, fbr.pop())
+							} else {
+								fbr.stack = append(fbr.stack, &Value{})
+							}
+						}
+
+						for idx, argFn := range arguments {
+							arg, exc := argFn(fbr)
+							if exc != nil {
+								fbr.push(fn.recyclable)
+								fbr.popStack(len(fn.locals))
+								return arg, exc
+							}
+
+							*(fbr.stack[base+idx]) = arg
+						}
+
+						prevBase := fbr.swapBase(base)
+
+						if fn.mode == ast.UndefinedMode || fbr.synced {
+							result, exc = fn.code(fbr)
+						} else {
+							vm.rt.AcquireGIL()
+							fbr.synced = true
+							result, exc = fn.code(fbr)
+							fbr.synced = false
+							vm.rt.ReleaseGIL()
+						}
+
+						fbr.push(fn.recyclable)
+						fbr.popStack(len(fn.locals))
+						fbr.swapBase(prevBase)
+
+						switch exc {
+						case nil:
+							return Value{}, nil
+						case signalReturn:
+							return result, nil
+						default:
+							return result, exc
+						}
+					}
+				}
+
 				return func(fbr *Fiber) (result Value, exc Exception) {
-					// setup stack locals
 					base := len(fbr.stack)
 					for idx, escapes := range fn.locals {
 						if !escapes {
@@ -1018,94 +1067,6 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 							fbr.stack = append(fbr.stack, &Value{})
 						}
 
-						// evaluate arguments
-						if !fn.isVariadic {
-							if idx < len(arguments) {
-								arg, exc := arguments[idx](fbr)
-								if exc != nil {
-									return arg, exc
-								}
-
-								*(fbr.stack[base+idx]) = arg
-							}
-						} else {
-							variadicIdx := len(fn.args) - 1
-							if idx < variadicIdx {
-								arg, exc := arguments[idx](fbr)
-								if exc != nil {
-									return arg, exc
-								}
-
-								*(fbr.stack[base+idx]) = arg
-							} else if idx == variadicIdx {
-								tailCount := len(arguments) - variadicIdx
-								tail := make([]Value, tailCount)
-								for t := 0; t < tailCount; t++ {
-									arg, exc := arguments[variadicIdx+t](fbr)
-									if exc != nil {
-										return arg, exc
-									}
-									tail[t] = arg
-								}
-								*(fbr.stack[base+idx]) = BoxArray(&Array{Data: tail})
-							}
-						}
-					}
-
-					// save current state
-					prevBase := fbr.swapBase(base)
-
-					// no transition
-					if fn.mode == ast.UndefinedMode || fbr.synced {
-						result, exc = fn.code(fbr)
-					} else {
-						// transition unsynced -> synced
-						vm.rt.AcquireGIL()
-						fbr.synced = true
-						result, exc = fn.code(fbr)
-						fbr.synced = false
-						vm.rt.ReleaseGIL()
-					}
-
-					// restore old state
-					fbr.push(fn.recyclable)
-					fbr.popStack(len(fn.locals))
-					fbr.swapBase(prevBase)
-
-					// return result but catch relevant signals
-					switch exc {
-					case nil:
-						return Value{}, nil
-					case signalReturn:
-						return result, nil
-					default:
-						return result, exc
-					}
-				}
-			}
-
-			// optimise: call to an arbitrary static global
-			return func(fbr *Fiber) (result Value, exc Exception) {
-				// setup stack locals
-				base := len(fbr.stack)
-				for idx, escapes := range fn.locals {
-					if !escapes {
-						fbr.stack = append(fbr.stack, fbr.pop())
-					} else {
-						fbr.stack = append(fbr.stack, &Value{})
-					}
-
-					// evaluate arguments
-					if !fn.isVariadic {
-						if idx < len(arguments) {
-							arg, exc := arguments[idx](fbr)
-							if exc != nil {
-								return arg, exc
-							}
-
-							*(fbr.stack[base+idx]) = arg
-						}
-					} else {
 						variadicIdx := len(fn.args) - 1
 						if idx < variadicIdx {
 							arg, exc := arguments[idx](fbr)
@@ -1127,17 +1088,123 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 							*(fbr.stack[base+idx]) = BoxArray(&Array{Data: tail})
 						}
 					}
+
+					prevBase := fbr.swapBase(base)
+
+					if fn.mode == ast.UndefinedMode || fbr.synced {
+						result, exc = fn.code(fbr)
+					} else {
+						vm.rt.AcquireGIL()
+						fbr.synced = true
+						result, exc = fn.code(fbr)
+						fbr.synced = false
+						vm.rt.ReleaseGIL()
+					}
+
+					fbr.push(fn.recyclable)
+					fbr.popStack(len(fn.locals))
+					fbr.swapBase(prevBase)
+
+					switch exc {
+					case nil:
+						return Value{}, nil
+					case signalReturn:
+						return result, nil
+					default:
+						return result, exc
+					}
+				}
+			}
+
+			// optimise: call to an arbitrary static global
+			if !fn.isVariadic {
+				return func(fbr *Fiber) (result Value, exc Exception) {
+					base := len(fbr.stack)
+					for _, escapes := range fn.locals {
+						if !escapes {
+							fbr.stack = append(fbr.stack, fbr.pop())
+						} else {
+							fbr.stack = append(fbr.stack, &Value{})
+						}
+					}
+
+					for idx, argFn := range arguments {
+						arg, exc := argFn(fbr)
+						if exc != nil {
+							fbr.push(fn.recyclable)
+							fbr.popStack(len(fn.locals))
+							return arg, exc
+						}
+
+						*(fbr.stack[base+idx]) = arg
+					}
+
+					prevBase := fbr.swapBase(base)
+					prevFn := fbr.swapActive(fn)
+
+					if fn.mode == ast.UndefinedMode || fbr.synced {
+						result, exc = fn.code(fbr)
+					} else {
+						vm.rt.AcquireGIL()
+						fbr.synced = true
+						result, exc = fn.code(fbr)
+						fbr.synced = false
+						vm.rt.ReleaseGIL()
+					}
+
+					fbr.push(fn.recyclable)
+					fbr.popStack(len(fn.locals))
+					fbr.swapBase(prevBase)
+					fbr.swapActive(prevFn)
+
+					switch exc {
+					case nil:
+						return Value{}, nil
+					case signalReturn:
+						return result, nil
+					default:
+						return result, exc
+					}
+				}
+			}
+
+			return func(fbr *Fiber) (result Value, exc Exception) {
+				base := len(fbr.stack)
+				for idx, escapes := range fn.locals {
+					if !escapes {
+						fbr.stack = append(fbr.stack, fbr.pop())
+					} else {
+						fbr.stack = append(fbr.stack, &Value{})
+					}
+
+					variadicIdx := len(fn.args) - 1
+					if idx < variadicIdx {
+						arg, exc := arguments[idx](fbr)
+						if exc != nil {
+							return arg, exc
+						}
+
+						*(fbr.stack[base+idx]) = arg
+					} else if idx == variadicIdx {
+						tailCount := len(arguments) - variadicIdx
+						tail := make([]Value, tailCount)
+						for t := 0; t < tailCount; t++ {
+							arg, exc := arguments[variadicIdx+t](fbr)
+							if exc != nil {
+								return arg, exc
+							}
+							tail[t] = arg
+						}
+						*(fbr.stack[base+idx]) = BoxArray(&Array{Data: tail})
+					}
 				}
 
-				// save current state
 				prevBase := fbr.swapBase(base)
 				prevFn := fbr.swapActive(fn)
 
-				// no transition
 				if fn.mode == ast.UndefinedMode || fbr.synced {
 					result, exc = fn.code(fbr)
 				} else {
-					// transition unsynced -> synced
 					vm.rt.AcquireGIL()
 					fbr.synced = true
 					result, exc = fn.code(fbr)
@@ -1145,13 +1212,11 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					vm.rt.ReleaseGIL()
 				}
 
-				// restore old state
 				fbr.push(fn.recyclable)
 				fbr.popStack(len(fn.locals))
 				fbr.swapBase(prevBase)
 				fbr.swapActive(prevFn)
 
-				// return result but catch relevant signals
 				switch exc {
 				case nil:
 					return Value{}, nil
@@ -1890,20 +1955,183 @@ func (vm *Instance) emitAwaitRace(node ast.AwaitRace) instruction {
 	}
 }
 
+func (vm *Instance) compileCondition(node ast.Node) func(fbr *Fiber) (bool, Exception) {
+	if bin, ok := node.(ast.BinOp); ok {
+		switch bin.Operator {
+		case ast.LtOp, ast.LtEqOp, ast.GtOp, ast.GtEqOp, ast.EqOp, ast.NotEqOp:
+			// optimise: lhs local and rhs constant
+			if lhsLocal, isLocal := vm.evaluate(bin.Lhs).(local); isLocal {
+				if rhsVal, isVal := vm.evaluate(bin.Rhs).(Value); isVal {
+					if rhsNum, isNum := rhsVal.AsFloat64(); isNum {
+						switch bin.Operator {
+						case ast.LtOp:
+							return func(fbr *Fiber) (bool, Exception) {
+								lhs := *fbr.get(lhsLocal)
+								if lhs.pointer == f64Type {
+									return math.Float64frombits(lhs.scalar) < rhsNum, nil
+								}
+								res, ok := lhs.LessThan(rhsVal)
+								if !ok {
+									return false, operatorError("<", lhs, rhsVal)
+								}
+								return res.IsTruthy(), nil
+							}
+						case ast.LtEqOp:
+							return func(fbr *Fiber) (bool, Exception) {
+								lhs := *fbr.get(lhsLocal)
+								if lhs.pointer == f64Type {
+									return math.Float64frombits(lhs.scalar) <= rhsNum, nil
+								}
+								res, ok := lhs.LessThanOrEqualTo(rhsVal)
+								if !ok {
+									return false, operatorError("<=", lhs, rhsVal)
+								}
+								return res.IsTruthy(), nil
+							}
+						case ast.GtOp:
+							return func(fbr *Fiber) (bool, Exception) {
+								lhs := *fbr.get(lhsLocal)
+								if lhs.pointer == f64Type {
+									return math.Float64frombits(lhs.scalar) > rhsNum, nil
+								}
+								res, ok := lhs.GreaterThan(rhsVal)
+								if !ok {
+									return false, operatorError(">", lhs, rhsVal)
+								}
+								return res.IsTruthy(), nil
+							}
+						case ast.GtEqOp:
+							return func(fbr *Fiber) (bool, Exception) {
+								lhs := *fbr.get(lhsLocal)
+								if lhs.pointer == f64Type {
+									return math.Float64frombits(lhs.scalar) >= rhsNum, nil
+								}
+								res, ok := lhs.GreaterThanOrEqualTo(rhsVal)
+								if !ok {
+									return false, operatorError(">=", lhs, rhsVal)
+								}
+								return res.IsTruthy(), nil
+							}
+						case ast.EqOp:
+							return func(fbr *Fiber) (bool, Exception) {
+								lhs := *fbr.get(lhsLocal)
+								return lhs.Equals(rhsVal), nil
+							}
+						case ast.NotEqOp:
+							return func(fbr *Fiber) (bool, Exception) {
+								lhs := *fbr.get(lhsLocal)
+								return !lhs.Equals(rhsVal), nil
+							}
+						}
+					}
+
+					switch bin.Operator {
+					case ast.EqOp:
+						return func(fbr *Fiber) (bool, Exception) {
+							lhs := *fbr.get(lhsLocal)
+							return lhs.Equals(rhsVal), nil
+						}
+					case ast.NotEqOp:
+						return func(fbr *Fiber) (bool, Exception) {
+							lhs := *fbr.get(lhsLocal)
+							return !lhs.Equals(rhsVal), nil
+						}
+					}
+				}
+			}
+
+			// optimise: lhs local and rhs local
+			if lhsLocal, isLocalL := vm.evaluate(bin.Lhs).(local); isLocalL {
+				if rhsLocal, isLocalR := vm.evaluate(bin.Rhs).(local); isLocalR {
+					switch bin.Operator {
+					case ast.LtOp:
+						return func(fbr *Fiber) (bool, Exception) {
+							lhs, rhs := *fbr.get(lhsLocal), *fbr.get(rhsLocal)
+							if lhs.pointer == f64Type && rhs.pointer == f64Type {
+								return math.Float64frombits(lhs.scalar) < math.Float64frombits(rhs.scalar), nil
+							}
+							res, ok := lhs.LessThan(rhs)
+							if !ok {
+								return false, operatorError("<", lhs, rhs)
+							}
+							return res.IsTruthy(), nil
+						}
+					case ast.LtEqOp:
+						return func(fbr *Fiber) (bool, Exception) {
+							lhs, rhs := *fbr.get(lhsLocal), *fbr.get(rhsLocal)
+							if lhs.pointer == f64Type && rhs.pointer == f64Type {
+								return math.Float64frombits(lhs.scalar) <= math.Float64frombits(rhs.scalar), nil
+							}
+							res, ok := lhs.LessThanOrEqualTo(rhs)
+							if !ok {
+								return false, operatorError("<=", lhs, rhs)
+							}
+							return res.IsTruthy(), nil
+						}
+					case ast.GtOp:
+						return func(fbr *Fiber) (bool, Exception) {
+							lhs, rhs := *fbr.get(lhsLocal), *fbr.get(rhsLocal)
+							if lhs.pointer == f64Type && rhs.pointer == f64Type {
+								return math.Float64frombits(lhs.scalar) > math.Float64frombits(rhs.scalar), nil
+							}
+							res, ok := lhs.GreaterThan(rhs)
+							if !ok {
+								return false, operatorError(">", lhs, rhs)
+							}
+							return res.IsTruthy(), nil
+						}
+					case ast.GtEqOp:
+						return func(fbr *Fiber) (bool, Exception) {
+							lhs, rhs := *fbr.get(lhsLocal), *fbr.get(rhsLocal)
+							if lhs.pointer == f64Type && rhs.pointer == f64Type {
+								return math.Float64frombits(lhs.scalar) >= math.Float64frombits(rhs.scalar), nil
+							}
+							res, ok := lhs.GreaterThanOrEqualTo(rhs)
+							if !ok {
+								return false, operatorError(">=", lhs, rhs)
+							}
+							return res.IsTruthy(), nil
+						}
+					case ast.EqOp:
+						return func(fbr *Fiber) (bool, Exception) {
+							lhs, rhs := *fbr.get(lhsLocal), *fbr.get(rhsLocal)
+							return lhs.Equals(rhs), nil
+						}
+					case ast.NotEqOp:
+						return func(fbr *Fiber) (bool, Exception) {
+							lhs, rhs := *fbr.get(lhsLocal), *fbr.get(rhsLocal)
+							return !lhs.Equals(rhs), nil
+						}
+					}
+				}
+			}
+		}
+	}
+
+	condition := vm.compile(node)
+	return func(fbr *Fiber) (bool, Exception) {
+		v, err := condition(fbr)
+		if err != nil {
+			return false, err
+		}
+		return v.IsTruthy(), nil
+	}
+}
+
 func (vm *Instance) emitConditional(node ast.Conditional) instruction {
-	condition := vm.compile(node.Condition)
+	condition := vm.compileCondition(node.Condition)
 	action := vm.compile(node.Action)
 
 	if node.Otherwise != nil {
 		otherwise := vm.compile(node.Otherwise)
 
 		return func(fbr *Fiber) (Value, Exception) {
-			v, err := condition(fbr)
+			ok, err := condition(fbr)
 			if err != nil {
-				return v, err
+				return Value{}, err
 			}
 
-			if v.IsTruthy() {
+			if ok {
 				return action(fbr)
 			}
 			return otherwise(fbr)
@@ -1911,12 +2139,12 @@ func (vm *Instance) emitConditional(node ast.Conditional) instruction {
 	}
 
 	return func(fbr *Fiber) (Value, Exception) {
-		v, err := condition(fbr)
+		ok, err := condition(fbr)
 		if err != nil {
-			return v, err
+			return Value{}, err
 		}
 
-		if v.IsTruthy() {
+		if ok {
 			return action(fbr)
 		}
 		return Value{}, nil
@@ -1924,23 +2152,23 @@ func (vm *Instance) emitConditional(node ast.Conditional) instruction {
 }
 
 func (vm *Instance) emitWhile(node ast.While) instruction {
-	condition := vm.compile(node.Condition)
+	condition := vm.compileCondition(node.Condition)
 	action := vm.compile(node.Action)
 
 	return func(fbr *Fiber) (Value, Exception) {
 		for {
 			// evaluate condition
-			v, err := condition(fbr)
+			ok, err := condition(fbr)
 			if err != nil {
-				return v, err
+				return Value{}, err
 			}
 
-			if !v.IsTruthy() {
+			if !ok {
 				break
 			}
 
 			// evaluate action
-			v, err = action(fbr)
+			v, err := action(fbr)
 			if err != nil {
 				if err == signalContinue {
 					continue

@@ -2371,13 +2371,56 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 		block[i] = vm.compile(statement)
 	}
 
-	return func(fbr *Fiber) (Value, Exception) {
-		for _, statement := range block {
-			if v, err := statement(fbr); err != nil {
+	switch len(block) {
+	case 0:
+		return func(fbr *Fiber) (Value, Exception) {
+			return Value{}, nil
+		}
+	case 1:
+		s0 := block[0]
+		return func(fbr *Fiber) (Value, Exception) {
+			if v, err := s0(fbr); err != nil {
 				return v, err
 			}
+			return Value{}, nil
 		}
-		return Value{}, nil
+	case 2:
+		s0 := block[0]
+		s1 := block[1]
+		return func(fbr *Fiber) (Value, Exception) {
+			if v, err := s0(fbr); err != nil {
+				return v, err
+			}
+			if v, err := s1(fbr); err != nil {
+				return v, err
+			}
+			return Value{}, nil
+		}
+	case 3:
+		s0 := block[0]
+		s1 := block[1]
+		s2 := block[2]
+		return func(fbr *Fiber) (Value, Exception) {
+			if v, err := s0(fbr); err != nil {
+				return v, err
+			}
+			if v, err := s1(fbr); err != nil {
+				return v, err
+			}
+			if v, err := s2(fbr); err != nil {
+				return v, err
+			}
+			return Value{}, nil
+		}
+	default:
+		return func(fbr *Fiber) (Value, Exception) {
+			for _, statement := range block {
+				if v, err := statement(fbr); err != nil {
+					return v, err
+				}
+			}
+			return Value{}, nil
+		}
 	}
 }
 

@@ -25,6 +25,7 @@ type closure struct {
 	freeVars ds.Set[int]
 	scope    ds.Scope
 	info     *funcInfoStatic
+	ustruct  *UserStruct
 }
 
 type compiler struct {

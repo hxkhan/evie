@@ -495,11 +495,16 @@ func (v Value) ToGo() any {
 	if inst, ok := v.AsUserStructInstance(); ok {
 		inst.MU.RLock()
 		defer inst.MU.RUnlock()
-		res := make(map[string]any, len(inst.Fields)+1)
+		res := make(map[string]any, len(inst.Fields)+len(inst.Dynamic)+1)
 		if inst.InstanceOf != nil {
 			res["__struct"] = inst.InstanceOf.Name
+			for i, fid := range inst.InstanceOf.Fields {
+				if i < len(inst.Fields) {
+					res[fields.Lookup(fid)] = inst.Fields[i].ToGo()
+				}
+			}
 		}
-		for f, val := range inst.Fields {
+		for f, val := range inst.Dynamic {
 			res[fields.Lookup(f)] = val.ToGo()
 		}
 		return res

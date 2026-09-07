@@ -277,10 +277,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 				}
 
 				if obj, ok := lhs.AsUserStructInstance(); ok {
-					obj.MU.RLock()
-					_, exists := obj.Fields[index]
-					obj.MU.RUnlock()
-					return BoxBool(exists), nil
+					return BoxBool(obj.HasField(index)), nil
 				}
 
 				panic("implement type")
@@ -322,10 +319,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 				}
 				if si, ok := lhs.AsUserStructInstance(); ok {
 					if keyStr, ok := k.AsString(); ok {
-						si.MU.RLock()
-						_, exists := si.Fields[fields.Get(keyStr)]
-						si.MU.RUnlock()
-						return BoxBool(exists), nil
+						return BoxBool(si.HasField(fields.Get(keyStr))), nil
 					}
 					return BoxBool(false), nil
 				}
@@ -420,11 +414,17 @@ func (vm *Instance) runPackage(node ast.Package) (Value, Exception) {
 				args[i] = fields.Get(a)
 			}
 
+			offsets := make(map[fields.ID]int, len(args))
+			for i, fid := range args {
+				offsets[fid] = i
+			}
+
 			// create a stub for now
 			v := BoxUserStruct(&UserStruct{
-				Name:    str.Name,
-				Fields:  args,
-				Methods: make(map[fields.ID]*UserFn),
+				Name:         str.Name,
+				Fields:       args,
+				FieldOffsets: offsets,
+				Methods:      make(map[fields.ID]*UserFn),
 			})
 			this.globals[index] = Global{Value: &v, IsStatic: true}
 		}
@@ -642,6 +642,33 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 			// compile new value & return setter
 			value := vm.compile(node.Value)
 			index := fields.Get(fa.Rhs)
+
+			if lhs.index == 0 && !lhs.isCaptured && vm.cp.closures.Len() > 0 && vm.cp.closures.Last(0).ustruct != nil {
+				ustruct := vm.cp.closures.Last(0).ustruct
+				if slot, ok := ustruct.FieldOffsets[index]; ok {
+					return func(fbr *Fiber) (Value, Exception) {
+						v, err := value(fbr)
+						if err != nil {
+							return v, err
+						}
+						thisVal := fbr.stack[fbr.base]
+						if thisVal.scalar == kindStructInstance && !isKnown(thisVal.pointer) {
+							usi := (*UserStructInstance)(thisVal.pointer)
+							usi.MU.Lock()
+							if usi.InstanceOf == ustruct && slot < len(usi.Fields) {
+								usi.Fields[slot] = v
+								usi.MU.Unlock()
+								return Value{}, nil
+							}
+							usi.MU.Unlock()
+							usi.SetField(index, v)
+							return Value{}, nil
+						}
+						return Value{}, RuntimeExceptionF("cannot assign field '%s' on %s", fa.Rhs, thisVal.TypeOf())
+					}
+				}
+			}
+
 			return func(fbr *Fiber) (Value, Exception) {
 				lhs := fbr.get(lhs)
 
@@ -661,9 +688,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 						return value, err
 					}
 
-					obj.MU.Lock()
-					obj.Fields[index] = value
-					obj.MU.Unlock()
+					obj.SetField(index, value)
 					return Value{}, nil
 				}
 
@@ -737,9 +762,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 						return value, err
 					}
 
-					obj.MU.Lock()
-					obj.Fields[index] = value
-					obj.MU.Unlock()
+					obj.SetField(index, value)
 					return Value{}, nil
 				}
 
@@ -815,9 +838,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 					return Value{}, TypeErrorF("struct field key must be a string, got '%s'", keyVal.TypeOf())
 				}
 
-				si.MU.Lock()
-				si.Fields[fields.Get(keyStr)] = newVal
-				si.MU.Unlock()
+				si.SetField(fields.Get(keyStr), newVal)
 				return Value{}, nil
 			}
 
@@ -948,7 +969,7 @@ func (vm *Instance) compileStructMethod(ustruct *UserStruct, node ast.Fn) *UserF
 		vm:         vm,
 	}
 
-	vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: info})
+	vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: info, ustruct: ustruct})
 	vm.cp.closures.Last(0).scope.OpenBlock()
 
 	// declare arguments: "this" is declared first as a static local at slot 0
@@ -1248,22 +1269,24 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				panic(CustomError("struct '%v' requires %v argument(s), %v provided", us.Name, len(us.Fields), len(arguments)))
 			}
 
+			numFields := len(us.Fields)
 			return func(fbr *Fiber) (Value, Exception) {
-				usi := &UserStructInstance{InstanceOf: us}
-				usi.Fields = make(map[fields.ID]Value, len(us.Fields))
+				usi := &UserStructInstance{
+					InstanceOf: us,
+					Fields:     make([]Value, numFields),
+				}
 
-				for i, f := range us.Fields {
+				for i := range numFields {
 					v, exc := arguments[i](fbr)
 					if exc != nil {
 						return v, exc
 					}
 
-					usi.Fields[f] = v
+					usi.Fields[i] = v
 				}
 
 				return BoxUserStructInstance(usi), nil
 			}
-
 		}
 
 		// try built-in
@@ -2431,8 +2454,55 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 	if lhs := vm.evaluate(node.Lhs); lhs != nil {
 		switch lhs := lhs.(type) {
 		case local:
+			if lhs.index == 0 && !lhs.isCaptured && vm.cp.closures.Len() > 0 && vm.cp.closures.Last(0).ustruct != nil {
+				ustruct := vm.cp.closures.Last(0).ustruct
+				if slot, ok := ustruct.FieldOffsets[index]; ok {
+					return func(fbr *Fiber) (Value, Exception) {
+						thisVal := fbr.stack[fbr.base]
+						if thisVal.scalar == kindStructInstance && !isKnown(thisVal.pointer) {
+							usi := (*UserStructInstance)(thisVal.pointer)
+							usi.MU.RLock()
+							if usi.InstanceOf == ustruct && slot < len(usi.Fields) {
+								val := usi.Fields[slot]
+								usi.MU.RUnlock()
+								return val, nil
+							}
+							usi.MU.RUnlock()
+							if val, exists := usi.GetField(index); exists {
+								return val, nil
+							}
+						}
+						if field, exists := thisVal.getField(index); exists {
+							return field, nil
+						}
+						return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", node.Rhs, node)
+					}
+				}
+			}
+
+			var cachedStruct *UserStruct
+			var cachedSlot int = -1
 			return func(fbr *Fiber) (Value, Exception) {
 				v := fbr.get(lhs)
+				if v.scalar == kindStructInstance && !isKnown(v.pointer) {
+					usi := (*UserStructInstance)(v.pointer)
+					usi.MU.RLock()
+					if usi.InstanceOf == cachedStruct && cachedSlot >= 0 && cachedSlot < len(usi.Fields) {
+						val := usi.Fields[cachedSlot]
+						usi.MU.RUnlock()
+						return val, nil
+					}
+					usi.MU.RUnlock()
+
+					if slot, ok := usi.InstanceOf.FieldOffsets[index]; ok {
+						cachedStruct = usi.InstanceOf
+						cachedSlot = slot
+						usi.MU.RLock()
+						val := usi.Fields[slot]
+						usi.MU.RUnlock()
+						return val, nil
+					}
+				}
 				if field, exists := v.getField(index); exists {
 					return field, nil
 				}
@@ -2461,10 +2531,32 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 
 	// generic compilation
 	lhs := vm.compile(node.Lhs)
+	var cachedStruct *UserStruct
+	var cachedSlot int = -1
 	return func(fbr *Fiber) (Value, Exception) {
 		lhs, exc := lhs(fbr)
 		if exc != nil {
 			return lhs, exc
+		}
+
+		if lhs.scalar == kindStructInstance && !isKnown(lhs.pointer) {
+			usi := (*UserStructInstance)(lhs.pointer)
+			usi.MU.RLock()
+			if usi.InstanceOf == cachedStruct && cachedSlot >= 0 && cachedSlot < len(usi.Fields) {
+				val := usi.Fields[cachedSlot]
+				usi.MU.RUnlock()
+				return val, nil
+			}
+			usi.MU.RUnlock()
+
+			if slot, ok := usi.InstanceOf.FieldOffsets[index]; ok {
+				cachedStruct = usi.InstanceOf
+				cachedSlot = slot
+				usi.MU.RLock()
+				val := usi.Fields[slot]
+				usi.MU.RUnlock()
+				return val, nil
+			}
 		}
 
 		if field, exists := lhs.getField(index); exists {
@@ -2537,9 +2629,7 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 				return Value{}, TypeErrorF("struct field key must be a string, got '%s'", indexVal.TypeOf())
 			}
 
-			si.MU.RLock()
-			val, exists := si.Fields[fields.Get(keyStr)]
-			si.MU.RUnlock()
+			val, exists := si.GetField(fields.Get(keyStr))
 			if !exists {
 				return Value{}, RuntimeExceptionF("undefined field '%s' in struct", keyStr)
 			}

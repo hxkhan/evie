@@ -196,6 +196,15 @@ func (pkg *packageInstance) GetSymbol(name string) (value Global, exists bool) {
 	return v, exists
 }
 
+func (pkg *packageInstance) Get(name string) (value Value, exists bool) {
+	index := fields.Get(name)
+	v, exists := pkg.globals[index]
+	if !exists || v.Value == nil {
+		return Value{}, false
+	}
+	return *v.Value, true
+}
+
 func (pkg *packageInstance) HasSymbol(name string) (exists bool) {
 	_, exists = pkg.globals[fields.Get(name)]
 	return exists

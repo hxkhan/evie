@@ -1,12 +1,26 @@
 package fields
 
+import "sync"
+
 type ID int
 
-var registryA = map[string]ID{}
-var registryB = map[ID]string{}
+var (
+	mu        sync.RWMutex
+	registryA = map[string]ID{}
+	registryB = map[ID]string{}
+)
 
 func Get(name string) ID {
+	mu.RLock()
 	index, exists := registryA[name]
+	mu.RUnlock()
+	if exists {
+		return index
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	index, exists = registryA[name]
 	if !exists {
 		id := ID(len(registryA))
 		registryA[name] = id
@@ -17,5 +31,7 @@ func Get(name string) ID {
 }
 
 func Lookup(id ID) string {
+	mu.RLock()
+	defer mu.RUnlock()
 	return registryB[id]
 }

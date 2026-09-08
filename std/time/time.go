@@ -9,6 +9,7 @@ import (
 func Construct() vm.Package {
 	pkg := vm.NewHostPackage()
 	pkg.SetSymbol("wait", wait)
+	pkg.SetSymbol("timer", wait)
 	return pkg
 }
 

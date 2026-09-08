@@ -677,6 +677,17 @@ func (x Value) dotAccess(f fields.ID) (field Value) {
 	panic("add more types?")
 }
 
+// IsCallable reports whether the value can be invoked via Call.
+func (x Value) IsCallable() bool {
+	if !isKnown(x.pointer) {
+		switch x.scalar {
+		case kindUserFn, kindGoFunc, kindBoundMethod:
+			return true
+		}
+	}
+	return false
+}
+
 func (x Value) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) {
 	if !isKnown(x.pointer) {
 		switch x.scalar {

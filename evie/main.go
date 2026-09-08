@@ -58,21 +58,9 @@ func main() {
 		return
 	}
 
-	pkgMain := evm.GetPackage("main")
-	if pkgMain == nil {
-		fmt.Println("Error: no main package found")
-		return
-	}
-
-	symMain, exists := pkgMain.GetSymbol("main")
-	if !exists {
+	fn, ok := evm.Lookup("main.main")
+	if !ok || !fn.IsCallable() {
 		fmt.Println("Error: no main entry point found")
-		return
-	}
-
-	fn, ok := symMain.AsUserFn()
-	if !ok {
-		fmt.Println("Error: main.main found but it is not a function")
 		return
 	}
 

@@ -599,6 +599,7 @@ package main
 import (
     "fmt"
     "github.com/hxkhan/evie"
+    "github.com/hxkhan/evie/vm"
 )
 
 type OrderResult struct {
@@ -611,12 +612,13 @@ func main() {
     env := evie.New()
 
     // 2. Expose Go functions directly to Evie
-    env.Set("calculateTax", func(subtotal float64) float64 {
+    taxFn, _ := vm.BoxAny(func(subtotal float64) float64 {
         return subtotal * 0.15
     })
+    env.SetStatic("calculateTax", taxFn)
 
-    // 3. Run Evie scripts
-    _, err := env.Run(`
+    // 3. Evaluate Evie script
+    _, err := env.EvalString(`
     package main
     fn processOrder(price) {
         var tax := calculateTax(price)
@@ -627,8 +629,10 @@ func main() {
     }
     `)
 
-    // 4. Call Evie functions from Go
-    val, _ := env.Call("processOrder", 100.0)
+    // 4. Look up function reference and call it
+    fn, _ := env.Lookup("main.processOrder")
+    fbr := env.NewFiber()
+    val, _ := fn.Call(fbr, vm.BoxNumber(100.0))
 
     // 5. Unmarshal directly into a Go struct
     var res OrderResult

@@ -43,7 +43,7 @@ func New() *vm.Instance {
 
 // Run executes an Evie script using a new default VM instance and returns the result Value.
 func Run(script string) (vm.Value, error) {
-	return New().Run(script)
+	return New().EvalString(script)
 }
 
 // Eval executes an Evie script and returns the unboxed native Go value.

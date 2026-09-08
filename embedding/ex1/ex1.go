@@ -54,22 +54,10 @@ func main() {
 		fmt.Println(result)
 	}
 
-	// get a reference to the main package
-	pkgMain := evm.GetPackage("main")
-	if pkgMain == nil {
-		panic("package main not found")
-	}
-
-	// get a reference to the main symbol
-	symAdd, exists := pkgMain.GetSymbol("add")
-	if !exists {
-		panic("symbol add not found")
-	}
-
-	// type assert it
-	add, ok := symAdd.AsUserFn()
-	if !ok {
-		panic("symbol add is not a function")
+	// look up the function reference directly
+	add, exists := evm.Lookup("main.add")
+	if !exists || !add.IsCallable() {
+		panic("symbol add not found or not callable")
 	}
 
 	fbr := evm.NewFiber()

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/hxkhan/evie"
+	"github.com/hxkhan/evie/vm"
 )
 
 type Result struct {
@@ -16,15 +17,19 @@ func main() {
 	env := evie.New()
 
 	// 2. Expose a native Go function to Evie
-	env.Set("formatGreeting", func(name string, count int) string {
+	greetingFn, err := vm.BoxAny(func(name string, count int) string {
 		return fmt.Sprintf("Welcome %s! You have %d notifications.", name, count)
 	})
+	if err != nil {
+		panic(err)
+	}
+	env.SetStatic("formatGreeting", greetingFn)
 
 	// 3. Expose host data
-	env.Set("taxRate", 0.12)
+	env.SetStatic("taxRate", vm.BoxNumber(0.12))
 
 	// 4. Run an Evie script defining functions and logic
-	_, err := env.Run(`
+	_, err = env.EvalString(`
 	package main imports("io")
 
 	fn calculateOrder(subtotal, count, customerName) {
@@ -44,13 +49,20 @@ func main() {
 		panic(err)
 	}
 
-	// 5. Call the Evie function directly from Go with automatic marshaling
-	val, err := env.Call("calculateOrder", 250.0, 3, "Alice")
-	if err != nil {
-		panic(err)
+	// 5. Look up the function reference once
+	calcOrder, ok := env.Lookup("main.calculateOrder")
+	if !ok || !calcOrder.IsCallable() {
+		panic("function calculateOrder not found or not callable")
 	}
 
-	// 6. Unmarshal directly into a Go struct
+	// 6. Call the Evie function directly using its reference and a Fiber
+	fbr := env.NewFiber()
+	val, exc := calcOrder.Call(fbr, vm.BoxNumber(250.0), vm.BoxNumber(3), vm.BoxString("Alice"))
+	if exc != nil {
+		panic(exc)
+	}
+
+	// 7. Unmarshal directly into a Go struct
 	var orderResult Result
 	if err := val.Unmarshal(&orderResult); err != nil {
 		panic(err)
@@ -58,7 +70,7 @@ func main() {
 
 	fmt.Printf("[Go Host] Received: Total = $%.2f, Message = %q\n", orderResult.Total, orderResult.Message)
 
-	// 7. One-liner script evaluation
+	// 8. One-liner script evaluation
 	quickResult, _ := evie.Eval("return [1, 2, 3, 4, 5].filter(fn(x) => x > 2).map(fn(x) => x * 10)")
 	fmt.Printf("[Go Host] Quick Eval: %v\n", quickResult)
 }

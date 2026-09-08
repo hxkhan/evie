@@ -490,6 +490,10 @@ func (fn *GoFunc) invoke(fbr *Fiber, arguments []instruction) (result Value, exc
 
 // mostly only used when calling from Go -> GoFunc
 func (fn *GoFunc) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) {
+	if fbr == nil {
+		return Value{}, CustomError("cannot call GoFunc with nil fiber")
+	}
+
 	if fn.IsVariadic {
 		if len(args) < fn.Arguments {
 			return Value{}, CustomError("callable requires at least %v argument(s), %v provided", fn.Arguments, len(args))

@@ -49,18 +49,11 @@ func runCode(code string) (resVal vm.Value, retErr error) {
 		return vm.Value{}, err
 	}
 
-	pkgMain := evm.GetPackage("main")
-	if pkgMain == nil {
-		return vm.Value{}, nil
-	}
-
-	symMain, exists := pkgMain.GetSymbol("main")
-	if !exists {
-		return vm.Value{}, nil
-	}
-
-	fn, ok := symMain.AsUserFn()
+	fn, ok := evm.Lookup("main.main")
 	if !ok {
+		return vm.Value{}, nil
+	}
+	if !fn.IsCallable() {
 		return vm.Value{}, fmt.Errorf("main is not a function")
 	}
 
@@ -1376,35 +1369,31 @@ func TestTypeMarshaling(t *testing.T) {
 }
 
 func TestGoHostEmbedding(t *testing.T) {
-	// evie.New() and vm.Run()
 	env := evie.New()
 
-	// Inject variable
-	err := env.Set("taxRate", 0.15)
-	if err != nil {
-		t.Fatalf("Set failed: %v", err)
-	}
+	// Inject variable via SetStatic
+	env.SetStatic("taxRate", vm.BoxNumber(0.15))
 
 	// Use injected variable in Evie
-	val, err := env.Run(`
+	val, err := env.EvalString(`
 	var price := 100
 	return price + (price * taxRate)
 	`)
 	if err != nil {
-		t.Fatalf("Run failed: %v", err)
+		t.Fatalf("EvalString failed: %v", err)
 	}
 	if val.Float64() != 115 {
 		t.Fatalf("expected 115, got %v", val.Float64())
 	}
 
-	// Get variable
-	taxVal, ok := env.Get("taxRate")
+	// Lookup variable reference
+	taxVal, ok := env.Lookup("taxRate")
 	if !ok || taxVal.Float64() != 0.15 {
-		t.Fatalf("Get failed: %v, %v", taxVal, ok)
+		t.Fatalf("Lookup failed: %v, %v", taxVal, ok)
 	}
 
-	// Package definition and Calling Evie function from Go
-	_, err = env.Run(`
+	// Package definition and calling Evie function reference from Go
+	_, err = env.EvalString(`
 	package main
 	fn multiply(a, b) {
 		return a * b
@@ -1414,23 +1403,37 @@ func TestGoHostEmbedding(t *testing.T) {
 		t.Fatalf("defining multiply failed: %v", err)
 	}
 
-	mulVal, err := env.Call("multiply", 7, 8)
-	if err != nil {
-		t.Fatalf("Call failed: %v", err)
+	mulFn, ok := env.Lookup("main.multiply")
+	if !ok || !mulFn.IsCallable() {
+		t.Fatalf("Lookup main.multiply failed")
+	}
+
+	fbr := env.NewFiber()
+	mulVal, exc := mulFn.Call(fbr, vm.BoxNumber(7), vm.BoxNumber(8))
+	if exc != nil {
+		t.Fatalf("Call failed: %v", exc)
 	}
 	if mulVal.Int() != 56 {
 		t.Fatalf("expected 56, got %v", mulVal.Int())
 	}
 
-	// Package with main() auto-execution
-	mainRes, err := env.Run(`
+	// Package with main() execution via Lookup reference
+	_, err = env.EvalString(`
 	package main
 	fn main() {
 		return "executed main successfully"
 	}
 	`)
 	if err != nil {
-		t.Fatalf("Run main failed: %v", err)
+		t.Fatalf("EvalString main failed: %v", err)
+	}
+	mainFn, ok := env.Lookup("main.main")
+	if !ok || !mainFn.IsCallable() {
+		t.Fatalf("Lookup main.main failed")
+	}
+	mainRes, exc := mainFn.Call(fbr)
+	if exc != nil {
+		t.Fatalf("Call main failed: %v", exc)
 	}
 	if mainRes.String() != "executed main successfully" {
 		t.Fatalf("expected main return, got %v", mainRes.String())
@@ -1450,11 +1453,15 @@ func TestGoFuncWrapping(t *testing.T) {
 	env := evie.New()
 
 	// 1. Basic function
-	env.Set("add", func(a, b int) int {
+	addFn, err := vm.BoxAny(func(a, b int) int {
 		return a + b
 	})
+	if err != nil {
+		t.Fatalf("BoxAny failed: %v", err)
+	}
+	env.SetStatic("add", addFn)
 
-	val, err := env.Run(`return add(20, 22)`)
+	val, err := env.EvalString(`return add(20, 22)`)
 	if err != nil {
 		t.Fatalf("add call failed: %v", err)
 	}
@@ -1463,11 +1470,15 @@ func TestGoFuncWrapping(t *testing.T) {
 	}
 
 	// 2. String manipulation function
-	env.Set("greet", func(name string) string {
+	greetFn, err := vm.BoxAny(func(name string) string {
 		return "Hello, " + name + "!"
 	})
+	if err != nil {
+		t.Fatalf("BoxAny failed: %v", err)
+	}
+	env.SetStatic("greet", greetFn)
 
-	val, err = env.Run(`return greet("Evie")`)
+	val, err = env.EvalString(`return greet("Evie")`)
 	if err != nil {
 		t.Fatalf("greet call failed: %v", err)
 	}
@@ -1476,34 +1487,42 @@ func TestGoFuncWrapping(t *testing.T) {
 	}
 
 	// 3. Function returning error
-	env.Set("divide", func(a, b float64) (float64, error) {
+	divFn, err := vm.BoxAny(func(a, b float64) (float64, error) {
 		if b == 0 {
 			return 0, fmt.Errorf("division by zero in Go")
 		}
 		return a / b, nil
 	})
+	if err != nil {
+		t.Fatalf("BoxAny failed: %v", err)
+	}
+	env.SetStatic("divide", divFn)
 
-	val, err = env.Run(`return divide(10, 2)`)
+	val, err = env.EvalString(`return divide(10, 2)`)
 	if err != nil || val.Float64() != 5 {
 		t.Fatalf("expected 5, got %v (err: %v)", val, err)
 	}
 
 	// Test error returned from Go caught in Evie or reported
-	_, err = env.Run(`return divide(10, 0)`)
+	_, err = env.EvalString(`return divide(10, 0)`)
 	if err == nil {
 		t.Fatalf("expected error from division by zero, got nil")
 	}
 
 	// 4. Variadic Go function
-	env.Set("sumAll", func(nums ...int) int {
+	sumFn, err := vm.BoxAny(func(nums ...int) int {
 		total := 0
 		for _, n := range nums {
 			total += n
 		}
 		return total
 	})
+	if err != nil {
+		t.Fatalf("BoxAny failed: %v", err)
+	}
+	env.SetStatic("sumAll", sumFn)
 
-	val, err = env.Run(`return sumAll(1, 2, 3, 4, 5)`)
+	val, err = env.EvalString(`return sumAll(1, 2, 3, 4, 5)`)
 	if err != nil {
 		t.Fatalf("sumAll call failed: %v", err)
 	}

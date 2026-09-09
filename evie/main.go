@@ -12,20 +12,6 @@ import (
 )
 
 func main() {
-	/* f, err := os.Create("cpu.prof")
-	if err != nil {
-		log.Fatal("could not create CPU profile: ", err)
-	}
-	defer f.Close() // error handling omitted for example
-	if err := pprof.StartCPUProfile(f); err != nil {
-		log.Fatal("could not start CPU profile: ", err)
-	}
-	defer pprof.StopCPUProfile()
-
-	if err != nil {
-		panic(err)
-	} */
-
 	inline := flag.Bool("inline", true, "Optimise the program by inlining certain instruction combinations")
 	m := flag.Bool("m", false, "Print metrics")
 	t := flag.Bool("t", false, "Print execution time")
@@ -33,48 +19,39 @@ func main() {
 	logCache := flag.Bool("log-cache", false, "Log cache hits/misses")
 	flag.Parse()
 
-	fileName := os.Args[len(os.Args)-1]
-	if !strings.HasSuffix(fileName, ".ev") {
-		fmt.Println("Provide a file with a .ev extension as the last argument!")
+	if flag.NArg() < 1 {
+		fmt.Println("Provide a file with a .ev extension or a project directory as the last argument!")
 		return
 	}
 
-	input, err := os.ReadFile(fileName)
-	if err != nil {
-		panic(err)
-	}
+	target := flag.Arg(flag.NArg() - 1)
 
-	evm := vm.New(vm.Options{
-		LogCache:        *logCache,
-		LogCaptures:     *logCaptures,
-		DisableInlining: !(*inline),
-		Metrics:         *m,
-		//UniversalStatics: evie.ImplicitBuilitins(),
-		ImportsResolver: resolver,
+	loader := evie.NewLoader(evie.LoaderOptions{
+		Inline:      *inline,
+		Metrics:     *m,
+		LogCaptures: *logCaptures,
+		LogCache:    *logCache,
 	})
-	_, err = evm.EvalScript(input)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	fn, ok := evm.Lookup("main.main")
-	if !ok || !fn.IsCallable() {
-		fmt.Println("Error: no main entry point found")
-		return
-	}
-
-	fbr := evm.NewFiber()
 
 	before := time.Now()
-	res, exc := fn.Call(fbr)
-	if exc != nil {
-		fmt.Println(exc)
+	var res vm.Value
+	var err error
+
+	info, statErr := os.Stat(target)
+	if statErr == nil && info.IsDir() {
+		res, err = loader.RunProject(target)
+	} else if strings.HasSuffix(target, ".ev") || statErr == nil {
+		res, err = loader.RunFile(target)
+	} else {
+		fmt.Println("Provide a file with a .ev extension or a project directory!")
 		return
 	}
 
-	evm.WaitForNoActivity()
 	difference := time.Since(before)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
 
 	if !res.IsNil() {
 		fmt.Println(res)
@@ -87,15 +64,4 @@ func main() {
 	if *t {
 		fmt.Printf("Execution time: %v\n", difference)
 	}
-
-	/* if *m {
-		fmt.Println("Metrics")
-	} */
-}
-
-func resolver(name string) vm.Package {
-	if constructor, exists := evie.StandardLibraryConstructors[name]; exists {
-		return constructor()
-	}
-	panic(fmt.Errorf("constructor not found for '%v'", name))
 }

@@ -28,6 +28,9 @@ type closure struct {
 	ustruct  *UserStruct
 }
 
+// PackageResolver resolves a package by import name or path.
+type PackageResolver func(name string) (Package, error)
+
 type compiler struct {
 	inline  bool              // use dispatch inlining (combining instructions into one)
 	statics map[string]*Value // implicitly available to all user packages
@@ -36,15 +39,15 @@ type compiler struct {
 	closures ds.Slice[*closure]     // currently open closures
 	modes    ds.Slice[ast.SyncMode] // sync mode stack
 
-	resolver func(name string) Package
+	resolver PackageResolver
 }
 
 type runtime struct {
-	packages map[string]*packageInstance // loaded packages
-	fibers   sync.Pool                   // pooled fibers for this vm
-	trace    []string                    // call-stack trace
-	gil      sync.Mutex                  // global interpreter lock
-	wg       sync.WaitGroup              // wait for all fibers to complete
+	packages map[string]Package // loaded packages
+	fibers   sync.Pool          // pooled fibers for this vm
+	trace    []string           // call-stack trace
+	gil      sync.Mutex         // global interpreter lock
+	wg       sync.WaitGroup     // wait for all fibers to complete
 }
 
 // Global is just a wrapper for a global variable reference
@@ -69,21 +72,36 @@ type Options struct {
 	Metrics         bool // collect metrics (affects performance)
 	TopLevelLogic   bool // whether to only allow declarations at top level
 
-	ImportsResolver  func(name string) Package // to instantiate host packages when user packages import them
+	ImportsResolver  func(name string) Package // legacy/simple resolver
+	PackageResolver  PackageResolver           // robust package resolver with error return
 	UniversalStatics map[string]*Value         // implicitly visible to all user packages
 }
 
 func New(opts Options) (vm *Instance) {
+	var res PackageResolver
+	if opts.PackageResolver != nil {
+		res = opts.PackageResolver
+	} else if opts.ImportsResolver != nil {
+		legacy := opts.ImportsResolver
+		res = func(name string) (Package, error) {
+			p := legacy(name)
+			if p == nil {
+				return nil, fmt.Errorf("package '%v' not found", name)
+			}
+			return p, nil
+		}
+	}
+
 	vm = &Instance{
 		compiler{
-			resolver: opts.ImportsResolver,
+			resolver: res,
 			statics:  opts.UniversalStatics,
 			inline:   !opts.DisableInlining,
 			modes:    make(ds.Slice[ast.SyncMode], 0, 6),
 			closures: make(ds.Slice[*closure], 0, 6),
 		},
 		runtime{
-			packages: make(map[string]*packageInstance),
+			packages: make(map[string]Package),
 		},
 		logger{
 			Logger:      *log.New(os.Stdout, "", 0),
@@ -177,6 +195,14 @@ func (vm *Instance) GetPackage(name string) (pkg Package) {
 		return nil
 	}
 	return pkg
+}
+
+func (pkg *packageInstance) Name() string {
+	return pkg.name
+}
+
+func (pkg *packageInstance) SetName(name string) {
+	pkg.name = name
 }
 
 func (pkg *packageInstance) SetSymbol(name string, value Value) (existed bool) {

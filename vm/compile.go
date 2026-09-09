@@ -3,7 +3,9 @@ package vm
 import (
 	"fmt"
 	"math"
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/ds"
@@ -335,8 +337,17 @@ func (vm *Instance) compile(node ast.Node) instruction {
 }
 
 func (vm *Instance) runPackage(node ast.Package) (Value, Exception) {
-	vm.cp.pkg = vm.rt.packages[node.Name]
-	if vm.cp.pkg == nil {
+	prevPkg := vm.cp.pkg
+	defer func() {
+		vm.cp.pkg = prevPkg
+	}()
+
+	p, exists := vm.rt.packages[node.Name]
+	if exists {
+		if pi, ok := p.(*packageInstance); ok {
+			vm.cp.pkg = pi
+		}
+	} else {
 		vm.cp.pkg = &packageInstance{
 			name:    node.Name,
 			globals: map[fields.ID]Global{},
@@ -349,15 +360,40 @@ func (vm *Instance) runPackage(node ast.Package) (Value, Exception) {
 	for _, name := range node.Imports {
 		pkg := vm.rt.packages[name]
 		if pkg == nil {
-			pkg = vm.cp.resolver(name).(*packageInstance)
-			pkg.name = name
-
-			// save as loaded package
+			if vm.cp.resolver == nil {
+				return Value{}, RuntimeExceptionF("no package resolver configured to import '%v'", name)
+			}
+			vm.rt.ReleaseGIL()
+			p, err := vm.cp.resolver(name)
+			vm.rt.AcquireGIL()
+			if err != nil {
+				return Value{}, RuntimeExceptionF("failed to import '%v': %v", name, err)
+			}
+			if p == nil {
+				return Value{}, RuntimeExceptionF("package '%v' not found", name)
+			}
+			pkg = p
+			if pkg.Name() == "" {
+				pkg.SetName(name)
+			}
 			vm.rt.packages[name] = pkg
+			if pkg.Name() != "" && pkg.Name() != name {
+				vm.rt.packages[pkg.Name()] = pkg
+			}
 		}
 
 		v := pkg.Box()
-		this.globals[fields.Get(name)] = Global{Value: &v, IsPublic: false, IsStatic: true}
+		bindName := pkg.Name()
+		if bindName == "" {
+			bindName = filepath.Base(name)
+			if ext := filepath.Ext(bindName); ext != "" {
+				bindName = strings.TrimSuffix(bindName, ext)
+			}
+		}
+		this.globals[fields.Get(bindName)] = Global{Value: &v, IsPublic: false, IsStatic: true}
+		if bindName != name {
+			this.globals[fields.Get(name)] = Global{Value: &v, IsPublic: false, IsStatic: true}
+		}
 	}
 
 	/*
@@ -400,7 +436,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, Exception) {
 					vm:         vm,
 				},
 			})
-			this.globals[index] = Global{Value: &fn, IsStatic: true}
+			this.globals[index] = Global{Value: &fn, IsPublic: true, IsStatic: true}
 		}
 
 		if str, isStruct := node.(ast.StructDefinition); isStruct {
@@ -426,7 +462,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, Exception) {
 				FieldOffsets: offsets,
 				Methods:      make(map[fields.ID]*UserFn),
 			})
-			this.globals[index] = Global{Value: &v, IsStatic: true}
+			this.globals[index] = Global{Value: &v, IsPublic: true, IsStatic: true}
 		}
 	}
 
@@ -453,7 +489,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, Exception) {
 				panic("this cant be!!")
 			}
 			// store the value
-			this.globals[index] = Global{Value: &value, IsStatic: iDec.IsStatic}
+			this.globals[index] = Global{Value: &value, IsPublic: true, IsStatic: iDec.IsStatic}
 		}
 	}
 

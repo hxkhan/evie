@@ -714,6 +714,28 @@ func TestErrorHandling(t *testing.T) {
 	if !strings.Contains(err.Error(), "uncaught exception") {
 		t.Fatalf("expected error message to contain 'uncaught exception', got: %v", err)
 	}
+
+	// Verify compile errors return clean error without crashing/panicking
+	evm := vm.New(evie.Defaults)
+	_, err = evm.EvalScript([]byte(`
+	package main
+	fn dup() {}
+	fn dup() {}
+	`))
+	if err == nil || !strings.Contains(err.Error(), "double declaration") {
+		t.Fatalf("expected double declaration error, got: %v", err)
+	}
+
+	_, err = evm.EvalScript([]byte(`
+	package main
+	const c := 10
+	fn main() {
+		c = 20
+	}
+	`))
+	if err == nil || !strings.Contains(err.Error(), "constant binding") {
+		t.Fatalf("expected constant binding error, got: %v", err)
+	}
 }
 
 func TestConcurrency(t *testing.T) {

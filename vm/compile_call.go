@@ -1,8 +1,6 @@
 package vm
 
 import (
-	"fmt"
-
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/ds"
 	"github.com/hxkhan/evie/vm/fields"
@@ -82,12 +80,12 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 	}
 
 	if node.Name == "" {
-		panic("cannot declare an fn statement with no name")
+		panic(CompileErrorf("cannot declare an fn statement with no name"))
 	}
 
 	index, ok := vm.cp.closures.Last(0).scope.Declare(node.Name, true)
 	if !ok {
-		panic(fmt.Errorf("double declaration of %s", node.Name))
+		panic(CompileErrorf("double declaration of %s", node.Name))
 	}
 
 	// create the function & declare it

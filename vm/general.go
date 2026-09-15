@@ -126,6 +126,20 @@ func (vm *Instance) EvalNode(node ast.Node) (result Value, err error) {
 	vm.rt.AcquireGIL()
 	defer vm.rt.ReleaseGIL()
 
+	defer func() {
+		if r := recover(); r != nil {
+			if ce, ok := r.(*CompileError); ok {
+				err = ce
+			} else if exc, ok := r.(Exception); ok {
+				err = exc
+			} else if e, ok := r.(error); ok {
+				err = e
+			} else {
+				err = fmt.Errorf("%v", r)
+			}
+		}
+	}()
+
 	if pkg, isPackage := node.(ast.Package); isPackage {
 		v, exc := vm.runPackage(pkg)
 		if exc != nil {
@@ -312,10 +326,8 @@ func (cp *compiler) addToCaptured(scroll int, index int) (idx int) {
 
 func (rt *runtime) AcquireGIL() {
 	rt.gil.Lock()
-	//fmt.Println("Someone acquired the GIL")
 }
 
 func (rt *runtime) ReleaseGIL() {
 	rt.gil.Unlock()
-	//fmt.Println("Someone released the GIL")
 }

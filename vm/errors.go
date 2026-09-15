@@ -11,14 +11,6 @@ type Error struct {
 	Code    int
 }
 
-/* var exception = &UserStruct{
-	Name: "error",
-	Fields: []fields.ID{
-		fields.Get("kind"),
-		fields.Get("message"),
-	},
-} */
-
 var signalReturn = &Error{
 	Message: "return",
 	Code:    0,
@@ -105,6 +97,25 @@ func RuntimeExceptionF(format string, a ...any) Exception {
 
 func TypeErrorF(format string, a ...any) Exception {
 	return &Error{
+		Message: fmt.Sprintf(format, a...),
+	}
+}
+
+// CompileError represents an error that occurred during compilation or static analysis.
+type CompileError struct {
+	Message string
+	Line    int
+}
+
+func (e CompileError) Error() string {
+	if e.Line > 0 {
+		return fmt.Sprintf("compile error on line %d: %s", e.Line, e.Message)
+	}
+	return fmt.Sprintf("compile error: %s", e.Message)
+}
+
+func CompileErrorf(format string, a ...any) *CompileError {
+	return &CompileError{
 		Message: fmt.Sprintf(format, a...),
 	}
 }

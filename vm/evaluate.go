@@ -45,7 +45,6 @@ func (vm *Instance) evaluate(node ast.Node) any {
 	case ast.FieldAccess:
 		if lhs, ok := vm.evaluate(node.Lhs).(Value); ok {
 			if v, exists := lhs.getField(fields.Get(node.Rhs)); exists {
-				//fmt.Println(node, "->", field)
 				return v
 			}
 		}

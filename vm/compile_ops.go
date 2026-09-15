@@ -597,7 +597,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 		// optimise: lhs being a local
 		if lhs, ok := lhs.(local); ok {
 			if lhs.isStatic {
-				panic(fmt.Sprintf("Assignment to constant binding on line '%v'.", node.Line()))
+				panic(CompileErrorf("Assignment to constant binding on line '%v'.", node.Line()))
 			}
 
 			if rhs := vm.evaluate(node.Rhs); rhs != nil {
@@ -795,7 +795,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 		// optimise: lhs being a global
 		if lhs, ok := lhs.(Global); ok {
 			if lhs.IsStatic {
-				panic(fmt.Sprintf("Assignment to constant binding on line '%v'.", node.Line()))
+				panic(CompileErrorf("Assignment to constant binding on line '%v'.", node.Line()))
 			}
 
 			lhs := lhs.Value

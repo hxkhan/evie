@@ -334,10 +334,33 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	panic(fmt.Errorf("implement %T", node))
 }
 
-func (vm *Instance) runPackage(node ast.Package) (Value, Exception) {
+func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 	prevPkg := vm.cp.pkg
+	prevClosures := vm.cp.closures.Len()
+	prevModes := vm.cp.modes.Len()
+
 	defer func() {
 		vm.cp.pkg = prevPkg
+		for vm.cp.closures.Len() > prevClosures {
+			vm.cp.closures.Pop()
+		}
+		for vm.cp.modes.Len() > prevModes {
+			vm.cp.modes.Pop()
+		}
+	}()
+
+	defer func() {
+		if r := recover(); r != nil {
+			if ce, ok := r.(*CompileError); ok {
+				exc = &Error{Message: ce.Error()}
+			} else if e, ok := r.(Exception); ok {
+				exc = e
+			} else if e, ok := r.(error); ok {
+				exc = CustomError("%v", e.Error())
+			} else {
+				exc = CustomError("%v", r)
+			}
+		}
 	}()
 
 	p, exists := vm.rt.packages[node.Name]
@@ -421,7 +444,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, Exception) {
 		if fn, isFn := node.(ast.Fn); isFn {
 			index := fields.Get(fn.Name)
 			if _, exists := this.globals[index]; exists {
-				panic(fmt.Errorf("double declaration of %s", fn.Name))
+				panic(CompileErrorf("double declaration of %s", fn.Name))
 			}
 
 			// create a stub for now
@@ -440,7 +463,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, Exception) {
 		if str, isStruct := node.(ast.StructDefinition); isStruct {
 			index := fields.Get(str.Name)
 			if _, exists := this.globals[index]; exists {
-				panic(fmt.Errorf("double declaration of %s", str.Name))
+				panic(CompileErrorf("double declaration of %s", str.Name))
 			}
 
 			args := make([]fields.ID, len(str.Args))
@@ -469,12 +492,12 @@ func (vm *Instance) runPackage(node ast.Package) (Value, Exception) {
 		if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
 			// check if contains function calls
 			if !ast.IsCallFree(iDec.Value) {
-				panic(fmt.Errorf("declaration of %s contains functions calls", iDec.Name))
+				panic(CompileErrorf("declaration of %s contains functions calls", iDec.Name))
 			}
 
 			index := fields.Get(iDec.Name)
 			if _, exists := this.globals[index]; exists {
-				panic(fmt.Errorf("double declaration of %s", iDec.Name))
+				panic(CompileErrorf("double declaration of %s", iDec.Name))
 			}
 
 			var value Value
@@ -484,7 +507,7 @@ func (vm *Instance) runPackage(node ast.Package) (Value, Exception) {
 			case Global:
 				value = *v.Value
 			default:
-				panic("this cant be!!")
+				panic(CompileErrorf("top-level declaration '%s' cannot be statically evaluated", iDec.Name))
 			}
 			// store the value
 			this.globals[index] = Global{Value: &value, IsPublic: true, IsStatic: iDec.IsStatic}

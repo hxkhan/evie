@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"fmt"
 	"math"
 	"sort"
 
@@ -309,14 +308,14 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 	if node.IndexVar != "" {
 		idx, ok := vm.cp.closures.Last(0).scope.Declare(node.IndexVar, false)
 		if !ok {
-			panic(fmt.Errorf("double declaration of %s in for loop", node.IndexVar))
+			panic(CompileErrorf("double declaration of %s in for loop", node.IndexVar))
 		}
 		idxIndex = idx
 	}
 
 	itemIndex, ok := vm.cp.closures.Last(0).scope.Declare(node.ItemVar, false)
 	if !ok {
-		panic(fmt.Errorf("double declaration of %s in for loop", node.ItemVar))
+		panic(CompileErrorf("double declaration of %s in for loop", node.ItemVar))
 	}
 
 	bodyInst := vm.compile(node.Action)

@@ -41,10 +41,6 @@ func (fn UserFn) Synced() bool {
 	return fn.mode == ast.SyncedMode
 }
 
-/* func (fn UserFn) String() string {
-	return fmt.Sprintf("<function %v>", fn.name)
-} */
-
 func (fn *UserFn) Call(fbr *Fiber, args ...Value) (result Value, err Exception) {
 	if fbr == nil {
 		if fn.vm == nil {

@@ -139,11 +139,6 @@ func BoxTask(task *Task) Value {
 	return Value{scalar: kindTask, pointer: unsafe.Pointer(task)}
 }
 
-// BoxPackage boxes an evie package
-/* func BoxPackage(pkg Package) Value {
-	return Value{scalar: packageType, pointer: unsafe.Pointer(pkg.(*packageInstance))}
-} */
-
 // BoxError boxes an evie error
 func BoxError(err *Error) Value {
 	return Value{scalar: kindError, pointer: unsafe.Pointer(err)}

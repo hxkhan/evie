@@ -1,8 +1,6 @@
 package vm
 
 import (
-	"fmt"
-
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/vm/fields"
 )
@@ -10,7 +8,7 @@ import (
 func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
 	index, success := vm.cp.closures.Last(0).scope.Declare(node.Name, node.IsStatic)
 	if !success {
-		panic(fmt.Errorf("double declaration of %s", node.Name))
+		panic(CompileErrorf("double declaration of %s", node.Name))
 	}
 
 	// try to evaluate
@@ -79,7 +77,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 		switch v := variable.(type) {
 		case local:
 			if v.isStatic {
-				panic(fmt.Sprintf("Assignment to constant binding '%v'.", iGet.Name))
+				panic(CompileErrorf("Assignment to constant binding '%v'.", iGet.Name))
 			}
 
 			return func(fbr *Fiber) (Value, Exception) {
@@ -94,7 +92,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 
 		case Global:
 			if v.IsStatic {
-				panic(fmt.Sprintf("Assignment to constant binding '%v'.", iGet.Name))
+				panic(CompileErrorf("Assignment to constant binding '%v'.", iGet.Name))
 			}
 
 			return func(fbr *Fiber) (Value, Exception) {

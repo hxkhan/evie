@@ -67,6 +67,13 @@ func (vm *Instance) emitThrow(node ast.Throw) instruction {
 }
 
 func (vm *Instance) compileCondition(node ast.Node) func(fbr *Fiber) (bool, Exception) {
+	if val, ok := vm.evaluate(node).(Value); ok {
+		b := val.IsTruthy()
+		return func(fbr *Fiber) (bool, Exception) {
+			return b, nil
+		}
+	}
+
 	if bin, ok := node.(ast.BinOp); ok {
 		switch bin.Operator {
 		case ast.LtOp, ast.LtEqOp, ast.GtOp, ast.GtEqOp, ast.EqOp, ast.NotEqOp:

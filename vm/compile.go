@@ -41,6 +41,12 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		}
 
 	case ast.StringTemplate:
+		if val, ok := vm.evaluate(node).(Value); ok {
+			return func(fbr *Fiber) (Value, Exception) {
+				return val, nil
+			}
+		}
+
 		args := make([]instruction, len(node.Args))
 		for i, arg := range node.Args {
 			args[i] = vm.compile(arg)

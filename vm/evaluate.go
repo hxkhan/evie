@@ -1,11 +1,18 @@
 package vm
 
 import (
+	"fmt"
+
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/vm/fields"
 )
 
-// evaluate can return values of type (Value, Global, local) or nil
+// evaluate performs compile-time constant folding and static symbol resolution.
+// It can return:
+//   - Value: a fully folded compile-time constant (number, bool, string, nil)
+//   - local: a local stack slot reference
+//   - Global: a global variable binding
+//   - nil: if the expression depends on runtime state and cannot be evaluated at compile time
 func (vm *Instance) evaluate(node ast.Node) any {
 	if !vm.cp.inline {
 		return nil
@@ -49,6 +56,17 @@ func (vm *Instance) evaluate(node ast.Node) any {
 			}
 		}
 
+	case ast.StringTemplate:
+		params := make([]any, len(node.Args))
+		for i, arg := range node.Args {
+			val, ok := vm.evaluate(arg).(Value)
+			if !ok {
+				return nil
+			}
+			params[i] = val
+		}
+		return BoxString(fmt.Sprintf(node.Format, params...))
+
 	case ast.BinOp:
 		if lhs, ok := vm.evaluate(node.Lhs).(Value); ok {
 			if rhs, ok := vm.evaluate(node.Rhs).(Value); ok {
@@ -85,6 +103,18 @@ func (vm *Instance) evaluate(node ast.Node) any {
 					if res, ok := lhs.GreaterThan(rhs); ok {
 						return res
 					}
+				case ast.LtEqOp:
+					if res, ok := lhs.LessThanOrEqualTo(rhs); ok {
+						return res
+					}
+				case ast.GtEqOp:
+					if res, ok := lhs.GreaterThanOrEqualTo(rhs); ok {
+						return res
+					}
+				case ast.AndOp:
+					return BoxBool(lhs.IsTruthy() && rhs.IsTruthy())
+				case ast.OrOp:
+					return BoxBool(lhs.IsTruthy() || rhs.IsTruthy())
 				}
 			}
 		}

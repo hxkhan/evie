@@ -1586,3 +1586,58 @@ func TestExamples(t *testing.T) {
 		})
 	}
 }
+
+func TestConstantFolding(t *testing.T) {
+	// 1. Arithmetic constant folding
+	assertNumber(t, run(t, `return 10 + 20 * 3`), 70)
+	assertNumber(t, run(t, `return (100 - 40) / 2`), 30)
+	assertNumber(t, run(t, `return 17 % 5`), 2)
+	assertNumber(t, run(t, `return - - 42`), 42)
+
+	// 2. String constant folding
+	assertString(t, run(t, `return "hello " + "world"`), "hello world")
+	assertString(t, run(t, "return `val: {10 + 20}`"), "val: 30")
+
+	// 3. Comparison and boolean logic constant folding
+	assertBool(t, run(t, `return 10 < 20 && 5 >= 5`), true)
+	assertBool(t, run(t, `return 10 != 10 || 2 <= 1`), false)
+	assertBool(t, run(t, `return !false && !(10 > 20)`), true)
+	assertBool(t, run(t, `return "foo" == "foo"`), true)
+	assertBool(t, run(t, `return "foo" != "bar"`), true)
+
+	// 4. Top-level package constants folded at compile-time
+	codePackageConstants := `
+	package main
+	const SECONDS := 60
+	const MILLIS := SECONDS * 1000
+	const GREETING := "hello " + "world"
+	fn main() {
+		return MILLIS == 60000 && GREETING == "hello world"
+	}
+	`
+	assertBool(t, run(t, codePackageConstants), true)
+
+	// 5. Constant conditions in if branches
+	codeConstIf := `
+	package main
+	fn main() {
+		if 10 > 5 && "a" != "b" {
+			return "folded_true"
+		}
+		return "folded_false"
+	}
+	`
+	assertString(t, run(t, codeConstIf), "folded_true")
+
+	// 6. Evaluation with inlining/folding disabled
+	vmNoInline := vm.New(vm.Options{
+		DisableInlining: true,
+	})
+	resNoInline, err := vmNoInline.EvalScript([]byte("return 10 + 20 * 3"))
+	if err != nil {
+		t.Fatalf("unexpected error with inlining disabled: %v", err)
+	}
+	if num, ok := resNoInline.AsFloat64(); !ok || num != 70 {
+		t.Fatalf("expected 70 with inlining disabled, got: %v", resNoInline)
+	}
+}

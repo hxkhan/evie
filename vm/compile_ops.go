@@ -7,6 +7,12 @@ import (
 )
 
 func (vm *Instance) emitNeg(node ast.Neg) instruction {
+	if val, ok := vm.evaluate(node).(Value); ok {
+		return func(fbr *Fiber) (Value, Exception) {
+			return val, nil
+		}
+	}
+
 	value := vm.compile(node.Value)
 
 	return func(fbr *Fiber) (Value, Exception) {
@@ -23,6 +29,12 @@ func (vm *Instance) emitNeg(node ast.Neg) instruction {
 }
 
 func (vm *Instance) emitNot(node ast.Not) instruction {
+	if val, ok := vm.evaluate(node).(Value); ok {
+		return func(fbr *Fiber) (Value, Exception) {
+			return val, nil
+		}
+	}
+
 	value := vm.compile(node.Value)
 
 	return func(fbr *Fiber) (Value, Exception) {
@@ -55,6 +67,12 @@ func (vm *Instance) emitCatch(node ast.Catch) instruction {
 }
 
 func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
+	if val, ok := vm.evaluate(node).(Value); ok {
+		return func(fbr *Fiber) (Value, Exception) {
+			return val, nil
+		}
+	}
+
 	/*
 		1. Local x Local
 		2. Local x Value

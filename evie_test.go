@@ -1570,6 +1570,7 @@ func TestExamples(t *testing.T) {
 		"variadic.ev",
 		"inheritance.ev",
 		"await.ev",
+		"switch.ev",
 	}
 
 	for _, file := range exampleFiles {
@@ -1640,4 +1641,222 @@ func TestConstantFolding(t *testing.T) {
 	if num, ok := resNoInline.AsFloat64(); !ok || num != 70 {
 		t.Fatalf("expected 70 with inlining disabled, got: %v", resNoInline)
 	}
+}
+
+func TestSwitchStatement(t *testing.T) {
+	// 1. Basic Value Switch with Numbers
+	codeNumSwitch := `
+	package main
+	fn classify(n) {
+		switch n {
+		case 1:
+			return "one"
+		case 2:
+			return "two"
+		default:
+			return "other"
+		}
+	}
+	fn main() {
+		return classify(1) == "one" && classify(2) == "two" && classify(99) == "other"
+	}
+	`
+	assertBool(t, run(t, codeNumSwitch), true)
+
+	// 2. Value Switch with Strings
+	codeStrSwitch := `
+	package main
+	fn greet(role) {
+		switch role {
+		case "admin":
+			return "welcome admin"
+		case "user":
+			return "welcome user"
+		default:
+			return "welcome guest"
+		}
+	}
+	fn main() {
+		return greet("admin") == "welcome admin" && greet("user") == "welcome user" && greet("robot") == "welcome guest"
+	}
+	`
+	assertBool(t, run(t, codeStrSwitch), true)
+
+	// 3. Multi-Value Cases (case a, b, c:)
+	codeMultiVal := `
+	package main
+	fn size(n) {
+		switch n {
+		case 1, 2, 3:
+			return "small"
+		case 4, 5, 6:
+			return "medium"
+		default:
+			return "large"
+		}
+	}
+	fn main() {
+		return size(1) == "small" && size(3) == "small" && size(5) == "medium" && size(10) == "large"
+	}
+	`
+	assertBool(t, run(t, codeMultiVal), true)
+
+	// 4. Tagless Switch (Boolean Cases)
+	codeTagless := `
+	package main
+	fn sign(n) {
+		switch {
+		case n < 0:
+			return "negative"
+		case n == 0:
+			return "zero"
+		case n > 0:
+			return "positive"
+		}
+	}
+	fn main() {
+		return sign(-5) == "negative" && sign(0) == "zero" && sign(42) == "positive"
+	}
+	`
+	assertBool(t, run(t, codeTagless), true)
+
+	// 5. Break inside Switch
+	codeBreak := `
+	package main
+	fn main() {
+		var res := "default"
+		x := 1
+		switch x {
+		case 1:
+			res = "matched"
+			break
+			res = "unreachable"
+		case 2:
+			res = "two"
+		}
+		return res
+	}
+	`
+	assertString(t, run(t, codeBreak), "matched")
+
+	// 6. Switch inside While Loop with Break (Break must break Switch, not Loop)
+	codeLoopSwitch := `
+	package main
+	fn main() {
+		var sum := 0
+		var i := 0
+		while i < 5 {
+			i += 1
+			switch i {
+			case 1, 2:
+				sum += 10
+				break
+			default:
+				sum += 1
+			}
+		}
+		return sum // 10 + 10 + 1 + 1 + 1 = 23
+	}
+	`
+	assertNumber(t, run(t, codeLoopSwitch), 23)
+
+	// 7. Continue inside Switch inside Loop (Continue must continue Loop)
+	codeContinue := `
+	package main
+	fn main() {
+		var count := 0
+		var i := 0
+		while i < 4 {
+			i += 1
+			switch i {
+			case 2:
+				continue
+			}
+			count += i // executes for 1, 3, 4 -> 8
+		}
+		return count
+	}
+	`
+	assertNumber(t, run(t, codeContinue), 8)
+
+	// 8. Scoped Local Variables in Separate Cases
+	codeScopes := `
+	package main
+	fn testScope(mode) {
+		switch mode {
+		case 1:
+			y := "first"
+			return y
+		case 2:
+			y := "second"
+			return y
+		default:
+			y := "third"
+			return y
+		}
+	}
+	fn main() {
+		return testScope(1) == "first" && testScope(2) == "second" && testScope(3) == "third"
+	}
+	`
+	assertBool(t, run(t, codeScopes), true)
+
+	// 9. Nested Switches
+	codeNested := `
+	package main
+	fn route(a, b) {
+		switch a {
+		case 1:
+			switch b {
+			case "x": return "1-x"
+			case "y": return "1-y"
+			default:  return "1-other"
+			}
+		default:
+			return "other"
+		}
+	}
+	fn main() {
+		return route(1, "x") == "1-x" && route(1, "y") == "1-y" && route(1, "z") == "1-other" && route(2, "x") == "other"
+	}
+	`
+	assertBool(t, run(t, codeNested), true)
+
+	// 10. Tagless Switch with Type Checks (is operator)
+	codeTypeSwitch := `
+	package main
+	fn describe(val) {
+		switch {
+		case val is string:
+			return "a string"
+		case val is array:
+			return "an array"
+		case val is object:
+			return "an object"
+		default:
+			return "something else"
+		}
+	}
+	fn main() {
+		return describe("hi") == "a string" && describe([1, 2]) == "an array" && describe({a: 1}) == "an object" && describe(nil) == "something else"
+	}
+	`
+	assertBool(t, run(t, codeTypeSwitch), true)
+
+	// 11. Arrow syntax support (case 1 =>)
+	codeArrow := `
+	package main
+	fn testArrow(n) {
+		switch n {
+		case 1 =>
+			return "arrow-one"
+		default =>
+			return "arrow-default"
+		}
+	}
+	fn main() {
+		return testArrow(1) == "arrow-one" && testArrow(9) == "arrow-default"
+	}
+	`
+	assertBool(t, run(t, codeArrow), true)
 }

@@ -191,6 +191,8 @@ func (ps *parser) handleWords(main token.Token, asExpr bool, precedenceLevel int
 		return ps.parseWhile(main)
 	case "for":
 		return ps.parseFor(main)
+	case "switch":
+		return ps.parseSwitch(main)
 	case "break":
 		return ast.Break{Pos: main.Line}
 	case "continue":
@@ -393,6 +395,76 @@ func (ps *parser) parseFor(main token.Token) ast.Node {
 		Collection: col,
 		Action:     body,
 	}
+}
+
+func (ps *parser) parseSwitch(main token.Token) ast.Node {
+	sw := ast.Switch{Pos: main.Line}
+
+	// Check if this is a value switch or a tagless switch
+	// If the next token is '{', it's a tagless switch (switch { ... })
+	if !ps.consume("{") {
+		sw.Value = ps.parse(0, true)
+		if !ps.consume("{") {
+			ps.panic(main, "'{'")
+		}
+	}
+
+	for !ps.consume("}") {
+		tok := ps.PeekToken()
+		if tok.IsWord("case") {
+			ps.NextToken() // consume 'case'
+			casePos := tok.Line
+			var exprs []ast.Node
+			for {
+				exprs = append(exprs, ps.parse(0, true))
+				if !ps.consume(",") {
+					break
+				}
+			}
+			if !ps.consume(":") && !ps.consume("=>") {
+				ps.panic(tok, "':'")
+			}
+
+			var caseBlock ast.Block
+			for {
+				ps.consume(";")
+				next := ps.PeekToken()
+				if next.IsWord("case") || next.IsWord("default") || next.IsSimple("}") || next.IsEOS() {
+					break
+				}
+				caseBlock.Code = append(caseBlock.Code, ps.parse(0, true))
+				ps.consume(";")
+			}
+			sw.Cases = append(sw.Cases, ast.SwitchCase{
+				Pos:    casePos,
+				Values: exprs,
+				Action: caseBlock,
+			})
+		} else if tok.IsWord("default") {
+			ps.NextToken() // consume 'default'
+			if sw.Default != nil {
+				panic(fmt.Errorf("multiple default cases in switch on line %d", tok.Line))
+			}
+			if !ps.consume(":") && !ps.consume("=>") {
+				ps.panic(tok, "':'")
+			}
+			var defBlock ast.Block
+			for {
+				ps.consume(";")
+				next := ps.PeekToken()
+				if next.IsWord("case") || next.IsWord("default") || next.IsSimple("}") || next.IsEOS() {
+					break
+				}
+				defBlock.Code = append(defBlock.Code, ps.parse(0, true))
+				ps.consume(";")
+			}
+			sw.Default = defBlock
+		} else {
+			ps.panic(tok, "'case', 'default', or '}'")
+		}
+	}
+
+	return sw
 }
 
 // helper to parse a block or single statement

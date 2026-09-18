@@ -428,6 +428,103 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 	}
 }
 
+type switchCaseCompiled struct {
+	values []instruction
+	action instruction
+}
+
+func (vm *Instance) emitSwitch(node ast.Switch) instruction {
+	cases := make([]switchCaseCompiled, len(node.Cases))
+	for i, c := range node.Cases {
+		vals := make([]instruction, len(c.Values))
+		for j, val := range c.Values {
+			vals[j] = vm.compile(val)
+		}
+		cases[i] = switchCaseCompiled{
+			values: vals,
+			action: vm.compile(c.Action),
+		}
+	}
+
+	var defaultAction instruction
+	if node.Default != nil {
+		defaultAction = vm.compile(node.Default)
+	}
+
+	// Tagless switch: switch { case cond1, cond2: ... }
+	if node.Value == nil {
+		return func(fbr *Fiber) (Value, Exception) {
+			for _, c := range cases {
+				matched := false
+				for _, valInst := range c.values {
+					condVal, err := valInst(fbr)
+					if err != nil {
+						return condVal, err
+					}
+					if condVal.IsTruthy() {
+						matched = true
+						break
+					}
+				}
+				if matched {
+					v, err := c.action(fbr)
+					if err == signalBreak {
+						return Value{}, nil
+					}
+					return v, err
+				}
+			}
+			if defaultAction != nil {
+				v, err := defaultAction(fbr)
+				if err == signalBreak {
+					return Value{}, nil
+				}
+				return v, err
+			}
+			return Value{}, nil
+		}
+	}
+
+	// Value switch: switch expr { case val1, val2: ... }
+	targetInst := vm.compile(node.Value)
+	return func(fbr *Fiber) (Value, Exception) {
+		targetVal, err := targetInst(fbr)
+		if err != nil {
+			return targetVal, err
+		}
+
+		for _, c := range cases {
+			matched := false
+			for _, valInst := range c.values {
+				caseVal, err := valInst(fbr)
+				if err != nil {
+					return caseVal, err
+				}
+				if targetVal.Equals(caseVal) {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				v, err := c.action(fbr)
+				if err == signalBreak {
+					return Value{}, nil
+				}
+				return v, err
+			}
+		}
+
+		if defaultAction != nil {
+			v, err := defaultAction(fbr)
+			if err == signalBreak {
+				return Value{}, nil
+			}
+			return v, err
+		}
+		return Value{}, nil
+	}
+}
+
 func (vm *Instance) emitBlock(node ast.Block) instruction {
 	if vm.cp.closures.Len() == 0 {
 		vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: &funcInfoStatic{name: "anonymous"}})

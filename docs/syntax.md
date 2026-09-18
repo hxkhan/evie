@@ -301,6 +301,43 @@ for n in [1, 2, 3, 4, 5] {
 }
 ```
 
+### Switch Statements
+Evie supports multi-branch matching with `switch`:
+
+```go
+// 1. Value Switch with comma-separated matching
+switch day {
+case "monday", "tuesday", "wednesday", "thursday", "friday":
+    io.println("weekday")
+case "saturday", "sunday":
+    io.println("weekend")
+default:
+    io.println("invalid day")
+}
+
+// 2. Tagless Switch (evaluates boolean conditions)
+switch {
+case score >= 90:
+    grade = "A"
+case score >= 80:
+    grade = "B"
+default:
+    grade = "F"
+}
+
+// 3. Early Break
+switch mode {
+case 1:
+    setup()
+    break // terminates switch branch
+    unreachable()
+}
+```
+- Cases do not fall through by default.
+- Multiple comma-separated values match if any value matches (`case 1, 2, 3:`).
+- `break` inside a case exits the switch immediately without breaking enclosing loops.
+- `case` blocks have their own lexical scopes, allowing local variable declarations.
+
 ---
 
 ## 7. Structs & Object-Oriented Programming

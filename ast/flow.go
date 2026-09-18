@@ -55,6 +55,19 @@ type Throw struct {
 	Value Node
 }
 
+type SwitchCase struct {
+	token.Pos
+	Values []Node // multiple case expressions e.g. case 1, 2, 3:
+	Action Node   // body of the case (ast.Block)
+}
+
+type Switch struct {
+	token.Pos
+	Value   Node         // [optional] value to match against; nil for tagless switch
+	Cases   []SwitchCase // list of case branches
+	Default Node         // [optional] default action (ast.Block), nil if none
+}
+
 func (node Conditional) String() string {
 	if node.Action == nil {
 		return fmt.Sprintf("if (%v)", node.Condition)
@@ -85,4 +98,11 @@ func (node Break) String() string {
 
 func (node Throw) String() string {
 	return fmt.Sprintf("throw %v", node.Value)
+}
+
+func (node Switch) String() string {
+	if node.Value != nil {
+		return fmt.Sprintf("switch %v { ... }", node.Value)
+	}
+	return "switch { ... }"
 }

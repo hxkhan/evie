@@ -101,6 +101,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	case ast.For:
 		return vm.emitFor(node)
 
+	case ast.Switch:
+		return vm.emitSwitch(node)
+
 	case ast.Break:
 		return func(fbr *Fiber) (Value, Exception) {
 			return Value{}, signalBreak

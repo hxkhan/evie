@@ -889,3 +889,98 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 
 	panic(fmt.Errorf("implement Operator(%v) in %v", node.Operator, node))
 }
+
+func (vm *Instance) emitStringTemplate(node ast.StringTemplate) instruction {
+	if val, ok := vm.evaluate(node).(Value); ok {
+		return func(fbr *Fiber) (Value, Exception) {
+			return val, nil
+		}
+	}
+
+	args := make([]instruction, len(node.Args))
+	for i, arg := range node.Args {
+		args[i] = vm.compile(arg)
+	}
+
+	return func(fbr *Fiber) (Value, Exception) {
+		params := make([]any, len(args))
+
+		for i, param := range args {
+			res, err := param(fbr)
+			if err != nil {
+				return res, err
+			}
+
+			params[i] = res
+		}
+
+		return BoxString(fmt.Sprintf(node.Format, params...)), nil
+	}
+}
+
+func (vm *Instance) emitEcho(node ast.Echo) instruction {
+	what := vm.compile(node.Value)
+
+	return func(fbr *Fiber) (Value, Exception) {
+		v, err := what(fbr)
+		if err != nil {
+			return v, err
+		}
+
+		fmt.Println(v)
+		return Value{}, nil
+	}
+}
+
+func (vm *Instance) emitIsInstanceOf(node ast.IsInstanceOf) instruction {
+	lhs := vm.compile(node.Lhs)
+	rhs := vm.compile(node.Rhs)
+
+	return func(fbr *Fiber) (Value, Exception) {
+		lhs, exc := lhs(fbr)
+		if exc != nil {
+			return lhs, exc
+		}
+
+		rhs, exc := rhs(fbr)
+		if exc != nil {
+			return rhs, exc
+		}
+
+		// structs
+		if us, isUserStruct := rhs.AsUserStruct(); isUserStruct {
+			if usi, isUserStructInstance := lhs.AsUserStructInstance(); isUserStructInstance {
+				for cur := usi.InstanceOf; cur != nil; cur = cur.Parent {
+					if cur == us {
+						return BoxBool(true), nil
+					}
+				}
+				return BoxBool(false), nil
+			}
+			return BoxBool(false), nil
+		}
+
+		// built-ins
+		if rhs == BoxBuiltinType(typeString) {
+			_, isString := lhs.AsString()
+			return BoxBool(isString), nil
+		} else if rhs == BoxBuiltinType(typeError) {
+			_, isError := lhs.AsError()
+			return BoxBool(isError), nil
+		} else if rhs == BoxBuiltinType(typeArray) {
+			_, isArray := lhs.AsArray()
+			return BoxBool(isArray), nil
+		} else if rhs == BoxBuiltinType(typeObject) {
+			_, isObj := lhs.AsObject()
+			return BoxBool(isObj), nil
+		} else if rhs == BoxBuiltinType(typeBuffer) {
+			_, isBuf := lhs.AsBuffer()
+			return BoxBool(isBuf), nil
+		} else if rhs == BoxBuiltinType(typeTask) {
+			_, isTask := lhs.AsTask()
+			return BoxBool(isTask), nil
+		}
+
+		return BoxBool(false), nil
+	}
+}

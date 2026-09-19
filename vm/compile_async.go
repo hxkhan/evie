@@ -478,3 +478,25 @@ func (vm *Instance) emitAwaitRace(node ast.AwaitRace) instruction {
 		return first.res, first.err
 	}
 }
+
+func (vm *Instance) emitSynced(node ast.Synced) instruction {
+	vm.cp.modes.Push(ast.SyncedMode)
+	action := vm.compile(node.Action)
+	vm.cp.modes.Pop()
+
+	return func(fbr *Fiber) (Value, Exception) {
+		// check if already synced (re-entrant pass-through)
+		if fbr.synced {
+			return action(fbr)
+		}
+
+		// transition unsynced -> synced
+		vm.rt.AcquireGIL()
+		fbr.synced = true
+		res, exc := action(fbr)
+		fbr.synced = false
+		vm.rt.ReleaseGIL()
+
+		return res, exc
+	}
+}

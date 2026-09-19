@@ -40,45 +40,21 @@ func (vm *Instance) compile(node ast.Node) instruction {
 			return Value{}, nil
 		}
 
-	case ast.StringTemplate:
-		if val, ok := vm.evaluate(node).(Value); ok {
-			return func(fbr *Fiber) (Value, Exception) {
-				return val, nil
-			}
-		}
-
-		args := make([]instruction, len(node.Args))
-		for i, arg := range node.Args {
-			args[i] = vm.compile(arg)
-		}
-
+	case ast.Break:
 		return func(fbr *Fiber) (Value, Exception) {
-			params := make([]any, len(args))
-
-			for i, param := range args {
-				res, err := param(fbr)
-				if err != nil {
-					return res, err
-				}
-
-				params[i] = res
-			}
-
-			return BoxString(fmt.Sprintf(node.Format, params...)), nil
+			return Value{}, signalBreak
 		}
+
+	case ast.Continue:
+		return func(fbr *Fiber) (Value, Exception) {
+			return Value{}, signalContinue
+		}
+
+	case ast.StringTemplate:
+		return vm.emitStringTemplate(node)
 
 	case ast.Echo:
-		what := vm.compile(node.Value)
-
-		return func(fbr *Fiber) (Value, Exception) {
-			v, err := what(fbr)
-			if err != nil {
-				return v, err
-			}
-
-			fmt.Println(v)
-			return Value{}, nil
-		}
+		return vm.emitEcho(node)
 
 	case ast.Decl:
 		return vm.emitIdentDec(node)
@@ -104,36 +80,8 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	case ast.Switch:
 		return vm.emitSwitch(node)
 
-	case ast.Break:
-		return func(fbr *Fiber) (Value, Exception) {
-			return Value{}, signalBreak
-		}
-
-	case ast.Continue:
-		return func(fbr *Fiber) (Value, Exception) {
-			return Value{}, signalContinue
-		}
-
 	case ast.Synced:
-		vm.cp.modes.Push(ast.SyncedMode)
-		action := vm.compile(node.Action)
-		vm.cp.modes.Pop()
-
-		return func(fbr *Fiber) (Value, Exception) {
-			// check if already synced (re-entrant pass-through)
-			if fbr.synced {
-				return action(fbr)
-			}
-
-			// transition unsynced -> synced
-			vm.rt.AcquireGIL()
-			fbr.synced = true
-			res, exc := action(fbr)
-			fbr.synced = false
-			vm.rt.ReleaseGIL()
-
-			return res, exc
-		}
+		return vm.emitSynced(node)
 
 	case ast.Catch:
 		return vm.emitCatch(node)
@@ -181,160 +129,16 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		return vm.emitMutableBinOp(node)
 
 	case ast.IsInstanceOf:
-		lhs := vm.compile(node.Lhs)
-		rhs := vm.compile(node.Rhs)
-
-		return func(fbr *Fiber) (Value, Exception) {
-			lhs, exc := lhs(fbr)
-			if exc != nil {
-				return lhs, exc
-			}
-
-			rhs, exc := rhs(fbr)
-			if exc != nil {
-				return rhs, exc
-			}
-
-			// structs
-			if us, isUserStruct := rhs.AsUserStruct(); isUserStruct {
-				if usi, isUserStructInstance := lhs.AsUserStructInstance(); isUserStructInstance {
-					for cur := usi.InstanceOf; cur != nil; cur = cur.Parent {
-						if cur == us {
-							return BoxBool(true), nil
-						}
-					}
-					return BoxBool(false), nil
-				}
-				return BoxBool(false), nil
-			}
-
-			// built-ins
-			if rhs == BoxBuiltinType(typeString) {
-				_, isString := lhs.AsString()
-				return BoxBool(isString), nil
-			} else if rhs == BoxBuiltinType(typeError) {
-				_, isError := lhs.AsError()
-				return BoxBool(isError), nil
-			} else if rhs == BoxBuiltinType(typeArray) {
-				_, isArray := lhs.AsArray()
-				return BoxBool(isArray), nil
-			} else if rhs == BoxBuiltinType(typeObject) {
-				_, isObj := lhs.AsObject()
-				return BoxBool(isObj), nil
-			} else if rhs == BoxBuiltinType(typeBuffer) {
-				_, isBuf := lhs.AsBuffer()
-				return BoxBool(isBuf), nil
-			} else if rhs == BoxBuiltinType(typeTask) {
-				_, isTask := lhs.AsTask()
-				return BoxBool(isTask), nil
-			}
-
-			return BoxBool(false), nil
-		}
+		return vm.emitIsInstanceOf(node)
 
 	case ast.ArrayLiteral:
-		elements := make([]instruction, len(node.Elements))
-		for i, el := range node.Elements {
-			elements[i] = vm.compile(el)
-		}
-
-		return func(fbr *Fiber) (Value, Exception) {
-			values := make([]Value, len(elements))
-			for i, el := range elements {
-				v, err := el(fbr)
-				if err != nil {
-					return v, err
-				}
-				values[i] = v
-			}
-			return BoxArray(NewArray(values...)), nil
-		}
+		return vm.emitArrayLiteral(node)
 
 	case ast.Object:
-		items := make(map[fields.ID]instruction, len(node.Fields))
-		for _, f := range node.Fields {
-			items[fields.Get(f.Key)] = vm.compile(f.Value)
-		}
-
-		return func(fbr *Fiber) (Value, Exception) {
-			obj := make(map[fields.ID]Value, len(items))
-			for k, v := range items {
-				value, err := v(fbr)
-				if err != nil {
-					return value, err
-				}
-
-				obj[k] = value
-			}
-			return BoxObject(obj), nil
-		}
+		return vm.emitObject(node)
 
 	case ast.Exists:
-		if fa, isFieldAccess := node.Value.(ast.FieldAccess); isFieldAccess {
-			value := vm.compile(fa.Lhs)
-			index := fields.Get(fa.Rhs)
-
-			return func(fbr *Fiber) (Value, Exception) {
-				lhs, err := value(fbr)
-				if err != nil {
-					return lhs, err
-				}
-
-				if obj, ok := lhs.AsObject(); ok {
-					_, exists := obj[index]
-					return BoxBool(exists), nil
-				}
-
-				if obj, ok := lhs.AsUserStructInstance(); ok {
-					return BoxBool(obj.HasField(index)), nil
-				}
-
-				panic("implement type")
-			}
-		}
-
-		if sc, isSubscript := node.Value.(ast.Subscript); isSubscript {
-			target := vm.compile(sc.Lhs)
-			key := vm.compile(sc.Key)
-			return func(fbr *Fiber) (Value, Exception) {
-				lhs, err := target(fbr)
-				if err != nil {
-					return lhs, err
-				}
-				k, err := key(fbr)
-				if err != nil {
-					return k, err
-				}
-
-				if obj, ok := lhs.AsObject(); ok {
-					if keyStr, ok := k.AsString(); ok {
-						_, exists := obj[fields.Get(keyStr)]
-						return BoxBool(exists), nil
-					}
-					return BoxBool(false), nil
-				}
-				if arr, ok := lhs.AsArray(); ok {
-					if idxFloat, ok := k.AsFloat64(); ok {
-						idx := int(idxFloat)
-						arr.MU.RLock()
-						defer arr.MU.RUnlock()
-						length := len(arr.Data)
-						if idx < 0 {
-							idx = length + idx
-						}
-						return BoxBool(idx >= 0 && idx < length), nil
-					}
-					return BoxBool(false), nil
-				}
-				if si, ok := lhs.AsUserStructInstance(); ok {
-					if keyStr, ok := k.AsString(); ok {
-						return BoxBool(si.HasField(fields.Get(keyStr))), nil
-					}
-					return BoxBool(false), nil
-				}
-				return BoxBool(false), nil
-			}
-		}
+		return vm.emitExists(node)
 
 	case ast.Subscript:
 		return vm.emitSubscript(node)

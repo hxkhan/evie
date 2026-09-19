@@ -1,6 +1,8 @@
 package vm
 
 import (
+	"fmt"
+
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/vm/fields"
 )
@@ -560,4 +562,113 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 
 		return Value{}, TypeErrorF("cannot index value of type '%s'", target.TypeOf())
 	}
+}
+
+func (vm *Instance) emitArrayLiteral(node ast.ArrayLiteral) instruction {
+	elements := make([]instruction, len(node.Elements))
+	for i, el := range node.Elements {
+		elements[i] = vm.compile(el)
+	}
+
+	return func(fbr *Fiber) (Value, Exception) {
+		values := make([]Value, len(elements))
+		for i, el := range elements {
+			v, err := el(fbr)
+			if err != nil {
+				return v, err
+			}
+			values[i] = v
+		}
+		return BoxArray(NewArray(values...)), nil
+	}
+}
+
+func (vm *Instance) emitObject(node ast.Object) instruction {
+	items := make(map[fields.ID]instruction, len(node.Fields))
+	for _, f := range node.Fields {
+		items[fields.Get(f.Key)] = vm.compile(f.Value)
+	}
+
+	return func(fbr *Fiber) (Value, Exception) {
+		obj := make(map[fields.ID]Value, len(items))
+		for k, v := range items {
+			value, err := v(fbr)
+			if err != nil {
+				return value, err
+			}
+
+			obj[k] = value
+		}
+		return BoxObject(obj), nil
+	}
+}
+
+func (vm *Instance) emitExists(node ast.Exists) instruction {
+	if fa, isFieldAccess := node.Value.(ast.FieldAccess); isFieldAccess {
+		value := vm.compile(fa.Lhs)
+		index := fields.Get(fa.Rhs)
+
+		return func(fbr *Fiber) (Value, Exception) {
+			lhs, err := value(fbr)
+			if err != nil {
+				return lhs, err
+			}
+
+			if obj, ok := lhs.AsObject(); ok {
+				_, exists := obj[index]
+				return BoxBool(exists), nil
+			}
+
+			if obj, ok := lhs.AsUserStructInstance(); ok {
+				return BoxBool(obj.HasField(index)), nil
+			}
+
+			panic("implement type")
+		}
+	}
+
+	if sc, isSubscript := node.Value.(ast.Subscript); isSubscript {
+		target := vm.compile(sc.Lhs)
+		key := vm.compile(sc.Key)
+		return func(fbr *Fiber) (Value, Exception) {
+			lhs, err := target(fbr)
+			if err != nil {
+				return lhs, err
+			}
+			k, err := key(fbr)
+			if err != nil {
+				return k, err
+			}
+
+			if obj, ok := lhs.AsObject(); ok {
+				if keyStr, ok := k.AsString(); ok {
+					_, exists := obj[fields.Get(keyStr)]
+					return BoxBool(exists), nil
+				}
+				return BoxBool(false), nil
+			}
+			if arr, ok := lhs.AsArray(); ok {
+				if idxFloat, ok := k.AsFloat64(); ok {
+					idx := int(idxFloat)
+					arr.MU.RLock()
+					defer arr.MU.RUnlock()
+					length := len(arr.Data)
+					if idx < 0 {
+						idx = length + idx
+					}
+					return BoxBool(idx >= 0 && idx < length), nil
+				}
+				return BoxBool(false), nil
+			}
+			if si, ok := lhs.AsUserStructInstance(); ok {
+				if keyStr, ok := k.AsString(); ok {
+					return BoxBool(si.HasField(fields.Get(keyStr))), nil
+				}
+				return BoxBool(false), nil
+			}
+			return BoxBool(false), nil
+		}
+	}
+
+	panic(fmt.Errorf("implement %T?", node.Value))
 }

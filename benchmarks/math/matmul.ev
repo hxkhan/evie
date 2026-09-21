@@ -1,0 +1,54 @@
+// Dense integer matrix multiply on nested arrays.
+// expect: 8099
+package main
+
+fn matrix(n, seed) {
+    var rows := []
+    var i := 0
+    while i < n {
+        var row := []
+        var j := 0
+        while j < n {
+            row.push((i * seed + j) % 7 - 3)
+            j += 1
+        }
+        rows.push(row)
+        i += 1
+    }
+    return rows
+}
+
+fn mul(a, b, n) {
+    var c := []
+    var i := 0
+    while i < n {
+        ai := a[i]
+        var row := []
+        var j := 0
+        while j < n {
+            var s := 0
+            var k := 0
+            while k < n {
+                s += ai[k] * b[k][j]
+                k += 1
+            }
+            row.push(s)
+            j += 1
+        }
+        c.push(row)
+        i += 1
+    }
+    return c
+}
+
+fn main() {
+    n := 90
+    c := mul(matrix(n, 3), matrix(n, 5), n)
+    var trace := 0
+    var i := 0
+    while i < n {
+        trace += c[i][i]
+        i += 1
+    }
+    return trace
+}

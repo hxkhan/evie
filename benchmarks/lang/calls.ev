@@ -1,0 +1,52 @@
+// Call overhead: static calls with 0-4 args, first-class function values, variadics.
+// expect: 320003100000
+package main
+
+fn zero() => 1
+fn one(a) => a
+fn two(a, b) => a + b
+fn three(a, b, c) => a + b + c
+fn four(a, b, c, d) => a + b + c + d
+
+fn sum(...xs) {
+    var s := 0
+    for x in xs {
+        s += x
+    }
+    return s
+}
+
+fn apply(f, x) => f(x)
+
+fn main() {
+    var total := 0
+    var i := 0
+    while i < 300000 {
+        total += zero() + one(i) + two(i, 1) + three(i, 1, 2) + four(i, 1, 2, 3)
+        i += 1
+    }
+
+    // dynamic calls through a local
+    f := two
+    i = 0
+    while i < 300000 {
+        total += f(i, 1)
+        i += 1
+    }
+
+    // higher order with arrow lambdas
+    double := fn(x) => x * 2
+    i = 0
+    while i < 300000 {
+        total += apply(double, i)
+        i += 1
+    }
+
+    // variadic
+    i = 0
+    while i < 100000 {
+        total += sum(i, 1, 2, 3)
+        i += 1
+    }
+    return total
+}

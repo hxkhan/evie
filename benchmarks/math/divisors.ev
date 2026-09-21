@@ -1,0 +1,35 @@
+// Divisor sums: count perfect and abundant numbers below N.
+// expect: 4007427
+package main
+
+fn divisorSum(n) {
+    var s := 1
+    var d := 2
+    while d * d <= n {
+        if n % d == 0 {
+            s += d
+            q := n / d
+            if q != d {
+                s += q
+            }
+        }
+        d += 1
+    }
+    return s
+}
+
+fn main() {
+    var perfect := 0
+    var abundant := 0
+    var n := 2
+    while n < 30000 {
+        s := divisorSum(n)
+        if s == n {
+            perfect += 1
+        } else if s > n {
+            abundant += 1
+        }
+        n += 1
+    }
+    return perfect * 1000000 + abundant
+}

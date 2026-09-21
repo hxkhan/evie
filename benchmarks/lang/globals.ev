@@ -1,0 +1,24 @@
+// Package-level state: reading constants and mutating `var` globals from functions.
+// expect: 3100000
+package main
+
+limit := 1000000
+step := 3
+var counter := 0
+var hits := 0
+
+fn tick(i) {
+    counter += step
+    if i % 10 == 0 {
+        hits += 1
+    }
+}
+
+fn main() {
+    var i := 0
+    while i < limit {
+        tick(i)
+        i += 1
+    }
+    return counter + hits
+}

@@ -1,0 +1,49 @@
+// String workloads: concatenation, templates, comparisons, split/join, case conversion, iteration.
+// expect: 2044780
+package main
+
+fn main() {
+    var total := 0
+
+    // concatenation and templates
+    var i := 0
+    while i < 100000 {
+        s := "item-" + string(i)
+        t := `{s}:{i}`
+        total += t.len()
+        i += 1
+    }
+
+    // split / join / transform
+    line := "the quick brown fox jumps over the lazy dog"
+    i = 0
+    while i < 50000 {
+        words := line.split(" ")
+        joined := words.join("_").toUpper()
+        if joined.startsWith("THE") {
+            total += words.len()
+        }
+        i += 1
+    }
+
+    // equality and character iteration
+    i = 0
+    while i < 3000 {
+        for ch in line {
+            if ch == "o" {
+                total += 1
+            }
+        }
+        i += 1
+    }
+
+    // building a string incrementally
+    var buf := ""
+    i = 0
+    while i < 5000 {
+        buf = buf + "x"
+        i += 1
+    }
+    total += buf.len()
+    return total
+}

@@ -1,0 +1,32 @@
+// Exceptions: throwing user errors through call frames and catching them, plus the non-throwing catch path.
+// expect: 15000050000
+package main
+
+fn check(n) {
+    if n % 4 == 0 {
+        throw error("bad")
+    }
+    return n
+}
+
+fn deep(n, d) {
+    if d == 0 {
+        return check(n)
+    }
+    return deep(n, d - 1)
+}
+
+fn main() {
+    var total := 0
+    var i := 0
+    while i < 200000 {
+        res := catch(deep(i, 5))
+        if res is error {
+            total += 1
+        } else {
+            total += res
+        }
+        i += 1
+    }
+    return total
+}

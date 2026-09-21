@@ -1,0 +1,15 @@
+// Float accumulation loop approximating pi.
+// expect: 3.1415924535897797
+package main
+
+fn main() {
+    var sum := 0.0
+    var sign := 1.0
+    var k := 0
+    while k < 5000000 {
+        sum += sign / (2 * k + 1)
+        sign = -sign
+        k += 1
+    }
+    return sum * 4
+}

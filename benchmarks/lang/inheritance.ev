@@ -1,0 +1,37 @@
+// Polymorphic dispatch through an inheritance chain, overridden and inherited methods, `is` checks.
+// expect: 15900000
+package main
+
+struct Shape(id) {
+    fn area() => 0
+    fn kind() => 1
+}
+
+struct Rect(id, w, h) : Shape {
+    fn area() => this.w * this.h
+}
+
+struct Square(id, w, h) : Rect {
+    fn kind() => 3
+}
+
+struct Circle(id, r) : Shape {
+    fn area() => 3 * this.r * this.r
+    fn kind() => 2
+}
+
+fn main() {
+    shapes := [Shape(0), Rect(1, 2, 3), Square(2, 4, 4), Circle(3, 5)]
+    var total := 0
+    var i := 0
+    while i < 150000 {
+        for s in shapes {
+            total += s.area() + s.kind()
+            if s is Rect {
+                total += 1
+            }
+        }
+        i += 1
+    }
+    return total
+}

@@ -1,0 +1,54 @@
+// Concurrency: spawning many short tasks, awaiting individually and with await.all, plus parallel CPU work.
+// expect: 51185672
+package main
+
+fn work(n) {
+    var s := 0
+    var i := 0
+    while i < n {
+        s += i
+        i += 1
+    }
+    return s
+}
+
+fn fib(n) {
+    if n < 2 {
+        return n
+    }
+    return fib(n-1) + fib(n-2)
+}
+
+fn main() {
+    var total := 0
+
+    // spawn/await overhead
+    var i := 0
+    while i < 20000 {
+        t := go work(10)
+        total += await t
+        i += 1
+    }
+
+    // fan-out / fan-in
+    var r := 0
+    while r < 200 {
+        var tasks := []
+        var j := 0
+        while j < 50 {
+            tasks.push(go work(100))
+            j += 1
+        }
+        for v in await.all(tasks) {
+            total += v
+        }
+        r += 1
+    }
+
+    // parallel CPU-bound fibers (scales with cores)
+    results := await.all(go fib(27), go fib(27), go fib(27), go fib(27))
+    for v in results {
+        total += v
+    }
+    return total
+}

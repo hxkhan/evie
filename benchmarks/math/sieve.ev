@@ -1,0 +1,28 @@
+// Sieve of Eratosthenes: array growth, indexed reads and writes.
+// expect: 148933
+package main
+
+fn main() {
+    limit := 2000000
+    var flags := []
+    var i := 0
+    while i <= limit {
+        flags.push(true)
+        i += 1
+    }
+
+    var count := 0
+    var p := 2
+    while p <= limit {
+        if flags[p] {
+            count += 1
+            var m := p * p
+            while m <= limit {
+                flags[m] = false
+                m += p
+            }
+        }
+        p += 1
+    }
+    return count
+}

@@ -1,0 +1,53 @@
+// Switch dispatch: value switch with multi-value cases, tagless switch, string cases.
+// expect: 2414287
+package main
+
+fn opcode(n) {
+    switch n % 8 {
+    case 0:
+        return 1
+    case 1, 2:
+        return 2
+    case 3, 4, 5:
+        return 3
+    default:
+        return 4
+    }
+}
+
+fn grade(score) {
+    switch {
+    case score >= 90:
+        return 5
+    case score >= 80:
+        return 4
+    case score >= 70:
+        return 3
+    case score >= 60:
+        return 2
+    default:
+        return 1
+    }
+}
+
+fn day(name) {
+    switch name {
+    case "sat", "sun":
+        return 0
+    case "mon":
+        return 1
+    default:
+        return 2
+    }
+}
+
+fn main() {
+    days := ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    var total := 0
+    var i := 0
+    while i < 400000 {
+        total += opcode(i) + grade(i % 100) + day(days[i % 7])
+        i += 1
+    }
+    return total
+}

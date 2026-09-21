@@ -1860,3 +1860,58 @@ func TestSwitchStatement(t *testing.T) {
 	`
 	assertBool(t, run(t, codeArrow), true)
 }
+
+func TestDeepRecursionLocals(t *testing.T) {
+	// recursion deeper than the fiber's box pool must not hand out live locals twice
+	codeAck := `
+	package main
+	fn ack(m, n) {
+		if m == 0 {
+			return n + 1
+		}
+		if n == 0 {
+			return ack(m - 1, 1)
+		}
+		return ack(m - 1, ack(m, n - 1))
+	}
+	fn main() {
+		return ack(3, 5)
+	}
+	`
+	assertNumber(t, run(t, codeAck), 253)
+
+	codeLocal := `
+	package main
+	fn depth(n) {
+		if n == 0 {
+			return 0
+		}
+		before := n
+		inner := depth(n - 1)
+		return inner + before - n + 1
+	}
+	fn main() {
+		return depth(500)
+	}
+	`
+	assertNumber(t, run(t, codeLocal), 500)
+}
+
+func TestCompoundAssignWithCallRhs(t *testing.T) {
+	code := `
+	package main
+	fn f(x) => x * 2
+	fn main() {
+		var s := 1
+		s += f(3)
+		s -= f(1)
+		s *= f(2)
+		arr := [10, 20]
+		s += arr[1]
+		s /= (1 + 1)
+		return s
+	}
+	`
+	// ((1 + 6 - 2) * 4 + 20) / 2
+	assertNumber(t, run(t, code), 20)
+}

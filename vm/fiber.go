@@ -7,6 +7,7 @@ type Fiber struct {
 	stack  []*Value  // flat shared stack for local variables in the current call stack
 	base   int       // where locals of the active function start at
 	boxes  []Value   // pooled boxes for this fiber
+	debt   int       // boxes handed out from the heap because the pool was empty
 }
 
 func (fbr *Fiber) get(binding local) *Value {
@@ -75,6 +76,7 @@ func (fbr *Fiber) swapActive(new *UserFn) (old *UserFn) {
 
 func (fbr *Fiber) pop() (v *Value) {
 	if len(fbr.boxes) == 0 {
+		fbr.debt++
 		return new(Value)
 	}
 
@@ -85,6 +87,14 @@ func (fbr *Fiber) pop() (v *Value) {
 }
 
 func (fbr *Fiber) push(amount int) {
+	// boxes are released in LIFO order, so the most recent ones came from the heap;
+	// those must not be counted as returned pool slots or live slots get handed out twice
+	if fbr.debt > 0 {
+		repaid := min(fbr.debt, amount)
+		fbr.debt -= repaid
+		amount -= repaid
+	}
+
 	size := len(fbr.boxes) + amount
 	if size <= cap(fbr.boxes) {
 		fbr.boxes = fbr.boxes[:size]

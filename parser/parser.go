@@ -312,7 +312,9 @@ func (ps *parser) parseIdent(main token.Token, precedenceLevel int) ast.Node {
 		return ast.Assign{Pos: main.Line, Lhs: left, Value: ps.parse(0, true)}
 	}
 	if ps.consume("+=") || ps.consume("-=") || ps.consume("*=") || ps.consume("/=") || ps.consume("%=") {
-		return ast.MutableBinOp{Pos: main.Line, Operator: operators[ps.last.Literal], Lhs: left, Rhs: ps.parse(0, true)}
+		// read the operator before parsing the rhs; the evaluation order of map indexing vs calls in a composite literal is unspecified
+		operator := operators[ps.last.Literal]
+		return ast.MutableBinOp{Pos: main.Line, Operator: operator, Lhs: left, Rhs: ps.parse(0, true)}
 	}
 
 	return left

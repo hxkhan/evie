@@ -1,0 +1,32 @@
+// Synchronization: synced blocks and synced functions, uncontended and contended across fibers.
+// expect: 2000000
+package main
+
+var counter := 0
+
+fn deposit(n) synced {
+    counter += n
+}
+
+fn worker(n) {
+    var i := 0
+    while i < n {
+        synced {
+            counter += 1
+        }
+        i += 1
+    }
+}
+
+fn main() {
+    // uncontended synced function calls
+    var i := 0
+    while i < 1000000 {
+        deposit(1)
+        i += 1
+    }
+
+    // contended synced blocks across 4 fibers
+    await.all(go worker(250000), go worker(250000), go worker(250000), go worker(250000))
+    return counter
+}

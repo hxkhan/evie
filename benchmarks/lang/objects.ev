@@ -1,0 +1,47 @@
+// Object (hash map) workloads: literal creation, field get/set, subscript with dynamic keys, has, keys, for-in.
+// expect: 60000800005
+package main
+
+fn main() {
+    var total := 0
+
+    // literal creation + field reads
+    var i := 0
+    while i < 200000 {
+        p := { x: i, y: i + 1, z: i + 2 }
+        total += p.x + p.y + p.z
+        i += 1
+    }
+
+    // mutation through field access
+    var acc := { hits: 0, misses: 0 }
+    i = 0
+    while i < 300000 {
+        if i % 3 == 0 {
+            acc.hits = acc.hits + 1
+        } else {
+            acc.misses = acc.misses + 1
+        }
+        i += 1
+    }
+    total += acc.hits + acc.misses
+
+    // dynamic string keys
+    keys := ["alpha", "beta", "gamma", "delta", "epsilon"]
+    var counts := {}
+    i = 0
+    while i < 200000 {
+        k := keys[i % 5]
+        if counts.has(k) {
+            counts[k] = counts[k] + 1
+        } else {
+            counts[k] = 1
+        }
+        i += 1
+    }
+    for key, value in counts {
+        total += value
+    }
+    total += counts.keys().len()
+    return total
+}

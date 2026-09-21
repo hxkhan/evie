@@ -1,0 +1,62 @@
+// Struct workloads: instantiation, field access through this, method calls, field mutation, bound methods.
+// expect: 1950001
+package main
+
+struct Vec(x, y) {
+    fn add(o) => Vec(this.x + o.x, this.y + o.y)
+    fn dot(o) => this.x * o.x + this.y * o.y
+    fn scale(k) {
+        this.x = this.x * k
+        this.y = this.y * k
+    }
+}
+
+struct Counter(n) {
+    fn inc() {
+        this.n = this.n + 1
+    }
+    fn get() => this.n
+}
+
+fn main() {
+    var total := 0
+
+    // allocation-heavy: new instance per add
+    var acc := Vec(0, 0)
+    step := Vec(1, 2)
+    var i := 0
+    while i < 200000 {
+        acc = acc.add(step)
+        i += 1
+    }
+    total += acc.dot(step)
+
+    // in-place mutation via methods
+    v := Vec(1, 1)
+    i = 0
+    while i < 200000 {
+        v.scale(1)
+        i += 1
+    }
+    total += v.x
+
+    // direct field access from outside
+    c := Counter(0)
+    i = 0
+    while i < 300000 {
+        c.inc()
+        total += c.n % 2
+        i += 1
+    }
+    total += c.get()
+
+    // bound methods as first-class values
+    inc := c.inc
+    i = 0
+    while i < 200000 {
+        inc()
+        i += 1
+    }
+    total += c.get()
+    return total
+}

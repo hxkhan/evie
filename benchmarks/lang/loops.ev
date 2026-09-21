@@ -1,0 +1,45 @@
+// Loop constructs: nested while, for-in over arrays with and without index, break and continue.
+// expect: 923580300
+package main
+
+fn main() {
+    var arr := []
+    var i := 0
+    while i < 1000 {
+        arr.push(i)
+        i += 1
+    }
+
+    var total := 0
+    var r := 0
+    while r < 1200 {
+        for x in arr {
+            total += x
+        }
+        for idx, x in arr {
+            if idx % 3 == 0 {
+                continue
+            }
+            if x > 900 {
+                break
+            }
+            total += idx
+        }
+        r += 1
+    }
+
+    // nested while with early break
+    var a := 0
+    while a < 600 {
+        var b := 0
+        while b < 600 {
+            if b > a {
+                break
+            }
+            total += 1
+            b += 1
+        }
+        a += 1
+    }
+    return total
+}

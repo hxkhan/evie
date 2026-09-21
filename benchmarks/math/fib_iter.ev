@@ -1,0 +1,26 @@
+// Tight loop over local mutable variables.
+// expect: 4807526976
+package main
+
+fn fib(n) {
+    var a := 0
+    var b := 1
+    var i := 0
+    while i < n {
+        t := a + b
+        a = b
+        b = t
+        i += 1
+    }
+    return a
+}
+
+fn main() {
+    var sum := 0
+    var r := 0
+    while r < 100000 {
+        sum = fib(48)
+        r += 1
+    }
+    return sum
+}

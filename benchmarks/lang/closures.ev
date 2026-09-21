@@ -1,0 +1,46 @@
+// Closure creation, captured-variable reads and writes, nested captures.
+// expect: 40001600001
+package main
+
+fn counter(start) {
+    var count := start
+    return fn() {
+        count += 1
+        return count
+    }
+}
+
+fn adder(x) {
+    return fn(y) {
+        return fn(z) => x + y + z
+    }
+}
+
+fn main() {
+    var total := 0
+
+    // one long-lived closure mutating its capture
+    c := counter(0)
+    var i := 0
+    while i < 1000000 {
+        c()
+        i += 1
+    }
+    total += c()
+
+    // many short-lived closures (allocation + capture cost)
+    i = 0
+    while i < 200000 {
+        f := counter(i)
+        total += f()
+        i += 1
+    }
+
+    // two levels of capture
+    i = 0
+    while i < 200000 {
+        total += adder(i)(1)(2)
+        i += 1
+    }
+    return total
+}

@@ -1,0 +1,32 @@
+// Branchy integer arithmetic: start value of the longest Collatz chain below N.
+// expect: 35655
+package main
+
+fn chain(n) {
+    var x := n
+    var steps := 1
+    while x != 1 {
+        if x % 2 == 0 {
+            x = x / 2
+        } else {
+            x = 3 * x + 1
+        }
+        steps += 1
+    }
+    return steps
+}
+
+fn main() {
+    var best := 0
+    var bestN := 0
+    var n := 1
+    while n < 50000 {
+        c := chain(n)
+        if c > best {
+            best = c
+            bestN = n
+        }
+        n += 1
+    }
+    return bestN
+}

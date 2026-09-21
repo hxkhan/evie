@@ -1,0 +1,69 @@
+// Spectral norm (squared, no sqrt): float math and array indexing.
+// expect: 1.623640941528203
+package main
+
+fn a(i, j) {
+    return 1.0 / ((i + j) * (i + j + 1) / 2 + i + 1)
+}
+
+fn mulAv(n, v, av) {
+    var i := 0
+    while i < n {
+        var s := 0.0
+        var j := 0
+        while j < n {
+            s += a(i, j) * v[j]
+            j += 1
+        }
+        av[i] = s
+        i += 1
+    }
+}
+
+fn mulAtv(n, v, atv) {
+    var i := 0
+    while i < n {
+        var s := 0.0
+        var j := 0
+        while j < n {
+            s += a(j, i) * v[j]
+            j += 1
+        }
+        atv[i] = s
+        i += 1
+    }
+}
+
+fn mulAtAv(n, v, out, tmp) {
+    mulAv(n, v, tmp)
+    mulAtv(n, tmp, out)
+}
+
+fn main() {
+    n := 120
+    var u := []
+    var v := []
+    var tmp := []
+    var i := 0
+    while i < n {
+        u.push(1.0)
+        v.push(0.0)
+        tmp.push(0.0)
+        i += 1
+    }
+    var r := 0
+    while r < 10 {
+        mulAtAv(n, u, v, tmp)
+        mulAtAv(n, v, u, tmp)
+        r += 1
+    }
+    var vBv := 0.0
+    var vv := 0.0
+    i = 0
+    while i < n {
+        vBv += u[i] * v[i]
+        vv += v[i] * v[i]
+        i += 1
+    }
+    return vBv / vv
+}

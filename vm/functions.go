@@ -295,9 +295,12 @@ func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (result Value, ex
 	*box = m.this
 	fbr.stack = append(fbr.stack, box)
 
-	for _, arg := range arguments {
+	for i, arg := range arguments {
 		v, exc := arg(fbr)
 		if exc != nil {
+			// release self and the arguments evaluated so far
+			fbr.push(1 + i)
+			fbr.popStack(1 + i)
 			return v, exc
 		}
 
@@ -459,9 +462,12 @@ func (fn *GoFunc) call(fbr *Fiber, arguments []instruction) (result Value, exc E
 // just call; no args check; no GIL consideration
 func (fn *GoFunc) invoke(fbr *Fiber, arguments []instruction) (result Value, exc Exception) {
 	base := len(fbr.stack)
-	for _, arg := range arguments {
+	for i, arg := range arguments {
 		v, exc := arg(fbr)
 		if exc != nil {
+			// release the arguments evaluated so far
+			fbr.push(i)
+			fbr.popStack(i)
 			return v, exc
 		}
 

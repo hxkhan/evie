@@ -238,33 +238,18 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 				return func(fbr *Fiber) (result Value, exc Exception) {
 					base := len(fbr.stack)
-					for idx, escapes := range fn.locals {
+					for _, escapes := range fn.locals {
 						if !escapes {
 							fbr.stack = append(fbr.stack, fbr.pop())
 						} else {
 							fbr.stack = append(fbr.stack, &Value{})
 						}
+					}
 
-						variadicIdx := len(fn.args) - 1
-						if idx < variadicIdx {
-							arg, exc := arguments[idx](fbr)
-							if exc != nil {
-								return arg, exc
-							}
-
-							*(fbr.stack[base+idx]) = arg
-						} else if idx == variadicIdx {
-							tailCount := len(arguments) - variadicIdx
-							tail := make([]Value, tailCount)
-							for t := 0; t < tailCount; t++ {
-								arg, exc := arguments[variadicIdx+t](fbr)
-								if exc != nil {
-									return arg, exc
-								}
-								tail[t] = arg
-							}
-							*(fbr.stack[base+idx]) = BoxArray(&Array{Data: tail})
-						}
+					if arg, exc := fbr.evalVariadicArgs(fn, base, arguments); exc != nil {
+						fbr.push(fn.recyclable)
+						fbr.popStack(len(fn.locals))
+						return arg, exc
 					}
 
 					prevBase := fbr.swapBase(base)
@@ -348,33 +333,18 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 			return func(fbr *Fiber) (result Value, exc Exception) {
 				base := len(fbr.stack)
-				for idx, escapes := range fn.locals {
+				for _, escapes := range fn.locals {
 					if !escapes {
 						fbr.stack = append(fbr.stack, fbr.pop())
 					} else {
 						fbr.stack = append(fbr.stack, &Value{})
 					}
+				}
 
-					variadicIdx := len(fn.args) - 1
-					if idx < variadicIdx {
-						arg, exc := arguments[idx](fbr)
-						if exc != nil {
-							return arg, exc
-						}
-
-						*(fbr.stack[base+idx]) = arg
-					} else if idx == variadicIdx {
-						tailCount := len(arguments) - variadicIdx
-						tail := make([]Value, tailCount)
-						for t := 0; t < tailCount; t++ {
-							arg, exc := arguments[variadicIdx+t](fbr)
-							if exc != nil {
-								return arg, exc
-							}
-							tail[t] = arg
-						}
-						*(fbr.stack[base+idx]) = BoxArray(&Array{Data: tail})
-					}
+				if arg, exc := fbr.evalVariadicArgs(fn, base, arguments); exc != nil {
+					fbr.push(fn.recyclable)
+					fbr.popStack(len(fn.locals))
+					return arg, exc
 				}
 
 				prevBase := fbr.swapBase(base)
@@ -515,45 +485,30 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 			// setup stack locals
 			base := len(fbr.stack)
-			for idx, escapes := range fn.locals {
+			for _, escapes := range fn.locals {
 				if !escapes {
 					fbr.stack = append(fbr.stack, fbr.pop())
 				} else {
 					fbr.stack = append(fbr.stack, &Value{})
 				}
+			}
 
-				// evaluate arguments
-				if !fn.isVariadic {
-					if idx < len(arguments) {
-						arg, exc := arguments[idx](fbr)
-						if exc != nil {
-							return arg, exc
-						}
-
-						*(fbr.stack[base+idx]) = arg
+			// evaluate arguments
+			if !fn.isVariadic {
+				for idx, argFn := range arguments {
+					arg, exc := argFn(fbr)
+					if exc != nil {
+						fbr.push(fn.recyclable)
+						fbr.popStack(len(fn.locals))
+						return arg, exc
 					}
-				} else {
-					variadicIdx := len(fn.args) - 1
-					if idx < variadicIdx {
-						arg, exc := arguments[idx](fbr)
-						if exc != nil {
-							return arg, exc
-						}
 
-						*(fbr.stack[base+idx]) = arg
-					} else if idx == variadicIdx {
-						tailCount := len(arguments) - variadicIdx
-						tail := make([]Value, tailCount)
-						for t := 0; t < tailCount; t++ {
-							arg, exc := arguments[variadicIdx+t](fbr)
-							if exc != nil {
-								return arg, exc
-							}
-							tail[t] = arg
-						}
-						*(fbr.stack[base+idx]) = BoxArray(&Array{Data: tail})
-					}
+					*(fbr.stack[base+idx]) = arg
 				}
+			} else if arg, exc := fbr.evalVariadicArgs(fn, base, arguments); exc != nil {
+				fbr.push(fn.recyclable)
+				fbr.popStack(len(fn.locals))
+				return arg, exc
 			}
 
 			// save current state
@@ -601,4 +556,28 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 		return Value{}, CustomError("cannot call a non-function '%v'", value)
 	}
+}
+
+// evalVariadicArgs evaluates call arguments into the already allocated locals at base,
+// packing the trailing ones into an array for the variadic parameter
+func (fbr *Fiber) evalVariadicArgs(fn *UserFn, base int, arguments []instruction) (Value, Exception) {
+	variadicIdx := len(fn.args) - 1
+	for idx := range variadicIdx {
+		arg, exc := arguments[idx](fbr)
+		if exc != nil {
+			return arg, exc
+		}
+		*(fbr.stack[base+idx]) = arg
+	}
+
+	tail := make([]Value, len(arguments)-variadicIdx)
+	for t := range tail {
+		arg, exc := arguments[variadicIdx+t](fbr)
+		if exc != nil {
+			return arg, exc
+		}
+		tail[t] = arg
+	}
+	*(fbr.stack[base+variadicIdx]) = BoxArray(&Array{Data: tail})
+	return Value{}, nil
 }

@@ -21,7 +21,7 @@ fn main() {
         if i > 10 && i < 500000 || i % 7 == 0 {
             total += 1
         }
-        if !(i % 2 == 0) && !(i is string) {
+        if !(i % 2 == 0) && i is number {
             total += 1
         }
         i += 1

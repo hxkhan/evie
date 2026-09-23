@@ -1915,3 +1915,15 @@ func TestCompoundAssignWithCallRhs(t *testing.T) {
 	// ((1 + 6 - 2) * 4 + 20) / 2
 	assertNumber(t, run(t, code), 20)
 }
+
+func TestNumberAndBoolTypes(t *testing.T) {
+	assertBool(t, run(t, `42 is number && 1.5 is number && !("42" is number) && !(nil is number)`), true)
+	assertBool(t, run(t, `true is bool && false is bool && !(0 is bool) && !("true" is bool)`), true)
+	assertNumber(t, run(t, `number("2.5") + number(" 4 ") + number(true) + number(7)`), 14.5)
+	assertBool(t, run(t, `bool(1) && !bool(0) && bool("x") && !bool(nil)`), true)
+
+	_, err := runCode(`return number("abc")`)
+	if err == nil {
+		t.Fatal("expected an error converting 'abc' to a number")
+	}
+}

@@ -979,6 +979,12 @@ func (vm *Instance) emitIsInstanceOf(node ast.IsInstanceOf) instruction {
 		} else if rhs == BoxBuiltinType(typeTask) {
 			_, isTask := lhs.AsTask()
 			return BoxBool(isTask), nil
+		} else if rhs == BoxBuiltinType(typeNumber) {
+			_, isNumber := lhs.AsFloat64()
+			return BoxBool(isNumber), nil
+		} else if rhs == BoxBuiltinType(typeBool) {
+			_, isBool := lhs.AsBool()
+			return BoxBool(isBool), nil
 		}
 
 		return BoxBool(false), nil

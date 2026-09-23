@@ -175,6 +175,14 @@ p is Person            // true (struct instance check)
 dog is Animal          // true (polymorphic inheritance check)
 ```
 
+The type names double as conversion functions:
+```go
+number("2.5")   // 2.5 (throws if the string is not a number)
+number(true)    // 1
+bool(0)         // false (truthiness)
+string(42)      // "42"
+```
+
 ---
 
 ## 5. Functions & Closures

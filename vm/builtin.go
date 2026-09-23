@@ -2,6 +2,7 @@ package vm
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/hxkhan/evie/vm/fields"
@@ -28,7 +29,42 @@ var builtins = map[string]*Value{
 	"object": BoxBuiltinType(typeObject).Allocate(),
 	"buffer": BoxBuiltinType(typeBuffer).Allocate(),
 	"task":   BoxBuiltinType(typeTask).Allocate(),
+	"number": BoxBuiltinType(typeNumber).Allocate(),
+	"bool":   BoxBuiltinType(typeBool).Allocate(),
 }
+
+var typeNumber = NewBuiltinType("number", &GoFunc{
+	Name: "number",
+	Fn: func(fbr *Fiber) (Value, Exception) {
+		arg := fbr.GetLocal(0)
+		if _, ok := arg.AsFloat64(); ok {
+			return arg, nil
+		}
+		if b, ok := arg.AsBool(); ok {
+			if b {
+				return BoxNumber(1), nil
+			}
+			return BoxNumber(0), nil
+		}
+		if s, ok := arg.AsString(); ok {
+			f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+			if err != nil {
+				return Value{}, CustomError("cannot convert '%v' to a number", s)
+			}
+			return BoxNumber(f), nil
+		}
+		return Value{}, CustomError("cannot convert %v to a number", arg.TypeOf())
+	},
+	Arguments: 1,
+}, map[fields.ID]Value{})
+
+var typeBool = NewBuiltinType("bool", &GoFunc{
+	Name: "bool",
+	Fn: func(fbr *Fiber) (Value, Exception) {
+		return BoxBool(fbr.GetLocal(0).IsTruthy()), nil
+	},
+	Arguments: 1,
+}, map[fields.ID]Value{})
 
 var typeError = NewBuiltinType("error", &GoFunc{
 	Name: "error",

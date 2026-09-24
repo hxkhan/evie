@@ -672,3 +672,179 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 
 	panic(fmt.Errorf("implement %T?", node.Value))
 }
+
+// compoundOperator returns the arithmetic behind a compound assignment like `+=`
+func compoundOperator(node ast.MutableBinOp) func(fbr *Fiber, current, rhs Value) (Value, Exception) {
+	var apply func(Value, Value) (Value, bool)
+	switch node.Operator {
+	case ast.AddOp:
+		apply = Value.Add
+	case ast.SubOp:
+		apply = Value.Sub
+	case ast.MulOp:
+		apply = Value.Mul
+	case ast.DivOp:
+		apply = Value.Div
+	case ast.ModOp:
+		apply = Value.Mod
+	default:
+		panic(CompileErrorf("unsupported compound operator '%v' on line '%v'.", node.Operator, node.Line()))
+	}
+
+	symbol := node.Operator.String()
+	return func(fbr *Fiber, current, rhs Value) (Value, Exception) {
+		if result, ok := apply(current, rhs); ok {
+			return result, nil
+		}
+		return Value{}, operatorError(symbol, current, rhs)
+	}
+}
+
+// emitCompoundFieldAssign compiles `x.field op= value`, evaluating `x` exactly once
+func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldAccess) instruction {
+	target := vm.compile(fa.Lhs)
+	rhs := vm.compile(node.Rhs)
+	apply := compoundOperator(node)
+	index := fields.Get(fa.Rhs)
+
+	return func(fbr *Fiber) (Value, Exception) {
+		obj, exc := target(fbr)
+		if exc != nil {
+			return obj, exc
+		}
+
+		value, exc := rhs(fbr)
+		if exc != nil {
+			return value, exc
+		}
+
+		if usi, ok := obj.AsUserStructInstance(); ok {
+			exists, exc := usi.UpdateField(index, func(current Value) (Value, Exception) {
+				return apply(fbr, current, value)
+			})
+			if !exists {
+				return Value{}, RuntimeExceptionF("undefined field '%s' on %s", fa.Rhs, usi.InstanceOf.Name)
+			}
+			return Value{}, exc
+		}
+
+		if m, ok := obj.AsObject(); ok {
+			current, exists := m[index]
+			if !exists {
+				return Value{}, RuntimeExceptionF("undefined key '%s' in object", fa.Rhs)
+			}
+			result, exc := apply(fbr, current, value)
+			if exc != nil {
+				return result, exc
+			}
+			m[index] = result
+			return Value{}, nil
+		}
+
+		if pkg, ok := obj.asPackage(); ok {
+			field, exists := pkg.globals[index]
+			if !exists {
+				return Value{}, TypeErrorF("Symbol '%s' not found in package '%s'.", fa.Rhs, pkg.name)
+			}
+			if field.IsStatic {
+				return Value{}, TypeErrorF("Assignment to constant symbol '%v' of package '%v'.", fa.Rhs, pkg.name)
+			}
+			result, exc := apply(fbr, *field.Value, value)
+			if exc != nil {
+				return result, exc
+			}
+			*field.Value = result
+			return Value{}, nil
+		}
+
+		return Value{}, TypeErrorF("cannot assign field '%s' on %s", fa.Rhs, obj.TypeOf())
+	}
+}
+
+// emitCompoundSubscriptAssign compiles `x[key] op= value`, evaluating `x` and `key` exactly once
+func (vm *Instance) emitCompoundSubscriptAssign(node ast.MutableBinOp, sub ast.Subscript) instruction {
+	target := vm.compile(sub.Lhs)
+	key := vm.compile(sub.Key)
+	rhs := vm.compile(node.Rhs)
+	apply := compoundOperator(node)
+
+	return func(fbr *Fiber) (Value, Exception) {
+		obj, exc := target(fbr)
+		if exc != nil {
+			return obj, exc
+		}
+
+		keyVal, exc := key(fbr)
+		if exc != nil {
+			return keyVal, exc
+		}
+
+		value, exc := rhs(fbr)
+		if exc != nil {
+			return value, exc
+		}
+
+		if arr, ok := obj.AsArray(); ok {
+			idxFloat, ok := keyVal.AsFloat64()
+			if !ok {
+				return Value{}, TypeErrorF("array index must be a number, got '%s'", keyVal.TypeOf())
+			}
+			idx := int(idxFloat)
+			if float64(idx) != idxFloat {
+				return Value{}, RuntimeExceptionF("array index must be an integer, got %v", idxFloat)
+			}
+
+			arr.MU.Lock()
+			defer arr.MU.Unlock()
+
+			length := len(arr.Data)
+			if idx < 0 {
+				idx = length + idx
+			}
+			if idx < 0 || idx >= length {
+				return Value{}, RuntimeExceptionF("IndexError: index %d out of bounds (length %d)", int(idxFloat), length)
+			}
+
+			result, exc := apply(fbr, arr.Data[idx], value)
+			if exc != nil {
+				return result, exc
+			}
+			arr.Data[idx] = result
+			return Value{}, nil
+		}
+
+		keyStr, isString := keyVal.AsString()
+
+		if m, ok := obj.AsObject(); ok {
+			if !isString {
+				return Value{}, TypeErrorF("object key must be a string, got '%s'", keyVal.TypeOf())
+			}
+			index := fields.Get(keyStr)
+			current, exists := m[index]
+			if !exists {
+				return Value{}, RuntimeExceptionF("undefined key '%s' in object", keyStr)
+			}
+			result, exc := apply(fbr, current, value)
+			if exc != nil {
+				return result, exc
+			}
+			m[index] = result
+			return Value{}, nil
+		}
+
+		if usi, ok := obj.AsUserStructInstance(); ok {
+			if !isString {
+				return Value{}, TypeErrorF("struct field key must be a string, got '%s'", keyVal.TypeOf())
+			}
+			exists, exc := usi.UpdateField(fields.Get(keyStr), func(current Value) (Value, Exception) {
+				return apply(fbr, current, value)
+			})
+			if !exists {
+				return Value{}, RuntimeExceptionF("undefined field '%s' on %s", keyStr, usi.InstanceOf.Name)
+			}
+			return Value{}, exc
+		}
+
+		return Value{}, TypeErrorF("cannot assign to subscript of type '%s'", obj.TypeOf())
+	}
+}

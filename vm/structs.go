@@ -54,6 +54,28 @@ func (usi *UserStructInstance) SetField(f fields.ID, val Value) {
 	usi.Dynamic[f] = val
 }
 
+// UpdateField replaces an existing field with update(current) while holding the write lock
+func (usi *UserStructInstance) UpdateField(f fields.ID, update func(Value) (Value, Exception)) (exists bool, err Exception) {
+	usi.MU.Lock()
+	defer usi.MU.Unlock()
+
+	if slot, ok := usi.InstanceOf.FieldOffsets[f]; ok && slot < len(usi.Fields) {
+		value, exc := update(usi.Fields[slot])
+		if exc == nil {
+			usi.Fields[slot] = value
+		}
+		return true, exc
+	}
+	if current, ok := usi.Dynamic[f]; ok {
+		value, exc := update(current)
+		if exc == nil {
+			usi.Dynamic[f] = value
+		}
+		return true, exc
+	}
+	return false, nil
+}
+
 func (usi *UserStructInstance) HasField(f fields.ID) bool {
 	usi.MU.RLock()
 	defer usi.MU.RUnlock()

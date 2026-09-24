@@ -140,6 +140,23 @@ x /= 2   // 13
 x %= 4   // 1
 ```
 
+Compound assignment also works on object fields, struct fields and subscripts. The target and key are evaluated once, and updates to array elements and struct fields happen under that value's lock, so concurrent `this.count += 1` calls never lose updates:
+```go
+var stats := { hits: 0 }
+stats.hits += 1
+stats["hits"] *= 2
+
+var scores := [10, 20, 30]
+scores[0] += 5
+scores[-1] -= 1
+
+struct Counter(count) {
+    fn inc() {
+        this.count += 1
+    }
+}
+```
+
 ### Comparisons
 All standard comparison operators are supported:
 ```go

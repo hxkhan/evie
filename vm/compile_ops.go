@@ -611,6 +611,13 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 }
 
 func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
+	switch target := node.Lhs.(type) {
+	case ast.FieldAccess:
+		return vm.emitCompoundFieldAssign(node, target)
+	case ast.Subscript:
+		return vm.emitCompoundSubscriptAssign(node, target)
+	}
+
 	if lhs := vm.evaluate(node.Lhs); lhs != nil {
 		// optimise: lhs being a local
 		if lhs, ok := lhs.(local); ok {

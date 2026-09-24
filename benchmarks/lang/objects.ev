@@ -20,7 +20,7 @@ fn main() {
         if i % 3 == 0 {
             acc.hits = acc.hits + 1
         } else {
-            acc.misses = acc.misses + 1
+            acc.misses += 1
         }
         i += 1
     }

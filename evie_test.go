@@ -1927,3 +1927,79 @@ func TestNumberAndBoolTypes(t *testing.T) {
 		t.Fatal("expected an error converting 'abc' to a number")
 	}
 }
+
+func TestCompoundAssignFieldsAndSubscripts(t *testing.T) {
+	code := `
+	package main
+	struct Counter(n) {
+		fn add(k) {
+			this.n += k
+		}
+	}
+	fn main() {
+		var obj := {a: 1}
+		obj.a += 2
+		obj["a"] *= 10
+		var arr := [1, 2, 3]
+		arr[0] += 5
+		arr[-1] -= 1
+		arr[1] %= 2
+		c := Counter(1)
+		c.add(4)
+		c.n *= 3
+		c["n"] -= 1
+		return obj.a + arr[0] + arr[1] + arr[2] + c.n
+	}
+	`
+	// 30 + 6 + 0 + 2 + 14
+	assertNumber(t, run(t, code), 52)
+
+	// target and key are evaluated exactly once
+	codeOnce := `
+	package main
+	var calls := 0
+	fn idx() {
+		calls += 1
+		return 0
+	}
+	fn main() {
+		var arr := [10]
+		arr[idx()] += 1
+		return arr[0] * 100 + calls
+	}
+	`
+	assertNumber(t, run(t, codeOnce), 1101)
+
+	// concurrent updates of the same struct field are atomic
+	codeConcurrent := `
+	package main
+	struct Counter(n) {
+		fn inc() {
+			this.n += 1
+		}
+	}
+	fn work(c) {
+		var i := 0
+		while i < 20000 {
+			c.inc()
+			i += 1
+		}
+	}
+	fn main() {
+		c := Counter(0)
+		await.all(go work(c), go work(c), go work(c), go work(c))
+		return c.n
+	}
+	`
+	assertNumber(t, run(t, codeConcurrent), 80000)
+
+	for _, bad := range []string{
+		"package main\nfn main() {\n\tvar obj := {}\n\tobj.missing += 1\n}",
+		"package main\nfn main() {\n\tvar arr := [1]\n\tarr[5] += 1\n}",
+		"package main\nfn main() {\n\tvar arr := [1]\n\tarr[0] += \"x\"\n}",
+	} {
+		if _, err := runCode(bad); err == nil {
+			t.Errorf("expected an error for:\n%s", bad)
+		}
+	}
+}

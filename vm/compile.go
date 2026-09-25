@@ -80,9 +80,6 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	case ast.Switch:
 		return vm.emitSwitch(node)
 
-	case ast.Synced:
-		return vm.emitSynced(node)
-
 	case ast.Catch:
 		return vm.emitCatch(node)
 
@@ -150,15 +147,11 @@ func (vm *Instance) compile(node ast.Node) instruction {
 func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 	prevPkg := vm.cp.pkg
 	prevClosures := vm.cp.closures.Len()
-	prevModes := vm.cp.modes.Len()
 
 	defer func() {
 		vm.cp.pkg = prevPkg
 		for vm.cp.closures.Len() > prevClosures {
 			vm.cp.closures.Pop()
-		}
-		for vm.cp.modes.Len() > prevModes {
-			vm.cp.modes.Pop()
 		}
 	}()
 
@@ -197,9 +190,9 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 			if vm.cp.resolver == nil {
 				return Value{}, RuntimeExceptionF("no package resolver configured to import '%v'", name)
 			}
-			vm.rt.ReleaseGIL()
+			vm.rt.release()
 			p, err := vm.cp.resolver(name)
-			vm.rt.AcquireGIL()
+			vm.rt.acquire()
 			if err != nil {
 				return Value{}, RuntimeExceptionF("failed to import '%v': %v", name, err)
 			}
@@ -266,7 +259,6 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 					name:       fn.Name,
 					args:       fn.Args,
 					isVariadic: fn.IsVariadic,
-					mode:       fn.SyncMode,
 					vm:         vm,
 				},
 			})
@@ -333,7 +325,6 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 			global := this.globals[fields.Get(fn.Name)]
 			ufn := (*UserFn)(global.pointer)
 
-			vm.cp.modes.Push(ufn.mode)
 			vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: ufn.funcInfoStatic})
 			vm.cp.closures.Last(0).scope.OpenBlock()
 
@@ -344,7 +335,6 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 
 			ufn.code = vm.compile(fn.Action)
 			closure := vm.cp.closures.Pop()
-			vm.cp.modes.Pop()
 			capacity := closure.scope.Capacity()
 			ufn.locals = make([]bool, capacity)
 

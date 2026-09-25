@@ -35,9 +35,8 @@ type compiler struct {
 	inline  bool              // use dispatch inlining (combining instructions into one)
 	statics map[string]*Value // implicitly available to all user packages
 
-	pkg      *packageInstance       // the package being compiled right now
-	closures ds.Slice[*closure]     // currently open closures
-	modes    ds.Slice[ast.SyncMode] // sync mode stack
+	pkg      *packageInstance   // the package being compiled right now
+	closures ds.Slice[*closure] // currently open closures
 
 	resolver PackageResolver
 }
@@ -46,7 +45,7 @@ type runtime struct {
 	packages map[string]Package // loaded packages
 	fibers   sync.Pool          // pooled fibers for this vm
 	trace    []string           // call-stack trace
-	gil      sync.Mutex         // global interpreter lock
+	runner   sync.Mutex         // held by the fiber that is executing evie code
 	wg       sync.WaitGroup     // wait for all fibers to complete
 }
 
@@ -97,7 +96,6 @@ func New(opts Options) (vm *Instance) {
 			resolver: res,
 			statics:  opts.UniversalStatics,
 			inline:   !opts.DisableInlining,
-			modes:    make(ds.Slice[ast.SyncMode], 0, 6),
 			closures: make(ds.Slice[*closure], 0, 6),
 		},
 		runtime{
@@ -111,20 +109,31 @@ func New(opts Options) (vm *Instance) {
 
 	vm.rt.fibers = sync.Pool{
 		New: func() any {
-			return &Fiber{vm: vm, boxes: make([]Value, 48)}
+			return newFiber(vm)
 		},
 	}
 
 	return vm
 }
 
+// NewFiber hands out a fiber for calling into the instance from Go. Give it
+// back with ReleaseFiber once the calls are done, or pass nil to Call and let
+// the instance borrow one itself.
 func (vm *Instance) NewFiber() (fbr *Fiber) {
-	return vm.rt.fibers.Get().(*Fiber)
+	fbr = vm.rt.fibers.Get().(*Fiber)
+	fbr.reset()
+	return fbr
+}
+
+// ReleaseFiber returns a fiber obtained from NewFiber to the pool
+func (vm *Instance) ReleaseFiber(fbr *Fiber) {
+	fbr.reset()
+	vm.rt.fibers.Put(fbr)
 }
 
 func (vm *Instance) EvalNode(node ast.Node) (result Value, err error) {
-	vm.rt.AcquireGIL()
-	defer vm.rt.ReleaseGIL()
+	vm.rt.acquire()
+	defer vm.rt.release()
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -147,11 +156,10 @@ func (vm *Instance) EvalNode(node ast.Node) (result Value, err error) {
 		}
 		result = v
 	} else {
-		fbr := vm.rt.fibers.Get().(*Fiber)
-		fbr.synced = true
+		fbr := vm.NewFiber()
+		defer vm.ReleaseFiber(fbr)
+		fbr.running = true // the runner is held above
 		fbr.active = &UserFn{funcInfoStatic: &funcInfoStatic{name: "anonymous"}}
-		fbr.base = 0
-		fbr.stack = fbr.stack[:0]
 
 		hasClosure := vm.cp.closures.Len() > 0
 		if !hasClosure {
@@ -324,10 +332,10 @@ func (cp *compiler) addToCaptured(scroll int, index int) (idx int) {
 	return idx
 }
 
-func (rt *runtime) AcquireGIL() {
-	rt.gil.Lock()
+func (rt *runtime) acquire() {
+	rt.runner.Lock()
 }
 
-func (rt *runtime) ReleaseGIL() {
-	rt.gil.Unlock()
+func (rt *runtime) release() {
+	rt.runner.Unlock()
 }

@@ -326,8 +326,7 @@ func (l *Loader) RunFile(filePath string) (vm.Value, error) {
 	// If main.main() exists and is callable, invoke it
 	mainFn, ok := l.vm.Lookup("main.main")
 	if ok && mainFn.IsCallable() {
-		fbr := l.vm.NewFiber()
-		res, exc := mainFn.Call(fbr)
+		res, exc := mainFn.Call(nil)
 		l.vm.WaitForNoActivity()
 		if exc != nil {
 			return res, exc

@@ -226,9 +226,7 @@ var arrayPushFunc = BoxGoFunc(&GoFunc{
 		parts, ok := fbr.GetLocal(0).AsArray()
 		val := fbr.GetLocal(1)
 		if ok {
-			parts.MU.Lock()
 			parts.Data = append(parts.Data, val)
-			parts.MU.Unlock()
 			return BoxArray(parts), nil
 		}
 		return Value{}, ErrTypes
@@ -248,8 +246,6 @@ var typeArray = NewBuiltinType("array", &GoFunc{
 		IsMethod:  true,
 		Fn: func(fbr *Fiber) (Value, Exception) {
 			if parts, ok := fbr.GetLocal(0).AsArray(); ok {
-				parts.MU.RLock()
-				defer parts.MU.RUnlock()
 				return BoxNumber(float64(len(parts.Data))), nil
 			}
 			return Value{}, ErrTypes
@@ -265,8 +261,6 @@ var typeArray = NewBuiltinType("array", &GoFunc{
 		IsMethod:  true,
 		Fn: func(fbr *Fiber) (Value, Exception) {
 			if parts, ok := fbr.GetLocal(0).AsArray(); ok {
-				parts.MU.Lock()
-				defer parts.MU.Unlock()
 				if len(parts.Data) == 0 {
 					return Value{}, nil
 				}
@@ -288,9 +282,6 @@ var typeArray = NewBuiltinType("array", &GoFunc{
 			startF, ok2 := fbr.GetLocal(1).AsFloat64()
 			endF, ok3 := fbr.GetLocal(2).AsFloat64()
 			if ok1 && ok2 && ok3 {
-				parts.MU.RLock()
-				defer parts.MU.RUnlock()
-
 				n := len(parts.Data)
 				start := int(startF)
 				end := int(endF)
@@ -333,9 +324,6 @@ var typeArray = NewBuiltinType("array", &GoFunc{
 			parts, ok1 := fbr.GetLocal(0).AsArray()
 			callback := fbr.GetLocal(1)
 			if ok1 {
-				parts.MU.RLock()
-				defer parts.MU.RUnlock()
-
 				var result []Value
 				for _, part := range parts.Data {
 					v, exc := callback.Call(fbr, part)
@@ -360,8 +348,6 @@ var typeArray = NewBuiltinType("array", &GoFunc{
 			parts, ok1 := fbr.GetLocal(0).AsArray()
 			target := fbr.GetLocal(1)
 			if ok1 {
-				parts.MU.RLock()
-				defer parts.MU.RUnlock()
 				for _, item := range parts.Data {
 					if item.Equals(target) {
 						return BoxBool(true), nil
@@ -380,8 +366,6 @@ var typeArray = NewBuiltinType("array", &GoFunc{
 		Fn: func(fbr *Fiber) (Value, Exception) {
 			parts, ok1 := fbr.GetLocal(0).AsArray()
 			if ok1 {
-				parts.MU.RLock()
-				defer parts.MU.RUnlock()
 				n := len(parts.Data)
 				reversed := make([]Value, n)
 				for i, v := range parts.Data {
@@ -402,9 +386,6 @@ var typeArray = NewBuiltinType("array", &GoFunc{
 			sep, ok2 := fbr.GetLocal(1).AsString()
 
 			if ok1 && ok2 {
-				parts.MU.RLock()
-				defer parts.MU.RUnlock()
-
 				strs := make([]string, len(parts.Data))
 				for i, part := range parts.Data {
 					str, ok := part.AsString()
@@ -429,9 +410,6 @@ var typeArray = NewBuiltinType("array", &GoFunc{
 			callback := fbr.GetLocal(1)
 
 			if ok1 {
-				parts.MU.RLock()
-				defer parts.MU.RUnlock()
-
 				result := make([]Value, len(parts.Data))
 				for i, part := range parts.Data {
 					v, exc := callback.Call(fbr, part)
@@ -708,6 +686,3 @@ var typeTask = NewBuiltinType("task", &GoFunc{
 		},
 	}),
 })
-
-
-

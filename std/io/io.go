@@ -54,7 +54,7 @@ var println = vm.BoxGoFunc(&vm.GoFunc{
 var prompt = vm.BoxGoFunc(&vm.GoFunc{
 	Name:      "prompt",
 	Arguments: 1,
-	IsMethod:  false,
+	Blocking:  true,
 	Fn: func(fbr *vm.Fiber) (vm.Value, vm.Exception) {
 		fmt.Print(fbr.GetLocal(0))
 
@@ -67,7 +67,7 @@ var prompt = vm.BoxGoFunc(&vm.GoFunc{
 var readln = vm.BoxGoFunc(&vm.GoFunc{
 	Name:      "readln",
 	Arguments: 0,
-	IsMethod:  false,
+	Blocking:  true,
 	Fn: func(fbr *vm.Fiber) (vm.Value, vm.Exception) {
 		var input string
 		fmt.Scanln(&input)

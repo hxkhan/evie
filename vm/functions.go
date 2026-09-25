@@ -3,8 +3,6 @@ package vm
 import (
 	"fmt"
 	"reflect"
-
-	"github.com/hxkhan/evie/ast"
 )
 
 type capture struct {
@@ -21,15 +19,35 @@ func (c capture) String() string {
 
 // funcInfoStatic holds static function information
 type funcInfoStatic struct {
-	name       string       // name of the function
-	args       []string     // argument names
-	isVariadic bool         // variadic function (...args)
-	locals     []bool       // all locals & true for those that escape
-	captures   []capture    // captured references
-	recyclable int          // number of non-escaping locals
-	code       instruction  // the actual function code
-	mode       ast.SyncMode // the sync mode of the action
-	vm         *Instance    // the corresponding vm
+	name       string      // name of the function
+	args       []string    // argument names
+	isVariadic bool        // variadic function (...args)
+	locals     []bool      // all locals & true for those that escape
+	captures   []capture   // captured references
+	recyclable int         // number of non-escaping locals
+	code       instruction // the actual function code
+	vm         *Instance   // the corresponding vm
+}
+
+// accepts checks a call's argument count against the signature
+func (fn *funcInfoStatic) accepts(n int) Exception {
+	if fn.isVariadic {
+		if minArgs := len(fn.args) - 1; n < minArgs {
+			return CustomError("%s requires at least %v argument(s), %v provided", fn.describe(), minArgs, n)
+		}
+		return nil
+	}
+	if n != len(fn.args) {
+		return CustomError("%s requires %v argument(s), %v provided", fn.describe(), len(fn.args), n)
+	}
+	return nil
+}
+
+func (fn *funcInfoStatic) describe() string {
+	if fn.name == "" {
+		return "callable"
+	}
+	return fmt.Sprintf("function '%v'", fn.name)
 }
 
 type UserFn struct {
@@ -37,33 +55,24 @@ type UserFn struct {
 	references []*Value // captured variables
 }
 
-func (fn UserFn) Synced() bool {
-	return fn.mode == ast.SyncedMode
-}
-
+// Call invokes the function from Go. A nil fiber borrows one from the instance.
+// The calling fiber becomes the instance's running fiber for the duration of the
+// call unless it already is, which is the case for callbacks made from natives.
 func (fn *UserFn) Call(fbr *Fiber, args ...Value) (result Value, err Exception) {
 	if fbr == nil {
 		if fn.vm == nil {
 			return Value{}, CustomError("cannot call function without a VM instance")
 		}
 		fbr = fn.vm.NewFiber()
+		defer fn.vm.ReleaseFiber(fbr)
 	}
 
-	if fn.isVariadic {
-		minArgs := len(fn.args) - 1
-		if len(args) < minArgs {
-			if fn.name != "λ" {
-				return Value{}, CustomError("function '%v' requires at least %v argument(s), %v provided", fn.name, minArgs, len(args))
-			}
-			return Value{}, CustomError("callable requires at least %v argument(s), %v provided", minArgs, len(args))
-		}
-	} else {
-		if len(fn.args) != len(args) {
-			if fn.name != "λ" {
-				return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), len(args))
-			}
-			return Value{}, CustomError("callable requires %v argument(s), %v provided", len(fn.args), len(args))
-		}
+	if exc := fn.accepts(len(args)); exc != nil {
+		return Value{}, exc
+	}
+
+	if fbr.lock() {
+		defer fbr.unlock()
 	}
 
 	base := len(fbr.stack)
@@ -99,16 +108,7 @@ func (fn *UserFn) Call(fbr *Fiber, args ...Value) (result Value, err Exception) 
 	prevActive := fbr.swapActive(fn)
 
 	// call the function
-	var exc Exception
-	if fn.mode == ast.UndefinedMode || fbr.synced {
-		result, exc = fn.code(fbr)
-	} else {
-		fbr.vm.rt.AcquireGIL()
-		fbr.synced = true
-		result, exc = fn.code(fbr)
-		fbr.synced = false
-		fbr.vm.rt.ReleaseGIL()
-	}
+	result, exc := fn.code(fbr)
 
 	// restore old state
 	fbr.push(fn.recyclable)
@@ -135,75 +135,43 @@ func (fn *UserFn) SaveInto(ptr any) (err error) {
 	fun := reflect.ValueOf(ptr).Elem()
 
 	if len(fn.args) != fun.Type().NumIn() {
-		if fn.name != "λ" {
-			return CustomError("function '%v' requires %v argument(s), %v provided", fn.name, len(fn.args), fun.Type().NumIn())
-		}
-		return CustomError("callable requires %v argument(s), %v provided", len(fn.args), fun.Type().NumIn())
+		return fn.accepts(fun.Type().NumIn())
 	}
 
 	resultKind := fun.Type().Out(0).Kind()
 
 	wrapper := reflect.MakeFunc(fun.Type(), func(in []reflect.Value) (out []reflect.Value) {
-		vm := fn.vm
-		vm.rt.AcquireGIL()
-		defer vm.rt.ReleaseGIL()
-
-		// fetch a fiber and prepare it
-		fbr := vm.rt.fibers.Get().(*Fiber)
-		fbr.active = fn
-		fbr.base = 0
-		fbr.stack = fbr.stack[:0]
-
-		// create space for all the locals
-		for idx, escapes := range fn.locals {
-			if !escapes {
-				fbr.stack = append(fbr.stack, fbr.pop())
-			} else {
-				fbr.stack = append(fbr.stack, &Value{})
-			}
-
-			// assign arguments
-			if idx < len(in) {
-				v := in[idx]
-				switch v.Kind() {
-				case reflect.Int, reflect.Int32, reflect.Int64:
-					*fbr.stack[idx] = BoxNumber(float64(v.Int()))
-				case reflect.Float32, reflect.Float64:
-					*fbr.stack[idx] = BoxNumber(v.Float())
-				case reflect.String:
-					*fbr.stack[idx] = BoxString(v.String())
-				default:
-					panic("Call: Unsuported types supplied!")
-				}
+		args := make([]Value, len(in))
+		for idx, v := range in {
+			switch v.Kind() {
+			case reflect.Int, reflect.Int32, reflect.Int64:
+				args[idx] = BoxNumber(float64(v.Int()))
+			case reflect.Float32, reflect.Float64:
+				args[idx] = BoxNumber(v.Float())
+			case reflect.String:
+				args[idx] = BoxString(v.String())
+			default:
+				panic("Call: Unsuported types supplied!")
 			}
 		}
 
-		// prep for execution & save currently captured values
-		result, err := fn.code(fbr)
-
-		// release non-escaping locals and fiber
-		fbr.push(fn.recyclable)
-		vm.rt.fibers.Put(fbr)
+		result, err := fn.Call(nil, args...)
 
 		out = make([]reflect.Value, 2)
-		// don't implicitly return the return value of the last executed instruction
-		if err == signalReturn {
-			out[1] = reflect.Zero(reflect.TypeOf((*error)(nil)).Elem())
+		errType := reflect.TypeOf((*error)(nil)).Elem()
+		if err == nil {
+			out[1] = reflect.Zero(errType)
+		} else {
+			out[1] = reflect.ValueOf(err).Convert(errType)
 		}
 
 		switch resultKind {
 		case reflect.Int:
-			f, ok := result.AsFloat64()
-			if !ok {
-				panic("not ok")
-			}
+			f, _ := result.AsFloat64()
 			out[0] = reflect.ValueOf(int(f))
 
 		case reflect.Float64:
-			f, ok := result.AsFloat64()
-			if !ok {
-				panic("not ok")
-			}
+			f, _ := result.AsFloat64()
 			out[0] = reflect.ValueOf(f)
 
 		default:
@@ -222,19 +190,16 @@ type BoundMethod struct {
 	fn   Value
 }
 
+// isMethod reports whether a user function expects a receiver as its first argument
+func (fn *UserFn) isMethod() bool {
+	return len(fn.args) > 0 && fn.args[0] == "this"
+}
+
 func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (result Value, exc Exception) {
 	if ufn, isUserFn := m.fn.AsUserFn(); isUserFn {
-		isMethod := len(ufn.args) > 0 && ufn.args[0] == "this"
-		if isMethod {
-			if ufn.isVariadic {
-				minArgs := len(ufn.args) - 2
-				if len(arguments) < minArgs {
-					return Value{}, CustomError("method '%v' requires at least %v argument(s), %v provided", ufn.name, minArgs, len(arguments))
-				}
-			} else {
-				if len(ufn.args)-1 != len(arguments) {
-					return Value{}, CustomError("method '%v' requires %v argument(s), %v provided", ufn.name, len(ufn.args)-1, len(arguments))
-				}
+		if ufn.isMethod() {
+			if exc := ufn.accepts(1 + len(arguments)); exc != nil {
+				return Value{}, exc
 			}
 
 			args := make([]Value, 1+len(arguments))
@@ -248,29 +213,22 @@ func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (result Value, ex
 			}
 
 			return ufn.Call(fbr, args...)
-		} else {
-			if ufn.isVariadic {
-				minArgs := len(ufn.args) - 1
-				if len(arguments) < minArgs {
-					return Value{}, CustomError("function '%v' requires at least %v argument(s), %v provided", ufn.name, minArgs, len(arguments))
-				}
-			} else {
-				if len(ufn.args) != len(arguments) {
-					return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", ufn.name, len(ufn.args), len(arguments))
-				}
-			}
-
-			args := make([]Value, len(arguments))
-			for i, arg := range arguments {
-				v, exc := arg(fbr)
-				if exc != nil {
-					return v, exc
-				}
-				args[i] = v
-			}
-
-			return ufn.Call(fbr, args...)
 		}
+
+		if exc := ufn.accepts(len(arguments)); exc != nil {
+			return Value{}, exc
+		}
+
+		args := make([]Value, len(arguments))
+		for i, arg := range arguments {
+			v, exc := arg(fbr)
+			if exc != nil {
+				return v, exc
+			}
+			args[i] = v
+		}
+
+		return ufn.Call(fbr, args...)
 	}
 
 	fn, ok := m.fn.AsGoFunc()
@@ -278,14 +236,8 @@ func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (result Value, ex
 		return Value{}, CustomError("property is not a callable method: %v", m.fn)
 	}
 
-	if fn.IsVariadic {
-		if len(arguments) < fn.Arguments-1 {
-			return Value{}, CustomError("method requires at least %v argument(s), %v provided", fn.Arguments-1, len(arguments))
-		}
-	} else {
-		if fn.Arguments-1 != len(arguments) {
-			return Value{}, CustomError("method requires %v argument(s), %v provided", fn.Arguments-1, len(arguments))
-		}
+	if exc := fn.accepts(1 + len(arguments)); exc != nil {
+		return Value{}, exc
 	}
 
 	base := len(fbr.stack)
@@ -309,21 +261,9 @@ func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (result Value, ex
 		fbr.stack = append(fbr.stack, box)
 	}
 
-	// save current state
 	prevBase := fbr.swapBase(base)
+	result, exc = fn.run(fbr)
 
-	// call the function
-	if fn.Mode == ast.UndefinedMode || fbr.synced {
-		result, exc = fn.Fn(fbr)
-	} else {
-		fbr.vm.rt.AcquireGIL()
-		fbr.synced = true
-		result, exc = fn.Fn(fbr)
-		fbr.synced = false
-		fbr.vm.rt.ReleaseGIL()
-	}
-
-	// restore old state
 	totalPushed := 1 + len(arguments)
 	fbr.push(totalPushed)
 	fbr.popStack(totalPushed)
@@ -334,37 +274,13 @@ func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (result Value, ex
 
 func (m BoundMethod) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) {
 	if ufn, isUserFn := m.fn.AsUserFn(); isUserFn {
-		isMethod := len(ufn.args) > 0 && ufn.args[0] == "this"
-		if isMethod {
-			if ufn.isVariadic {
-				minArgs := len(ufn.args) - 2
-				if len(args) < minArgs {
-					return Value{}, CustomError("method '%v' requires at least %v argument(s), %v provided", ufn.name, minArgs, len(args))
-				}
-			} else {
-				if len(ufn.args)-1 != len(args) {
-					return Value{}, CustomError("method '%v' requires %v argument(s), %v provided", ufn.name, len(ufn.args)-1, len(args))
-				}
-			}
-
+		if ufn.isMethod() {
 			allArgs := make([]Value, 1+len(args))
 			allArgs[0] = m.this
 			copy(allArgs[1:], args)
 			return ufn.Call(fbr, allArgs...)
-		} else {
-			if ufn.isVariadic {
-				minArgs := len(ufn.args) - 1
-				if len(args) < minArgs {
-					return Value{}, CustomError("function '%v' requires at least %v argument(s), %v provided", ufn.name, minArgs, len(args))
-				}
-			} else {
-				if len(ufn.args) != len(args) {
-					return Value{}, CustomError("function '%v' requires %v argument(s), %v provided", ufn.name, len(ufn.args), len(args))
-				}
-			}
-
-			return ufn.Call(fbr, args...)
 		}
+		return ufn.Call(fbr, args...)
 	}
 
 	fn, ok := m.fn.AsGoFunc()
@@ -372,94 +288,56 @@ func (m BoundMethod) Call(fbr *Fiber, args ...Value) (result Value, exc Exceptio
 		return Value{}, CustomError("property is not a callable method: %v", m.fn)
 	}
 
-	if fn.IsVariadic {
-		if len(args) < fn.Arguments-1 {
-			return Value{}, CustomError("method requires at least %v argument(s), %v provided", fn.Arguments-1, len(args))
-		}
-	} else {
-		if fn.Arguments-1 != len(args) {
-			return Value{}, CustomError("method requires %v argument(s), %v provided", fn.Arguments-1, len(args))
-		}
-	}
-
-	base := len(fbr.stack)
-
-	// push self
-	box := fbr.pop()
-	*box = m.this
-	fbr.stack = append(fbr.stack, box)
-
-	for _, v := range args {
-		box := fbr.pop()
-		*box = v
-		fbr.stack = append(fbr.stack, box)
-	}
-
-	// save current state
-	prevBase := fbr.swapBase(base)
-
-	// call the function
-	if fn.Mode == ast.UndefinedMode || fbr.synced {
-		result, exc = fn.Fn(fbr)
-	} else {
-		fbr.vm.rt.AcquireGIL()
-		fbr.synced = true
-		result, exc = fn.Fn(fbr)
-		fbr.synced = false
-		fbr.vm.rt.ReleaseGIL()
-	}
-
-	// restore old state
-	totalPushed := 1 + len(args)
-	fbr.push(totalPushed)
-	fbr.popStack(totalPushed)
-	fbr.swapBase(prevBase)
-
-	return result, exc
+	allArgs := make([]Value, 1+len(args))
+	allArgs[0] = m.this
+	copy(allArgs[1:], args)
+	return fn.Call(fbr, allArgs...)
 }
 
 type GoFuncSignature = func(fbr *Fiber) (Value, Exception)
 
+// GoFunc is a native function exposed to evie code. A Blocking function gives up
+// the instance runner while it executes, so it must not touch evie values that
+// other fibers can reach; use it for I/O and sleeps.
 type GoFunc struct {
 	Name       string
 	Arguments  int
 	IsVariadic bool
 	IsMethod   bool
-	Mode       ast.SyncMode
+	Blocking   bool
 	Fn         GoFuncSignature
 }
 
-func (fn GoFunc) Synced() bool {
-	return fn.Mode == ast.SyncedMode
+func (fn *GoFunc) accepts(n int) Exception {
+	if fn.IsVariadic {
+		if n < fn.Arguments {
+			return CustomError("callable requires at least %v argument(s), %v provided", fn.Arguments, n)
+		}
+		return nil
+	}
+	if fn.Arguments != n {
+		return CustomError("callable requires %v argument(s), %v provided", fn.Arguments, n)
+	}
+	return nil
+}
+
+// run executes the native with its arguments already on the fiber stack
+func (fn *GoFunc) run(fbr *Fiber) (Value, Exception) {
+	if fn.Blocking && fbr.running {
+		fbr.unlock()
+		defer fbr.lock()
+	}
+	return fn.Fn(fbr)
 }
 
 func (fn *GoFunc) call(fbr *Fiber, arguments []instruction) (result Value, exc Exception) {
-	if fn.IsVariadic {
-		if len(arguments) < fn.Arguments {
-			return Value{}, CustomError("callable requires at least %v argument(s), %v provided", fn.Arguments, len(arguments))
-		}
-	} else {
-		if fn.Arguments != len(arguments) {
-			return Value{}, CustomError("callable requires %v argument(s), %v provided", fn.Arguments, len(arguments))
-		}
+	if exc := fn.accepts(len(arguments)); exc != nil {
+		return Value{}, exc
 	}
-
-	// no transition
-	if fn.Mode == ast.UndefinedMode || fbr.synced {
-		return fn.invoke(fbr, arguments)
-	}
-
-	// transition unsynced -> synced
-	fbr.vm.rt.AcquireGIL()
-	fbr.synced = true
-	result, exc = fn.invoke(fbr, arguments)
-	fbr.synced = false
-	fbr.vm.rt.ReleaseGIL()
-
-	return result, exc
+	return fn.invoke(fbr, arguments)
 }
 
-// just call; no args check; no GIL consideration
+// just call; no args check
 func (fn *GoFunc) invoke(fbr *Fiber, arguments []instruction) (result Value, exc Exception) {
 	base := len(fbr.stack)
 	for i, arg := range arguments {
@@ -476,13 +354,9 @@ func (fn *GoFunc) invoke(fbr *Fiber, arguments []instruction) (result Value, exc
 		fbr.stack = append(fbr.stack, box)
 	}
 
-	// save current state
 	prevBase := fbr.swapBase(base)
+	result, exc = fn.run(fbr)
 
-	// call the fucntion
-	result, exc = fn.Fn(fbr)
-
-	// restore old state
 	fbr.push(len(arguments))
 	fbr.popStack(len(arguments))
 	fbr.swapBase(prevBase)
@@ -490,20 +364,19 @@ func (fn *GoFunc) invoke(fbr *Fiber, arguments []instruction) (result Value, exc
 	return result, exc
 }
 
-// mostly only used when calling from Go -> GoFunc
+// Call invokes the native from Go; a nil fiber is not allowed because a native
+// needs a stack to read its arguments from
 func (fn *GoFunc) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) {
 	if fbr == nil {
 		return Value{}, CustomError("cannot call GoFunc with nil fiber")
 	}
 
-	if fn.IsVariadic {
-		if len(args) < fn.Arguments {
-			return Value{}, CustomError("callable requires at least %v argument(s), %v provided", fn.Arguments, len(args))
-		}
-	} else {
-		if fn.Arguments != len(args) {
-			return Value{}, CustomError("callable requires %v argument(s), %v provided", fn.Arguments, len(args))
-		}
+	if exc := fn.accepts(len(args)); exc != nil {
+		return Value{}, exc
+	}
+
+	if fbr.lock() {
+		defer fbr.unlock()
 	}
 
 	base := len(fbr.stack)
@@ -513,21 +386,9 @@ func (fn *GoFunc) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) 
 		fbr.stack = append(fbr.stack, box)
 	}
 
-	// save current state
 	prevBase := fbr.swapBase(base)
+	result, exc = fn.run(fbr)
 
-	// call the function
-	if fn.Mode == ast.UndefinedMode || fbr.synced {
-		result, exc = fn.Fn(fbr)
-	} else {
-		fbr.vm.rt.AcquireGIL()
-		fbr.synced = true
-		result, exc = fn.Fn(fbr)
-		fbr.synced = false
-		fbr.vm.rt.ReleaseGIL()
-	}
-
-	// restore old state
 	fbr.push(len(args))
 	fbr.popStack(len(args))
 	fbr.swapBase(prevBase)

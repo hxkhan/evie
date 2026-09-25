@@ -493,8 +493,6 @@ func (v Value) ToGo() any {
 		return res
 	}
 	if inst, ok := v.AsUserStructInstance(); ok {
-		inst.MU.RLock()
-		defer inst.MU.RUnlock()
 		res := make(map[string]any, len(inst.Fields)+len(inst.Dynamic)+1)
 		if inst.InstanceOf != nil {
 			res["__struct"] = inst.InstanceOf.Name

@@ -862,15 +862,13 @@ func TestConcurrency(t *testing.T) {
 	`
 	assertBool(t, run(t, codeAwaitRace), true)
 
-	// Synced blocks eliminating data race
-	codeSyncedBlock := `
+	// Fibers of one instance never run at the same time, so shared state needs no locking
+	codeSharedCounter := `
 	package main
 	var count := 0
 	fn worker(n) {
 		while n > 0 {
-			synced {
-				count += 1
-			}
+			count += 1
 			n -= 1
 		}
 	}
@@ -881,50 +879,46 @@ func TestConcurrency(t *testing.T) {
 		return count
 	}
 	`
-	assertNumber(t, run(t, codeSyncedBlock), 1000)
+	assertNumber(t, run(t, codeSharedCounter), 1000)
 
-	// Nested / re-entrant synced block and return inside synced
-	codeNestedSynced := `
-	package main
-	var x := 10
-	fn update() synced {
-		synced {
-			x += 5
-			synced {
-				x += 5
-			}
-			return x
-		}
-	}
-	fn main() {
-		res := update()
-		return res == 20 && x == 20
-	}
-	`
-	assertBool(t, run(t, codeNestedSynced), true)
-
-	// Error handling inside synced block properly releases GIL
-	codeSyncedError := `
+	// A task that throws still hands the runner back to the awaiting fiber
+	codeTaskThrows := `
 	package main
 	var reached := false
 	fn failing() {
-		synced {
-			throw error("failed inside synced")
-		}
+		throw error("failed inside task")
 	}
 	fn main() {
-		err := catch(failing())
-		synced {
-			reached = true
-		}
-		return err is error && err.message == "failed inside synced" && reached
+		err := catch(await go failing())
+		reached = true
+		return err is error && err.message == "failed inside task" && reached
 	}
 	`
-	assertBool(t, run(t, codeSyncedError), true)
+	assertBool(t, run(t, codeTaskThrows), true)
+
+	// A blocking native releases the runner so other fibers progress meanwhile
+	codeBlocking := `
+	package main imports("time")
+	var order := ""
+	fn sleeper() {
+		time.wait(30)
+		order += "slept"
+	}
+	fn quick() {
+		order += "quick "
+	}
+	fn main() {
+		t := go sleeper()
+		await go quick()
+		await t
+		return order == "quick slept"
+	}
+	`
+	assertBool(t, run(t, codeBlocking), true)
 }
 
 func TestStructConcurrency(t *testing.T) {
-	// 1. Parallel execution across independent struct instances (no GIL contention)
+	// 1. Independent struct instances in separate tasks
 	codeParallel := `
 	package main
 	struct Worker(id, iterations) {
@@ -950,7 +944,7 @@ func TestStructConcurrency(t *testing.T) {
 	assertBool(t, run(t, codeParallel), true)
 
 	// 2. Concurrent field reads and mutations on the same struct instance
-	// Verifies fine-grained per-instance mutex avoids Go runtime map race panic
+	// Interleaved fibers share one instance safely because only one runs at a time
 	codeConcurrentAccess := `
 	package main
 	struct Counter(val) {
@@ -981,11 +975,11 @@ func TestStructConcurrency(t *testing.T) {
 	`
 	assertBool(t, run(t, codeConcurrentAccess), true)
 
-	// 3. Explicit synced struct method serializes updates via GIL
+	// 3. Updates from several tasks on one instance never get lost
 	codeSyncedMethod := `
 	package main
 	struct SafeCounter(count) {
-		fn inc() synced {
+		fn inc() {
 			this.count = this.count + 1
 		}
 	}

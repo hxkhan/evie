@@ -492,18 +492,8 @@ c is Animal  // true
 !(c is Dog)  // true
 ```
 
-### Struct Concurrency & Thread-Safety
-Struct instances in Evie are internally thread-safe and struct methods run in parallel by default:
-- **Parallel by Default**: Struct methods run unsynced (`UndefinedMode`) without acquiring the runtime GIL. Distinct struct instances execute their methods simultaneously across CPU cores with zero lock contention.
-- **Internal Synchronization**: Struct field reads and writes (`p.field`, `p.field = val`, `p[key]`, `p[key] = val`, `p.field?`, `p[key]?`) are protected by a fine-grained per-instance read-write mutex (`sync.RWMutex`). Concurrent field reads execute concurrently, and field mutations are safely serialized per-instance without risking Go map panics.
-- **Opt-in `synced` Methods**: When a struct method needs to coordinate across global variables or synchronize with other fibers using the GIL, declare it with `synced`:
-  ```go
-  struct SafeCounter(count) {
-      fn inc() synced {
-          this.count = this.count + 1 // acquires GIL before running
-      }
-  }
-  ```
+### Structs and Concurrency
+Struct instances need no locking. Fibers of an instance never run at the same time, so a method like `fn inc() { this.count = this.count + 1 }` called from several tasks always counts every call.
 
 ---
 
@@ -623,31 +613,28 @@ t.error()      // returns error (or nil)
 t.await()      // method form of await
 ```
 
-### Shared State & Synchronization (`synced`)
-By default, Evie fibers run in true multi-threaded parallel execution across CPU cores without a Global Interpreter Lock. When multiple tasks access shared mutable variables, use `synced` blocks or `synced` functions to create mutually exclusive critical sections:
+### Shared State
+Only one fiber of an instance executes Evie code at a time. A fiber hands over to the others when it awaits a task and while it is inside a blocking host function such as `time.wait`. Between those points a fiber runs uninterrupted, so shared variables, arrays, objects and structs never need locks:
 
 ```go
 var counter := 0
 
-// 1. Synced block for fine-grained critical sections:
 fn worker(n) {
     while n > 0 {
-        synced {
-            counter += 1 // Thread-safe mutation via runtime GIL
-        }
+        counter += 1 // never lost: no other fiber runs until this one awaits
         n -= 1
     }
 }
 
-// 2. Synced function:
-fn deposit(amount) synced {
-    counter += amount
+fn main() {
+    await.all(go worker(500), go worker(500))
+    return counter // always 1000
 }
 ```
 
-- **Re-entrant**: Calling a `synced` block or function from within an already synchronized execution is a safe pass-through and will not deadlock.
-- **Cooperative Await**: Awaiting a task inside `synced` code automatically releases the lock while blocked and re-acquires it once the task settles.
-- **Struct Thread-Safety**: Struct methods run parallel (unsynced) by default, while struct instances protect field access internally with fine-grained per-instance mutexes. Declare struct methods with `synced` only when GIL-level serialization is needed.
+- **No data races**: a script cannot corrupt memory or crash the host by sharing values between tasks.
+- **Cooperative handover**: a task spawned with `go` starts running when the current fiber awaits, finishes, or enters a blocking host call.
+- **Parallelism across instances**: to use several cores, a host runs several `vm.Instance`s. Each has its own heap; nothing is shared between them.
 
 ---
 

@@ -130,13 +130,10 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 						thisVal := fbr.stack[fbr.base]
 						if thisVal.scalar == kindStructInstance && !isKnown(thisVal.pointer) {
 							usi := (*UserStructInstance)(thisVal.pointer)
-							usi.MU.Lock()
 							if usi.InstanceOf == ustruct && slot < len(usi.Fields) {
 								usi.Fields[slot] = v
-								usi.MU.Unlock()
 								return Value{}, nil
 							}
-							usi.MU.Unlock()
 							usi.SetField(index, v)
 							return Value{}, nil
 						}
@@ -279,10 +276,6 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 				if float64(idx) != idxFloat {
 					return Value{}, RuntimeExceptionF("array index must be an integer, got %v", idxFloat)
 				}
-
-				arr.MU.Lock()
-				defer arr.MU.Unlock()
-
 				length := len(arr.Data)
 				if idx < 0 {
 					idx = length + idx
@@ -339,13 +332,10 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 						thisVal := fbr.stack[fbr.base]
 						if thisVal.scalar == kindStructInstance && !isKnown(thisVal.pointer) {
 							usi := (*UserStructInstance)(thisVal.pointer)
-							usi.MU.RLock()
 							if usi.InstanceOf == ustruct && slot < len(usi.Fields) {
 								val := usi.Fields[slot]
-								usi.MU.RUnlock()
 								return val, nil
 							}
-							usi.MU.RUnlock()
 							if val, exists := usi.GetField(index); exists {
 								return val, nil
 							}
@@ -364,20 +354,14 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 				v := fbr.get(lhs)
 				if v.scalar == kindStructInstance && !isKnown(v.pointer) {
 					usi := (*UserStructInstance)(v.pointer)
-					usi.MU.RLock()
 					if usi.InstanceOf == cachedStruct && cachedSlot >= 0 && cachedSlot < len(usi.Fields) {
 						val := usi.Fields[cachedSlot]
-						usi.MU.RUnlock()
 						return val, nil
 					}
-					usi.MU.RUnlock()
-
 					if slot, ok := usi.InstanceOf.FieldOffsets[index]; ok {
 						cachedStruct = usi.InstanceOf
 						cachedSlot = slot
-						usi.MU.RLock()
 						val := usi.Fields[slot]
-						usi.MU.RUnlock()
 						return val, nil
 					}
 				}
@@ -419,20 +403,14 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 
 		if lhs.scalar == kindStructInstance && !isKnown(lhs.pointer) {
 			usi := (*UserStructInstance)(lhs.pointer)
-			usi.MU.RLock()
 			if usi.InstanceOf == cachedStruct && cachedSlot >= 0 && cachedSlot < len(usi.Fields) {
 				val := usi.Fields[cachedSlot]
-				usi.MU.RUnlock()
 				return val, nil
 			}
-			usi.MU.RUnlock()
-
 			if slot, ok := usi.InstanceOf.FieldOffsets[index]; ok {
 				cachedStruct = usi.InstanceOf
 				cachedSlot = slot
-				usi.MU.RLock()
 				val := usi.Fields[slot]
-				usi.MU.RUnlock()
 				return val, nil
 			}
 		}
@@ -470,10 +448,6 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 			if float64(idx) != idxFloat {
 				return Value{}, RuntimeExceptionF("array index must be an integer, got %v", idxFloat)
 			}
-
-			arr.MU.RLock()
-			defer arr.MU.RUnlock()
-
 			length := len(arr.Data)
 			if idx < 0 {
 				idx = length + idx
@@ -650,8 +624,6 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 			if arr, ok := lhs.AsArray(); ok {
 				if idxFloat, ok := k.AsFloat64(); ok {
 					idx := int(idxFloat)
-					arr.MU.RLock()
-					defer arr.MU.RUnlock()
 					length := len(arr.Data)
 					if idx < 0 {
 						idx = length + idx
@@ -793,10 +765,6 @@ func (vm *Instance) emitCompoundSubscriptAssign(node ast.MutableBinOp, sub ast.S
 			if float64(idx) != idxFloat {
 				return Value{}, RuntimeExceptionF("array index must be an integer, got %v", idxFloat)
 			}
-
-			arr.MU.Lock()
-			defer arr.MU.Unlock()
-
 			length := len(arr.Data)
 			if idx < 0 {
 				idx = length + idx

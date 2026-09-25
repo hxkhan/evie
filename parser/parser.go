@@ -28,7 +28,7 @@ var keywords = []string{
 	"if", "else",
 	"is",
 	"await", "go",
-	"synced", "catch", "throw",
+	"catch", "throw",
 	"while", "break", "continue",
 	"for", "in",
 }
@@ -205,18 +205,6 @@ func (ps *parser) handleWords(main token.Token, asExpr bool, precedenceLevel int
 			ret.Value = ast.Input[struct{}]{Pos: main.Line}
 		}
 		return ret
-
-	case "unsynced":
-		if !ps.consume("{") {
-			return ast.Unsynced{Pos: main.Line, Action: ps.parse(0, true)}
-		}
-		return ast.Unsynced{Pos: main.Line, Action: ps.parseBlock()}
-
-	case "synced":
-		if !ps.consume("{") {
-			return ast.Synced{Pos: main.Line, Action: ps.parse(0, true)}
-		}
-		return ast.Synced{Pos: main.Line, Action: ps.parseBlock()}
 
 	case "catch":
 		var node ast.Node
@@ -485,12 +473,6 @@ func (ps *parser) parseFn(main token.Token, asExpr bool) ast.Node {
 		fn.Name = ps.NextToken().Literal
 	}
 	fn.Args, fn.IsVariadic = ps.parseNamesList(main)
-
-	// sync mode
-	switch {
-	case ps.consume("synced"):
-		fn.SyncMode = ast.SyncedMode
-	}
 
 	if ps.consume("{") {
 		fn.Action = ps.parseBlock()

@@ -7,23 +7,11 @@ import (
 )
 
 func (vm *Instance) emitFn(node ast.Fn) instruction {
-	mode := node.SyncMode
-	// inherit from parent (if not specified)
-	if mode == ast.UndefinedMode {
-		if vm.cp.modes.Len() > 0 {
-			mode = vm.cp.modes.Last(0)
-		} else {
-			mode = ast.SyncedMode
-		}
-	}
-	vm.cp.modes.Push(mode)
-
 	// create static info object
 	info := &funcInfoStatic{
 		name:       node.Name,
 		args:       node.Args,
 		isVariadic: node.IsVariadic,
-		mode:       mode,
 		vm:         vm,
 	}
 
@@ -37,7 +25,6 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 
 	info.code = vm.compile(node.Action)
 	closure := vm.cp.closures.Pop()
-	vm.cp.modes.Pop()
 	info.captures = closure.captures
 	capacity := closure.scope.Capacity()
 
@@ -111,9 +98,6 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 }
 
 func (vm *Instance) compileStructMethod(ustruct *UserStruct, node ast.Fn) *UserFn {
-	mode := node.SyncMode
-	vm.cp.modes.Push(mode)
-
 	methodArgs := make([]string, 1+len(node.Args))
 	methodArgs[0] = "this"
 	copy(methodArgs[1:], node.Args)
@@ -122,7 +106,6 @@ func (vm *Instance) compileStructMethod(ustruct *UserStruct, node ast.Fn) *UserF
 		name:       node.Name,
 		args:       methodArgs,
 		isVariadic: node.IsVariadic,
-		mode:       mode,
 		vm:         vm,
 	}
 
@@ -137,7 +120,6 @@ func (vm *Instance) compileStructMethod(ustruct *UserStruct, node ast.Fn) *UserF
 
 	info.code = vm.compile(node.Action)
 	closure := vm.cp.closures.Pop()
-	vm.cp.modes.Pop()
 	info.captures = closure.captures
 	capacity := closure.scope.Capacity()
 
@@ -211,15 +193,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 						prevBase := fbr.swapBase(base)
 
-						if fn.mode == ast.UndefinedMode || fbr.synced {
-							result, exc = fn.code(fbr)
-						} else {
-							vm.rt.AcquireGIL()
-							fbr.synced = true
-							result, exc = fn.code(fbr)
-							fbr.synced = false
-							vm.rt.ReleaseGIL()
-						}
+						result, exc = fn.code(fbr)
 
 						fbr.push(fn.recyclable)
 						fbr.popStack(len(fn.locals))
@@ -254,15 +228,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 					prevBase := fbr.swapBase(base)
 
-					if fn.mode == ast.UndefinedMode || fbr.synced {
-						result, exc = fn.code(fbr)
-					} else {
-						vm.rt.AcquireGIL()
-						fbr.synced = true
-						result, exc = fn.code(fbr)
-						fbr.synced = false
-						vm.rt.ReleaseGIL()
-					}
+					result, exc = fn.code(fbr)
 
 					fbr.push(fn.recyclable)
 					fbr.popStack(len(fn.locals))
@@ -305,15 +271,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					prevBase := fbr.swapBase(base)
 					prevFn := fbr.swapActive(fn)
 
-					if fn.mode == ast.UndefinedMode || fbr.synced {
-						result, exc = fn.code(fbr)
-					} else {
-						vm.rt.AcquireGIL()
-						fbr.synced = true
-						result, exc = fn.code(fbr)
-						fbr.synced = false
-						vm.rt.ReleaseGIL()
-					}
+					result, exc = fn.code(fbr)
 
 					fbr.push(fn.recyclable)
 					fbr.popStack(len(fn.locals))
@@ -350,15 +308,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				prevBase := fbr.swapBase(base)
 				prevFn := fbr.swapActive(fn)
 
-				if fn.mode == ast.UndefinedMode || fbr.synced {
-					result, exc = fn.code(fbr)
-				} else {
-					vm.rt.AcquireGIL()
-					fbr.synced = true
-					result, exc = fn.code(fbr)
-					fbr.synced = false
-					vm.rt.ReleaseGIL()
-				}
+				result, exc = fn.code(fbr)
 
 				fbr.push(fn.recyclable)
 				fbr.popStack(len(fn.locals))
@@ -515,17 +465,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			prevBase := fbr.swapBase(base)
 			prevFn := fbr.swapActive(fn)
 
-			// no transition
-			if fn.mode == ast.UndefinedMode || fbr.synced {
-				result, exc = fn.code(fbr)
-			} else {
-				// transition unsynced -> synced
-				vm.rt.AcquireGIL()
-				fbr.synced = true
-				result, exc = fn.code(fbr)
-				fbr.synced = false
-				vm.rt.ReleaseGIL()
-			}
+			result, exc = fn.code(fbr)
 
 			// restore old state
 			fbr.push(fn.recyclable)

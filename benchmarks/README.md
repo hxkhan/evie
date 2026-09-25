@@ -53,8 +53,7 @@ Each benchmark gets one untimed warm-up run (`-warmup`) followed by `-n` timed r
 | `inheritance` | polymorphic dispatch through a three-level hierarchy |
 | `errors` | `throw` through several frames and `catch` |
 | `globals` | package constants and mutable `var` globals |
-| `tasks` | `go` spawn/await overhead, `await.all` fan-out, parallel CPU work |
-| `synced` | `synced` functions and contended `synced` blocks |
+| `tasks` | `go` spawn/await overhead, `await.all` fan-out, CPU work across tasks |
 
 ## Adding a benchmark
 

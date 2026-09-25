@@ -2,7 +2,6 @@ package vm
 
 import (
 	"strings"
-	"sync"
 
 	"github.com/hxkhan/evie/vm/fields"
 )
@@ -16,16 +15,12 @@ type UserStruct struct {
 }
 
 type UserStructInstance struct {
-	MU         sync.RWMutex
 	InstanceOf *UserStruct
 	Fields     []Value             // Fixed array for declared fields: [0]=arg0, [1]=arg1
 	Dynamic    map[fields.ID]Value // Lazily allocated ONLY if ad-hoc dynamic fields are added
 }
 
 func (usi *UserStructInstance) GetField(f fields.ID) (Value, bool) {
-	usi.MU.RLock()
-	defer usi.MU.RUnlock()
-
 	if slot, ok := usi.InstanceOf.FieldOffsets[f]; ok {
 		if slot < len(usi.Fields) {
 			return usi.Fields[slot], true
@@ -39,9 +34,6 @@ func (usi *UserStructInstance) GetField(f fields.ID) (Value, bool) {
 }
 
 func (usi *UserStructInstance) SetField(f fields.ID, val Value) {
-	usi.MU.Lock()
-	defer usi.MU.Unlock()
-
 	if slot, ok := usi.InstanceOf.FieldOffsets[f]; ok {
 		if slot < len(usi.Fields) {
 			usi.Fields[slot] = val
@@ -54,11 +46,8 @@ func (usi *UserStructInstance) SetField(f fields.ID, val Value) {
 	usi.Dynamic[f] = val
 }
 
-// UpdateField replaces an existing field with update(current) while holding the write lock
+// UpdateField replaces an existing field with update(current)
 func (usi *UserStructInstance) UpdateField(f fields.ID, update func(Value) (Value, Exception)) (exists bool, err Exception) {
-	usi.MU.Lock()
-	defer usi.MU.Unlock()
-
 	if slot, ok := usi.InstanceOf.FieldOffsets[f]; ok && slot < len(usi.Fields) {
 		value, exc := update(usi.Fields[slot])
 		if exc == nil {
@@ -77,9 +66,6 @@ func (usi *UserStructInstance) UpdateField(f fields.ID, update func(Value) (Valu
 }
 
 func (usi *UserStructInstance) HasField(f fields.ID) bool {
-	usi.MU.RLock()
-	defer usi.MU.RUnlock()
-
 	if _, ok := usi.InstanceOf.FieldOffsets[f]; ok {
 		return true
 	}
@@ -91,9 +77,6 @@ func (usi *UserStructInstance) HasField(f fields.ID) bool {
 }
 
 func (usi *UserStructInstance) String() string {
-	usi.MU.RLock()
-	defer usi.MU.RUnlock()
-
 	builder := strings.Builder{}
 	builder.WriteString(usi.InstanceOf.Name)
 	builder.WriteByte('{')

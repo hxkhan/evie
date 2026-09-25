@@ -16,7 +16,7 @@ func Construct() vm.Package {
 var wait = vm.BoxGoFunc(&vm.GoFunc{
 	Name:      "wait",
 	Arguments: 1,
-	IsMethod:  false,
+	Blocking:  true,
 	Fn: func(fbr *vm.Fiber) (vm.Value, vm.Exception) {
 		if duration, ok := fbr.GetLocal(0).AsFloat64(); ok {
 			time.Sleep(time.Millisecond * time.Duration(duration))

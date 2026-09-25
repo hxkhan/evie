@@ -15,7 +15,7 @@ func Construct() vm.Package {
 var readFile = vm.BoxGoFunc(&vm.GoFunc{
 	Name:      "readFile",
 	Arguments: 1,
-	IsMethod:  false,
+	Blocking:  true,
 	Fn: func(fbr *vm.Fiber) (vm.Value, vm.Exception) {
 		if fileName, ok := fbr.GetLocal(0).AsString(); ok {
 			bytes, err := os.ReadFile(fileName)

@@ -7,32 +7,11 @@ import (
 	"github.com/hxkhan/evie/token"
 )
 
-type SyncMode int
-
-func (sm SyncMode) String() string {
-	switch sm {
-	case UndefinedMode:
-		return "UndefinedMode"
-	case SyncedMode:
-		return "SyncedMode"
-	}
-
-	return "UnknownMode"
-}
-
-const (
-	// Undefined mode inherits from lexical parent
-	UndefinedMode SyncMode = iota
-	// Synced mode assumes GIL
-	SyncedMode
-)
-
 type Fn struct {
 	token.Pos
 	Name       string
 	Args       []string
 	IsVariadic bool
-	SyncMode   SyncMode
 	Action     Node
 	IsPublic   bool
 	UsedAsExpr bool // if true then create and return, else declare

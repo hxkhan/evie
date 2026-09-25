@@ -21,9 +21,6 @@ var join = vm.BoxGoFunc(&vm.GoFunc{
 		sep, ok2 := fbr.GetLocal(1).AsString()
 
 		if ok1 && ok2 {
-			parts.MU.RLock()
-			defer parts.MU.RUnlock()
-
 			strs := make([]string, len(parts.Data))
 			for i, part := range parts.Data {
 				str, ok := part.AsString()

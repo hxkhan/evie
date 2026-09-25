@@ -86,13 +86,14 @@ func (t *Task) Result() (Value, Exception) {
 	return t.result, t.err
 }
 
-// Await waits for the task to complete, releasing the GIL if the fiber is synced,
-// and returns the result or exception. Safe to call multiple times.
+// Await waits for the task to settle and returns its result or exception.
+// A running fiber gives up the instance runner while it waits so that other
+// fibers of the instance can make progress. Safe to call multiple times.
 func (t *Task) Await(fbr *Fiber) (Value, Exception) {
-	if fbr != nil && fbr.synced && fbr.vm != nil {
-		fbr.vm.rt.ReleaseGIL()
+	if fbr != nil && fbr.running {
+		fbr.unlock()
 		<-t.done
-		fbr.vm.rt.AcquireGIL()
+		fbr.lock()
 	} else {
 		<-t.done
 	}

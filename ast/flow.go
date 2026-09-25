@@ -27,16 +27,6 @@ type For struct {
 	Action     Node   // [required]
 }
 
-type Unsynced struct {
-	token.Pos
-	Action Node // [required]
-}
-
-type Synced struct {
-	token.Pos
-	Action Node // [required]
-}
-
 type Catch struct {
 	token.Pos
 	Action Node // [required]

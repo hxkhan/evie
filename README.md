@@ -1,6 +1,6 @@
 # The Evie Programming Language
 
-Evie is a lightweight, dynamically typed, multi-threaded scripting language written in pure Go without CGO. Combining the dynamic ergonomics of JavaScript and Python with Go's simplicity and Rust's safe-by-default immutability, Evie features true multi-core parallel concurrency, cooperative fibers, first-class OOP with structs and inheritance, and seamless Go host embedding.
+Evie is a lightweight, dynamically typed scripting language written in pure Go without CGO. Combining the dynamic ergonomics of JavaScript and Python with Go's simplicity and Rust's safe-by-default immutability, Evie features cooperative fibers with `go` and `await`, first-class OOP with structs and inheritance, and seamless Go host embedding.
 
 Preliminary micro-benchmarks show Evie to be faster than PUC [Lua 5.4.2](https://lua.org/) and Google's [V8 Ignition](https://v8.dev/docs/ignition) JavaScript interpreter. See [here](#benchmarks).
 
@@ -26,34 +26,27 @@ Preliminary micro-benchmarks show Evie to be faster than PUC [Lua 5.4.2](https:/
     <img src="./docs/images/go.png" width="500" alt="A snippet of Evie code">
 </a>
 
-Evie fibers run in true parallel multi-threading across OS threads and CPU cores without a Global Interpreter Lock by default (`UndefinedMode`). Tasks spawned with `go` return stateful, memoized `Task` handles that can be awaited (`await task`, `await.all`, `await.any`, `await.race`).
+Tasks spawned with `go` run as fibers of the instance and return stateful, memoized `Task` handles that can be awaited (`await task`, `await.all`, `await.any`, `await.race`). Only one fiber of an instance executes Evie code at a time; a fiber hands over at `await` and inside blocking host functions such as `time.wait`, so shared state never needs locking and a script can never race.
 
 To test this program, run `go run ./evie -t ./examples/go.ev`.
 
 > The flag `-t` prints the execution time of just Evie, i.e. total time minus the time it took to compile Evie itself.
 
-#### Multi-Core Parallelism & Synchronization ([examples/unsynced.ev](./examples/unsynced.ev))
-<a href="./examples/unsynced.ev">
-    <img src="./docs/images/unsynced.png" width="500" alt="A snippet of Evie code">
-</a>
+#### Shared state without locks ([examples/race.ev](./examples/race.ev))
 
-Unlike Python's default GIL, Evie executes CPU-bound fibers simultaneously across multiple CPU cores out of the box. When mutual exclusion is required for shared mutable state, Evie provides fine-grained `synced` blocks (`synced { ... }`) and `synced` functions (`fn foo() synced { ... }`) to serialize critical sections under the runtime GIL without serializing unaffected code.
+Two tasks incrementing one global always end at the exact total, because fibers of an instance interleave only at `await` and in blocking host calls. To use several CPU cores, a host creates several instances; each has its own heap and nothing is shared between them.
 
 ---
 
 ## Key Features
 
-- **Parallel by Default**: Multi-threaded fibers execute simultaneously across CPU cores with zero GIL contention by default.
 - **Cooperative & Expressive Concurrency**:
   - `go` spawns concurrent fibers returning stateful `Task` instances.
   - `await` pauses the fiber until task resolution with multi-await memoization.
   - Multi-task coordination via `await.all()`, `await.any()`, and `await.race()`.
-- **Fine-Grained Critical Sections (`synced`)**:
-  - Re-entrant `synced { ... }` blocks and `fn ... synced` functions for thread-safe mutations.
-  - Cooperative lock-releasing: awaiting a task inside `synced` code automatically releases the GIL while waiting and re-acquires it on resume.
-- **Internal Struct Thread-Safety**:
-  - Struct instances are internally synchronized using per-instance `sync.RWMutex` locks, preventing low-level data races on field reads and mutations.
-  - Struct methods run in parallel by default across CPU cores.
+- **One Running Fiber per Instance**:
+  - Fibers hand over at `await` and inside blocking host functions, so arrays, objects, structs and globals need no locks and cannot race.
+  - Parallelism across instances: every `vm.Instance` has its own runner and heap.
 - **Safe-by-Default Immutability**:
   - `x := 10` creates an immutable binding.
   - `var x := 10` is explicitly required for mutability.
@@ -132,14 +125,13 @@ func main() {
 - [x] Primitive types (`number`, `bool`, `nil`)
 - [x] Reference types (`string`, `buffer`, `array`, `object`, `function`, `task`, `error`)
 - [x] Structs & OOP (methods, `this`, single inheritance, dynamic fields, bound methods)
-- [x] Struct thread-safety (per-instance `sync.RWMutex`, parallel methods by default)
 - [x] Control flow (`if`, `else`, `while`, `break`, `continue`)
 - [x] For loops (`for item in col`, `for idx, item in col`)
 - [x] Operators (`+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `?`)
 - [x] Logical operators (`!`, `&&`, `||`)
 - [x] Type checking (`is` operator)
 - [x] Concurrency (`go`, `await`, `await.all`, `await.any`, `await.race`, `Task`)
-- [x] Synchronization (`synced` blocks, `synced` functions, re-entrancy, cooperative await)
+- [x] One running fiber per instance (no locks, no data races, cooperative await)
 - [x] Scoping (global, package, function, block, captured closures)
 - [x] Error handling (`throw`, `catch(expr)`, `error` type)
 - [x] Go Host Embedding (bidirectional marshaling, function reflection, struct unmarshaling)

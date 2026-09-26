@@ -2,11 +2,9 @@ package vm
 
 import (
 	"math"
-	"sort"
 
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/ds"
-	"github.com/hxkhan/evie/vm/fields"
 )
 
 func (vm *Instance) emitReturn(node ast.Return) instruction {
@@ -354,17 +352,11 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 		}
 
 		if obj, ok := collVal.AsObject(); ok {
-			keys := make([]string, 0, len(obj))
-			for k := range obj {
-				keys = append(keys, fields.Lookup(k))
-			}
-			sort.Strings(keys)
-
-			for _, k := range keys {
+			for _, k := range sortedKeys(obj) {
 				keyVal := BoxString(k)
 				if idxIndex >= 0 {
 					fbr.setLocal(idxIndex, keyVal)
-					fbr.setLocal(itemIndex, obj[fields.Get(k)])
+					fbr.setLocal(itemIndex, obj[k])
 				} else {
 					fbr.setLocal(itemIndex, keyVal)
 				}

@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -66,13 +67,6 @@ const (
 var f64Type = unsafe.Pointer(new(byte))
 var boolType = unsafe.Pointer(new(byte))
 
-// type ids
-var strTypeID = unsafe.Pointer(new(byte))
-var arrayTypeID = unsafe.Pointer(new(byte))
-var objectTypeID = unsafe.Pointer(new(byte))
-var bufferTypeID = unsafe.Pointer(new(byte))
-var taskTypeID = unsafe.Pointer(new(byte))
-
 // CustomValue is an interface for evie hosts to add their own custom values to the language
 type CustomValue interface {
 	String() string
@@ -120,7 +114,7 @@ func BoxArray(arr *Array) Value {
 }
 
 // BoxObject boxes an evie object
-func BoxObject(obj map[fields.ID]Value) Value {
+func BoxObject(obj map[string]Value) Value {
 	return Value{scalar: kindObject, pointer: unsafe.Pointer(&obj)}
 }
 
@@ -208,11 +202,11 @@ func (x Value) AsArray() (arr *Array, ok bool) {
 	return (*Array)(x.pointer), true
 }
 
-func (x Value) AsObject() (obj map[fields.ID]Value, ok bool) {
+func (x Value) AsObject() (obj map[string]Value, ok bool) {
 	if x.scalar != kindObject || isKnown(x.pointer) {
 		return nil, false
 	}
-	return *(*map[fields.ID]Value)(x.pointer), true
+	return *(*map[string]Value)(x.pointer), true
 }
 
 func (x Value) AsUserStruct() (obj *UserStruct, ok bool) {
@@ -318,7 +312,7 @@ func (x Value) IsTruthy() bool {
 		array := (*Array)(x.pointer)
 		return len(array.Data) != 0
 	case kindObject:
-		obj := *(*map[fields.ID]Value)(x.pointer)
+		obj := *(*map[string]Value)(x.pointer)
 		return len(obj) != 0
 	case kindTask:
 		return true
@@ -393,17 +387,19 @@ func (x Value) String() string {
 		return (*Array)(x.pointer).String()
 
 	case kindObject:
-		obj := *(*map[fields.ID]Value)(x.pointer)
+		obj := *(*map[string]Value)(x.pointer)
 
 		builder := strings.Builder{}
 		builder.WriteByte('{')
 
-		iter := 0
-		for i, v := range obj {
-			builder.WriteString(fields.Lookup(i))
-			builder.WriteByte(':')
-			builder.WriteByte(' ')
+		for i, name := range sortedKeys(obj) {
+			if i > 0 {
+				builder.WriteString(", ")
+			}
+			builder.WriteString(name)
+			builder.WriteString(": ")
 
+			v := obj[name]
 			if str, ok := v.AsString(); ok {
 				builder.WriteByte('"')
 				builder.WriteString(str)
@@ -411,12 +407,6 @@ func (x Value) String() string {
 			} else {
 				builder.WriteString(v.String())
 			}
-
-			if iter != len(obj)-1 {
-				builder.WriteString(", ")
-			}
-
-			iter += 1
 		}
 
 		builder.WriteByte('}')
@@ -500,161 +490,122 @@ func (x Value) TypeOf() string {
 	return "<unknown>"
 }
 
-func (x Value) TypeID() unsafe.Pointer {
-	if isKnown(x.pointer) {
-		return x.pointer
-	}
-
-	switch x.scalar {
-	case kindString:
-		return strTypeID
-	case kindArray:
-		return arrayTypeID
-	case kindObject:
-		return objectTypeID
-	case kindBuffer:
-		return bufferTypeID
-	case kindTask:
-		return taskTypeID
-	case kindPackage:
-		return x.pointer
-	}
-
-	panic("TypeID() -> cant figure it out...")
+// fieldKey names a member that appears as a literal name in the source. Objects
+// are keyed by the name itself; structs, packages and builtin types by the
+// interned id, which the compiler resolves once.
+type fieldKey struct {
+	id   fields.ID
+	name string
 }
 
-func (x Value) getField(f fields.ID) (field Value, ok bool) {
+func fieldKeyOf(name string) fieldKey {
+	return fieldKey{id: fields.Get(name), name: name}
+}
+
+var messageID = fields.Get("message")
+
+// sortedKeys returns the keys of a string-keyed map in order
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func (x Value) getField(k fieldKey) (field Value, ok bool) {
 	if isKnown(x.pointer) {
 		return Value{}, false
 	}
 
 	switch x.scalar {
 	case kindString:
-		value, exists := typeString.Fields[f]
-		if !exists {
-			return Value{}, false
-		}
-
-		m := BoundMethod{this: x, fn: value}
-		return boxMethod(m), true
-
+		return x.boundMethod(typeString, k.id)
 	case kindArray:
-		value, exists := typeArray.Fields[f]
-		if !exists {
-			return Value{}, false
-		}
-
-		m := BoundMethod{this: x, fn: value}
-		return boxMethod(m), true
-
+		return x.boundMethod(typeArray, k.id)
 	case kindBuffer:
-		value, exists := typeBuffer.Fields[f]
-		if !exists {
-			return Value{}, false
-		}
-
-		m := BoundMethod{this: x, fn: value}
-		return boxMethod(m), true
-
+		return x.boundMethod(typeBuffer, k.id)
 	case kindTask:
-		value, exists := typeTask.Fields[f]
-		if !exists {
-			return Value{}, false
-		}
-
-		m := BoundMethod{this: x, fn: value}
-		return boxMethod(m), true
+		return x.boundMethod(typeTask, k.id)
 
 	case kindObject:
-		obj := *(*map[fields.ID]Value)(x.pointer)
-
-		value, exists := obj[f]
-		if exists {
+		obj := *(*map[string]Value)(x.pointer)
+		if value, exists := obj[k.name]; exists {
 			return value, true
 		}
-
-		if method, ok := typeObject.Fields[f]; ok {
-			m := BoundMethod{this: x, fn: method}
-			return boxMethod(m), true
-		}
-
-		return Value{}, false
+		return x.boundMethod(typeObject, k.id)
 
 	case kindBuiltinType:
 		obj := (*BuiltinType)(x.pointer)
-
-		value, exists := obj.Fields[f]
-		if !exists {
-			return Value{}, false
-		}
-
-		return value, true
+		value, exists := obj.Fields[k.id]
+		return value, exists
 
 	case kindStructInstance:
 		obj := (*UserStructInstance)(x.pointer)
-
-		if value, exists := obj.GetField(f); exists {
+		if value, exists := obj.GetField(k.id); exists {
 			return value, true
 		}
-
 		for cur := obj.InstanceOf; cur != nil; cur = cur.Parent {
-			if method, ok := cur.Methods[f]; ok {
-				m := BoundMethod{this: x, fn: BoxUserFn(*method)}
-				return boxMethod(m), true
+			if method, ok := cur.Methods[k.id]; ok {
+				return boxMethod(BoundMethod{this: x, fn: BoxUserFn(*method)}), true
 			}
 		}
-
 		return Value{}, false
 
 	case kindPackage:
 		pkg := (*packageInstance)(x.pointer)
-		value, exists := pkg.globals[f]
-		if !value.IsPublic {
+		value, exists := pkg.globals[k.id]
+		if !exists || !value.IsPublic {
 			return Value{}, false
 		}
-		return *(value.Value), exists
+		return *(value.Value), true
 
 	case kindError:
-		if f == fields.Get("message") {
-			obj := (*Error)(x.pointer)
-			return BoxString(obj.Message), true
+		if k.id == messageID {
+			return BoxString((*Error)(x.pointer).Message), true
 		}
-		value, exists := typeError.Fields[f]
-		if !exists {
-			return Value{}, false
-		}
-		m := BoundMethod{this: x, fn: value}
-		return boxMethod(m), true
+		return x.boundMethod(typeError, k.id)
 	}
 
 	return Value{}, false
 }
 
-func (x Value) dotAccess(f fields.ID) (field Value) {
+// boundMethod looks a method up on a builtin type and binds it to x
+func (x Value) boundMethod(t *BuiltinType, f fields.ID) (Value, bool) {
+	value, exists := t.Fields[f]
+	if !exists {
+		return Value{}, false
+	}
+	return boxMethod(BoundMethod{this: x, fn: value}), true
+}
+
+// dotAccess returns the member a call site like x.name(...) refers to, unbound
+func (x Value) dotAccess(k fieldKey) (field Value) {
 	if isKnown(x.pointer) {
 		return Value{}
 	}
 
 	switch x.scalar {
 	case kindString:
-		return typeString.Fields[f]
+		return typeString.Fields[k.id]
 	case kindArray:
-		return typeArray.Fields[f]
+		return typeArray.Fields[k.id]
 	case kindBuffer:
-		return typeBuffer.Fields[f]
+		return typeBuffer.Fields[k.id]
 	case kindTask:
-		return typeTask.Fields[f]
+		return typeTask.Fields[k.id]
 	case kindObject:
-		obj := *(*map[fields.ID]Value)(x.pointer)
-		if value, exists := obj[f]; exists {
+		obj := *(*map[string]Value)(x.pointer)
+		if value, exists := obj[k.name]; exists {
 			return value
 		}
-		return typeObject.Fields[f]
+		return typeObject.Fields[k.id]
 	case kindError:
-		return typeError.Fields[f]
+		return typeError.Fields[k.id]
 	case kindPackage:
 		pkg := (*packageInstance)(x.pointer)
-		value := pkg.globals[f]
+		value := pkg.globals[k.id]
 		if !value.IsPublic {
 			return Value{}
 		}
@@ -662,7 +613,7 @@ func (x Value) dotAccess(f fields.ID) (field Value) {
 	case kindStructInstance:
 		usi := (*UserStructInstance)(x.pointer)
 		for cur := usi.InstanceOf; cur != nil; cur = cur.Parent {
-			if fn, ok := cur.Methods[f]; ok {
+			if fn, ok := cur.Methods[k.id]; ok {
 				return BoxUserFn(*fn)
 			}
 		}
@@ -673,11 +624,12 @@ func (x Value) dotAccess(f fields.ID) (field Value) {
 	return Value{}
 }
 
-// IsCallable reports whether the value can be invoked via Call.
+// IsCallable reports whether the value can be invoked via Call: functions,
+// bound methods, and struct or builtin types, which construct a value.
 func (x Value) IsCallable() bool {
 	if !isKnown(x.pointer) {
 		switch x.scalar {
-		case kindUserFn, kindGoFunc, kindBoundMethod:
+		case kindUserFn, kindGoFunc, kindBoundMethod, kindStruct, kindBuiltinType:
 			return true
 		}
 	}
@@ -696,6 +648,12 @@ func (x Value) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) {
 		case kindBoundMethod:
 			bm := (*BoundMethod)(x.pointer)
 			return bm.Call(fbr, args...)
+		case kindStruct:
+			us := (*UserStruct)(x.pointer)
+			return us.instantiate(args)
+		case kindBuiltinType:
+			bt := (*BuiltinType)(x.pointer)
+			return bt.Constructor.Call(fbr, args...)
 		}
 	}
 	return Value{}, RuntimeExceptionF("cannot invoke a non-callable '%v'", x)

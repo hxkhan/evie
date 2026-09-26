@@ -59,22 +59,16 @@ func BoxAny(v any) (Value, error) {
 		return BoxArray(val), nil
 	case Array:
 		return BoxArray(&val), nil
-	case map[fields.ID]Value:
-		return BoxObject(val), nil
 	case map[string]Value:
-		obj := make(map[fields.ID]Value, len(val))
-		for k, item := range val {
-			obj[fields.Get(k)] = item
-		}
-		return BoxObject(obj), nil
+		return BoxObject(val), nil
 	case map[string]any:
-		obj := make(map[fields.ID]Value, len(val))
+		obj := make(map[string]Value, len(val))
 		for k, item := range val {
 			boxed, err := BoxAny(item)
 			if err != nil {
 				return Value{}, err
 			}
-			obj[fields.Get(k)] = boxed
+			obj[k] = boxed
 		}
 		return BoxObject(obj), nil
 	case []any:
@@ -145,7 +139,7 @@ func BoxAny(v any) (Value, error) {
 		return BoxArray(NewArray(items...)), nil
 
 	case reflect.Map:
-		obj := make(map[fields.ID]Value, rv.Len())
+		obj := make(map[string]Value, rv.Len())
 		iter := rv.MapRange()
 		for iter.Next() {
 			keyStr := fmt.Sprint(iter.Key().Interface())
@@ -153,13 +147,13 @@ func BoxAny(v any) (Value, error) {
 			if err != nil {
 				return Value{}, err
 			}
-			obj[fields.Get(keyStr)] = valBoxed
+			obj[keyStr] = valBoxed
 		}
 		return BoxObject(obj), nil
 
 	case reflect.Struct:
 		t := rv.Type()
-		obj := make(map[fields.ID]Value, t.NumField())
+		obj := make(map[string]Value, t.NumField())
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
 			if !f.IsExported() {
@@ -177,7 +171,7 @@ func BoxAny(v any) (Value, error) {
 			if err != nil {
 				return Value{}, err
 			}
-			obj[fields.Get(name)] = boxed
+			obj[name] = boxed
 		}
 		return BoxObject(obj), nil
 
@@ -416,8 +410,7 @@ func unmarshalToType(val Value, targetType reflect.Type) (any, error) {
 			keyType := targetType.Key()
 			valType := targetType.Elem()
 			for k, v := range obj {
-				keyName := fields.Lookup(k)
-				kConverted, err := unmarshalToType(BoxString(keyName), keyType)
+				kConverted, err := unmarshalToType(BoxString(k), keyType)
 				if err != nil {
 					return nil, err
 				}
@@ -488,7 +481,7 @@ func (v Value) ToGo() any {
 	if obj, ok := v.AsObject(); ok {
 		res := make(map[string]any, len(obj))
 		for k, val := range obj {
-			res[fields.Lookup(k)] = val.ToGo()
+			res[k] = val.ToGo()
 		}
 		return res
 	}
@@ -503,7 +496,7 @@ func (v Value) ToGo() any {
 			}
 		}
 		for f, val := range inst.Dynamic {
-			res[fields.Lookup(f)] = val.ToGo()
+			res[f] = val.ToGo()
 		}
 		return res
 	}

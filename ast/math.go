@@ -147,4 +147,3 @@ type Not struct {
 func (node Not) String() string {
 	return fmt.Sprintf("!%v", node.Value)
 }
-

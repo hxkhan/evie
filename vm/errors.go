@@ -1,10 +1,8 @@
 package vm
 
 import (
-	"errors"
 	"fmt"
 	"runtime/debug"
-	"strings"
 )
 
 type Error struct {
@@ -32,25 +30,6 @@ type Exception = *Error
 func (e Error) Error() string {
 	return e.Message
 }
-
-type trace struct {
-	err   error
-	stack []string
-}
-
-func (t trace) Error() string {
-	var bytes strings.Builder
-
-	bytes.WriteString(t.err.Error())
-	bytes.WriteByte('\n')
-	for _, name := range t.stack {
-		bytes.WriteString(fmt.Sprintf("\tin '%v'\n", name))
-	}
-
-	return bytes.String()
-}
-
-var ErrNotCallable error = errors.New("not a callable")
 
 // recovered turns a panic that reached a host boundary into an exception. A
 // thrown exception or compile error passes through; anything else is a bug in

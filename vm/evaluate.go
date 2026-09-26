@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/hxkhan/evie/ast"
-	"github.com/hxkhan/evie/vm/fields"
 )
 
 // evaluate performs compile-time constant folding and static symbol resolution.
@@ -51,7 +50,7 @@ func (vm *Instance) evaluate(node ast.Node) any {
 
 	case ast.FieldAccess:
 		if lhs, ok := vm.evaluate(node.Lhs).(Value); ok {
-			if v, exists := lhs.getField(fields.Get(node.Rhs)); exists {
+			if v, exists := lhs.getField(fieldKeyOf(node.Rhs)); exists {
 				return v
 			}
 		}

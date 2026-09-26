@@ -253,10 +253,6 @@ func (ps *parser) handleWords(main token.Token, asExpr bool, precedenceLevel int
 			panic(fmt.Errorf("expected ':=' after 'var %v' on line %v, got '%v' instead", name.Literal, main.Line, ps.PeekToken().Literal))
 		}
 		return ast.Decl{Pos: main.Line, Name: name.Literal, IsStatic: false, Value: ps.parse(0, true)}
-	case "pub":
-		// skip for now
-		return ps.parse(0, true)
-
 	default:
 		return ps.parseIdent(main, precedenceLevel)
 	}

@@ -44,7 +44,6 @@ type compiler struct {
 type runtime struct {
 	packages map[string]Package // loaded packages
 	fibers   sync.Pool          // pooled fibers for this vm
-	trace    []string           // call-stack trace
 	runner   sync.Mutex         // held by the fiber that is executing evie code
 	wg       sync.WaitGroup     // wait for all fibers to complete
 }
@@ -65,11 +64,8 @@ type packageInstance struct {
 type PackageContructor func() map[string]*Value
 
 type Options struct {
-	LogCache        bool // log cache hits/misses
 	LogCaptures     bool // log when and what is captured
 	DisableInlining bool // use dispatch inlining (combining instructions into one)
-	Metrics         bool // collect metrics (affects performance)
-	TopLevelLogic   bool // whether to only allow declarations at top level
 
 	ImportsResolver  func(name string) Package // legacy/simple resolver
 	PackageResolver  PackageResolver           // robust package resolver with error return

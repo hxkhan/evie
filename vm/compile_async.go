@@ -151,7 +151,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 		if m, isMethod := value.asMethod(); isMethod {
 			if ufn, isUserFn := m.fn.AsUserFn(); isUserFn {
 				var this *Value
-				if ufn.isMethod() {
+				if ufn.isMethod {
 					this = &m.this
 				}
 				if exc := ufn.accepts(len(arguments) + boolToInt(this != nil)); exc != nil {
@@ -165,10 +165,14 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 			}
 
 			if fn, isGoFunc := m.fn.AsGoFunc(); isGoFunc {
-				if exc := fn.accepts(1 + len(arguments)); exc != nil {
+				var this *Value
+				if fn.IsMethod {
+					this = &m.this
+				}
+				if exc := fn.accepts(len(arguments) + boolToInt(this != nil)); exc != nil {
 					return Value{}, exc
 				}
-				params, exc := evalArgs(fbr, &m.this)
+				params, exc := evalArgs(fbr, this)
 				if exc != nil {
 					return Value{}, exc
 				}

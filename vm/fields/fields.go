@@ -30,6 +30,14 @@ func Get(name string) ID {
 	return index
 }
 
+// Find returns the id of a name that was interned before, without interning it
+func Find(name string) (ID, bool) {
+	mu.RLock()
+	id, exists := registryA[name]
+	mu.RUnlock()
+	return id, exists
+}
+
 func Lookup(id ID) string {
 	mu.RLock()
 	defer mu.RUnlock()

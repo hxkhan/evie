@@ -151,7 +151,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 						return value, err
 					}
 
-					obj[index] = value
+					obj[fa.Rhs] = value
 					return Value{}, nil
 				}
 
@@ -225,7 +225,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 						return value, err
 					}
 
-					obj[index] = value
+					obj[fa.Rhs] = value
 					return Value{}, nil
 				}
 
@@ -296,7 +296,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 					return Value{}, TypeErrorF("object key must be a string, got '%s'", keyVal.TypeOf())
 				}
 
-				obj[fields.Get(keyStr)] = newVal
+				obj[keyStr] = newVal
 				return Value{}, nil
 			}
 
@@ -307,7 +307,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 					return Value{}, TypeErrorF("struct field key must be a string, got '%s'", keyVal.TypeOf())
 				}
 
-				si.SetField(fields.Get(keyStr), newVal)
+				si.setFieldByName(keyStr, newVal)
 				return Value{}, nil
 			}
 
@@ -319,7 +319,8 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 }
 
 func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
-	index := fields.Get(node.Rhs)
+	key := fieldKeyOf(node.Rhs)
+	index := key.id
 
 	// optimise: ident as lhs
 	if lhs := vm.evaluate(node.Lhs); lhs != nil {
@@ -340,7 +341,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 								return val, nil
 							}
 						}
-						if field, exists := thisVal.getField(index); exists {
+						if field, exists := thisVal.getField(key); exists {
 							return field, nil
 						}
 						return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", node.Rhs, node)
@@ -365,7 +366,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 						return val, nil
 					}
 				}
-				if field, exists := v.getField(index); exists {
+				if field, exists := v.getField(key); exists {
 					return field, nil
 				}
 				return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", node.Rhs, node)
@@ -373,7 +374,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 
 		case Value:
 			// I don't think this gets used tbh because using vm.evaluate(ast.FieldAccess) bypasses this
-			if field, exists := lhs.getField(index); exists {
+			if field, exists := lhs.getField(key); exists {
 				return func(fbr *Fiber) (Value, Exception) {
 					return field, nil
 				}
@@ -383,7 +384,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 		case Global:
 			// global non-static binding
 			return func(fbr *Fiber) (Value, Exception) {
-				if field, exists := lhs.getField(index); exists {
+				if field, exists := lhs.getField(key); exists {
 					return field, nil
 				}
 				return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", node.Rhs, node)
@@ -415,7 +416,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 			}
 		}
 
-		if field, exists := lhs.getField(index); exists {
+		if field, exists := lhs.getField(key); exists {
 			return field, nil
 		}
 
@@ -467,7 +468,7 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 				return Value{}, TypeErrorF("object key must be a string, got '%s'", indexVal.TypeOf())
 			}
 
-			val, exists := obj[fields.Get(keyStr)]
+			val, exists := obj[keyStr]
 			if !exists {
 				return Value{}, nil
 			}
@@ -481,7 +482,7 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 				return Value{}, TypeErrorF("struct field key must be a string, got '%s'", indexVal.TypeOf())
 			}
 
-			val, exists := si.GetField(fields.Get(keyStr))
+			val, exists := si.getFieldByName(keyStr)
 			if !exists {
 				return Value{}, RuntimeExceptionF("undefined field '%s' in struct", keyStr)
 			}
@@ -557,21 +558,27 @@ func (vm *Instance) emitArrayLiteral(node ast.ArrayLiteral) instruction {
 	}
 }
 
+type objectField struct {
+	key   string
+	value instruction
+}
+
 func (vm *Instance) emitObject(node ast.Object) instruction {
-	items := make(map[fields.ID]instruction, len(node.Fields))
-	for _, f := range node.Fields {
-		items[fields.Get(f.Key)] = vm.compile(f.Value)
+	// fields are evaluated in source order, so their side effects happen in source order
+	items := make([]objectField, len(node.Fields))
+	for i, f := range node.Fields {
+		items[i] = objectField{key: f.Key, value: vm.compile(f.Value)}
 	}
 
 	return func(fbr *Fiber) (Value, Exception) {
-		obj := make(map[fields.ID]Value, len(items))
-		for k, v := range items {
-			value, err := v(fbr)
+		obj := make(map[string]Value, len(items))
+		for _, item := range items {
+			value, err := item.value(fbr)
 			if err != nil {
 				return value, err
 			}
 
-			obj[k] = value
+			obj[item.key] = value
 		}
 		return BoxObject(obj), nil
 	}
@@ -589,7 +596,7 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 			}
 
 			if obj, ok := lhs.AsObject(); ok {
-				_, exists := obj[index]
+				_, exists := obj[fa.Rhs]
 				return BoxBool(exists), nil
 			}
 
@@ -617,7 +624,7 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 
 			if obj, ok := lhs.AsObject(); ok {
 				if keyStr, ok := k.AsString(); ok {
-					_, exists := obj[fields.Get(keyStr)]
+					_, exists := obj[keyStr]
 					return BoxBool(exists), nil
 				}
 				return BoxBool(false), nil
@@ -635,7 +642,7 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 			}
 			if si, ok := lhs.AsUserStructInstance(); ok {
 				if keyStr, ok := k.AsString(); ok {
-					return BoxBool(si.HasField(fields.Get(keyStr))), nil
+					return BoxBool(si.hasFieldByName(keyStr)), nil
 				}
 				return BoxBool(false), nil
 			}
@@ -702,7 +709,7 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 		}
 
 		if m, ok := obj.AsObject(); ok {
-			current, exists := m[index]
+			current, exists := m[fa.Rhs]
 			if !exists {
 				return Value{}, RuntimeExceptionF("undefined key '%s' in object", fa.Rhs)
 			}
@@ -710,7 +717,7 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 			if exc != nil {
 				return result, exc
 			}
-			m[index] = result
+			m[fa.Rhs] = result
 			return Value{}, nil
 		}
 
@@ -788,8 +795,7 @@ func (vm *Instance) emitCompoundSubscriptAssign(node ast.MutableBinOp, sub ast.S
 			if !isString {
 				return Value{}, TypeErrorF("object key must be a string, got '%s'", keyVal.TypeOf())
 			}
-			index := fields.Get(keyStr)
-			current, exists := m[index]
+			current, exists := m[keyStr]
 			if !exists {
 				return Value{}, RuntimeExceptionF("undefined key '%s' in object", keyStr)
 			}
@@ -797,7 +803,7 @@ func (vm *Instance) emitCompoundSubscriptAssign(node ast.MutableBinOp, sub ast.S
 			if exc != nil {
 				return result, exc
 			}
-			m[index] = result
+			m[keyStr] = result
 			return Value{}, nil
 		}
 
@@ -805,7 +811,7 @@ func (vm *Instance) emitCompoundSubscriptAssign(node ast.MutableBinOp, sub ast.S
 			if !isString {
 				return Value{}, TypeErrorF("struct field key must be a string, got '%s'", keyVal.TypeOf())
 			}
-			exists, exc := usi.UpdateField(fields.Get(keyStr), func(current Value) (Value, Exception) {
+			exists, exc := usi.updateFieldByName(keyStr, func(current Value) (Value, Exception) {
 				return apply(fbr, current, value)
 			})
 			if !exists {

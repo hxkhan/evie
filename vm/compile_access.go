@@ -62,7 +62,7 @@ func (vm *Instance) emitIdentGet(node ast.Ident) instruction {
 		}
 	}
 
-	panic("ayo what")
+	panic(CompileErrorf("cannot read '%s' on line %v", node.Name, node.Line()))
 }
 
 func (vm *Instance) emitAssign(node ast.Assign) instruction {
@@ -165,7 +165,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 					return Value{}, nil
 				}
 
-				panic("implement type")
+				return Value{}, TypeErrorF("cannot assign field '%s' on %s", fa.Rhs, lhs.TypeOf())
 			}
 
 		case Global:
@@ -193,7 +193,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 					}
 				}
 
-				panic("implement type")
+				panic(CompileErrorf("cannot assign field '%s' on constant '%v' on line %v", fa.Rhs, fa.Lhs, node.Line()))
 			}
 
 			// compile new value & return setter
@@ -239,7 +239,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 					return Value{}, nil
 				}
 
-				panic("implement type")
+				return Value{}, TypeErrorF("cannot assign field '%s' on %s", fa.Rhs, lhs.TypeOf())
 			}
 		}
 	}
@@ -315,7 +315,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 		}
 	}
 
-	panic("ayo what")
+	panic(CompileErrorf("cannot assign to '%v' on line %v", node.Lhs, node.Line()))
 }
 
 func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
@@ -378,7 +378,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 					return field, nil
 				}
 			}
-			panic(TypeErrorF("undefined symbol '%v' in '%v'", node.Rhs, node))
+			panic(CompileErrorf("undefined symbol '%v' in '%v' on line %v", node.Rhs, node, node.Line()))
 
 		case Global:
 			// global non-static binding
@@ -386,7 +386,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 				if field, exists := lhs.getField(index); exists {
 					return field, nil
 				}
-				panic(TypeErrorF("undefined symbol '%v' in '%v'", node.Rhs, node))
+				return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", node.Rhs, node)
 			}
 		}
 	}
@@ -597,7 +597,8 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 				return BoxBool(obj.HasField(index)), nil
 			}
 
-			panic("implement type")
+			// nothing else has fields
+			return BoxBool(false), nil
 		}
 	}
 

@@ -30,7 +30,7 @@ type Token struct {
 
 // Checks if the token is signaling end-of-source
 func (t Token) IsEOS() bool {
-	return t.Type == flag && t.Literal == "eos"
+	return t.Type == flag
 }
 
 // helper

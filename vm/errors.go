@@ -3,6 +3,7 @@ package vm
 import (
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strings"
 )
 
@@ -50,6 +51,20 @@ func (t trace) Error() string {
 }
 
 var ErrNotCallable error = errors.New("not a callable")
+
+// recovered turns a panic that reached a host boundary into an exception. A
+// thrown exception or compile error passes through; anything else is a bug in
+// the runtime or in a native and is reported with its stack instead of taking
+// the host process down.
+func recovered(r any) Exception {
+	switch e := r.(type) {
+	case Exception:
+		return e
+	case *CompileError:
+		return &Error{Message: e.Error()}
+	}
+	return &Error{Message: fmt.Sprintf("internal error: %v\n%s", r, debug.Stack())}
+}
 
 var ErrTypes Exception = &Error{
 	Message: "TypeError: wrong type of arguments given to function",

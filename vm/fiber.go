@@ -45,6 +45,30 @@ func (fbr *Fiber) reset() {
 	fbr.stack = fbr.stack[:0]
 }
 
+// runGuarded executes one instruction on this fiber, turning a panic into an exception
+func (fbr *Fiber) runGuarded(code instruction) (result Value, exc Exception) {
+	stack, base, active := len(fbr.stack), fbr.base, fbr.active
+	defer func() {
+		if r := recover(); r != nil {
+			result, exc = Value{}, recovered(r)
+			fbr.unwind(stack, base, active)
+		}
+	}()
+	return code(fbr)
+}
+
+// unwind puts the fiber back into the state it had when a host call began,
+// after a panic skipped the frame bookkeeping. The box pool cannot be
+// reconciled, so it starts over; the boxes still referenced stay alive.
+func (fbr *Fiber) unwind(stack int, base int, active *UserFn) {
+	fbr.stack = fbr.stack[:stack]
+	fbr.base = base
+	fbr.active = active
+	fbr.boxes = make([]Value, boxChunk)
+	fbr.spent = nil
+	fbr.spare = nil
+}
+
 func (fbr *Fiber) get(binding local) *Value {
 	if !binding.isCaptured {
 		return fbr.stack[fbr.base+int(binding.index)]

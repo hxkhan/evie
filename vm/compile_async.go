@@ -12,51 +12,65 @@ func (vm *Instance) spawn(fn *UserFn, params []Value) *Task {
 	vm.rt.wg.Go(func() {
 		fbr := vm.NewFiber()
 		fbr.lock()
-		fbr.active = fn
-
-		// setup stack locals
-		for idx, escapes := range fn.locals {
-			if !escapes {
-				fbr.stack = append(fbr.stack, fbr.pop())
-			} else {
-				fbr.stack = append(fbr.stack, &Value{})
-			}
-
-			// assign arguments
-			if !fn.isVariadic {
-				if idx < len(params) {
-					*(fbr.stack[idx]) = params[idx]
-				}
-			} else {
-				variadicIdx := len(fn.args) - 1
-				if idx < variadicIdx {
-					*(fbr.stack[idx]) = params[idx]
-				} else if idx == variadicIdx {
-					tailCount := len(params) - variadicIdx
-					tail := make([]Value, tailCount)
-					copy(tail, params[variadicIdx:])
-					*(fbr.stack[idx]) = BoxArray(&Array{Data: tail})
-				}
-			}
-		}
-
-		result, exc := fn.code(fbr)
-
-		// cleanup fiber and release
-		fbr.push(fn.recyclable)
-		fbr.popStack(len(fn.locals))
+		result, exc := fbr.runTask(fn, params)
 		fbr.unlock()
 		vm.ReleaseFiber(fbr)
-
-		// return result but catch relevant signals
-		switch exc {
-		case nil:
-		case signalReturn:
-			exc = nil
-		}
 		task.Finish(result, exc)
 	})
 	return task
+}
+
+// runTask executes fn with params as the first frame of a fresh fiber
+func (fbr *Fiber) runTask(fn *UserFn, params []Value) (result Value, exc Exception) {
+	defer func() {
+		if r := recover(); r != nil {
+			result, exc = Value{}, recovered(r)
+			fbr.unwind(0, 0, nil)
+		}
+	}()
+
+	fbr.active = fn
+
+	// setup stack locals
+	for idx, escapes := range fn.locals {
+		if !escapes {
+			fbr.stack = append(fbr.stack, fbr.pop())
+		} else {
+			fbr.stack = append(fbr.stack, &Value{})
+		}
+
+		// assign arguments
+		if !fn.isVariadic {
+			if idx < len(params) {
+				*(fbr.stack[idx]) = params[idx]
+			}
+		} else {
+			variadicIdx := len(fn.args) - 1
+			if idx < variadicIdx {
+				*(fbr.stack[idx]) = params[idx]
+			} else if idx == variadicIdx {
+				tailCount := len(params) - variadicIdx
+				tail := make([]Value, tailCount)
+				copy(tail, params[variadicIdx:])
+				*(fbr.stack[idx]) = BoxArray(&Array{Data: tail})
+			}
+		}
+	}
+
+	result, exc = fn.code(fbr)
+
+	fbr.push(fn.recyclable)
+	fbr.popStack(len(fn.locals))
+
+	// return result but catch relevant signals
+	switch exc {
+	case nil:
+		return Value{}, nil
+	case signalReturn:
+		return result, nil
+	default:
+		return result, exc
+	}
 }
 
 // spawnNative runs a native function with params on a fiber of its own
@@ -65,20 +79,9 @@ func (vm *Instance) spawnNative(fn *GoFunc, params []Value) *Task {
 	vm.rt.wg.Go(func() {
 		fbr := vm.NewFiber()
 		fbr.lock()
-
-		for _, p := range params {
-			box := fbr.pop()
-			*box = p
-			fbr.stack = append(fbr.stack, box)
-		}
-
-		result, exc := fn.run(fbr)
-
-		fbr.push(len(params))
-		fbr.popStack(len(params))
+		result, exc := fn.Call(fbr, params...)
 		fbr.unlock()
 		vm.ReleaseFiber(fbr)
-
 		task.Finish(result, exc)
 	})
 	return task

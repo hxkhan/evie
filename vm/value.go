@@ -669,7 +669,8 @@ func (x Value) dotAccess(f fields.ID) (field Value) {
 		return Value{}
 	}
 
-	panic("add more types?")
+	// nothing else has members
+	return Value{}
 }
 
 // IsCallable reports whether the value can be invoked via Call.

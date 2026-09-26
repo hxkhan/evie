@@ -373,7 +373,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			}
 		}
 
-		panic("cannot call whatever this is")
+		panic(CompileErrorf("cannot call '%v' on line %v", node.Fn, node.Line()))
 	}
 
 	// optimise: calling methods (avoids heap allocation of Method{})
@@ -393,7 +393,16 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 						return fn.call(fbr, arguments)
 					}
 
-					panic("fix.")
+					// anything else the package holds goes through the generic call
+					args := make([]Value, len(arguments))
+					for i, argument := range arguments {
+						arg, exc := argument(fbr)
+						if exc != nil {
+							return arg, exc
+						}
+						args[i] = arg
+					}
+					return value.Call(fbr, args...)
 				}
 
 				// 100% method

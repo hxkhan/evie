@@ -52,7 +52,7 @@ START:
 
 	switch current {
 	case iEOS:
-		return lex.flag("eos", lex.line)
+		return lex.flag("end of source", lex.line)
 	case ' ', '\t', '\r':
 		goto START
 	case '\n':

@@ -172,7 +172,7 @@ func (vm *Instance) EvalNode(node ast.Node) (result Value, err error) {
 			}()
 		}
 
-		v, exc := vm.compile(node)(fbr)
+		v, exc := fbr.runGuarded(vm.compile(node))
 		if exc != nil {
 			err = exc
 		}

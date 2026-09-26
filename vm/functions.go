@@ -75,6 +75,21 @@ func (fn *UserFn) Call(fbr *Fiber, args ...Value) (result Value, err Exception) 
 		defer fbr.unlock()
 	}
 
+	stack, base, active := len(fbr.stack), fbr.base, fbr.active
+	defer func() {
+		if r := recover(); r != nil {
+			result, err = Value{}, recovered(r)
+			fbr.unwind(stack, base, active)
+		}
+	}()
+
+	return fn.call(fbr, args)
+}
+
+// call runs the function on a fiber that is already running. The arguments are
+// known to match the signature and nothing here recovers from a panic; that is
+// the job of the host boundary in Call.
+func (fn *UserFn) call(fbr *Fiber, args []Value) (result Value, err Exception) {
 	base := len(fbr.stack)
 
 	// create space for all the locals
@@ -212,7 +227,7 @@ func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (result Value, ex
 				args[1+i] = v
 			}
 
-			return ufn.Call(fbr, args...)
+			return ufn.call(fbr, args)
 		}
 
 		if exc := ufn.accepts(len(arguments)); exc != nil {
@@ -228,7 +243,7 @@ func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (result Value, ex
 			args[i] = v
 		}
 
-		return ufn.Call(fbr, args...)
+		return ufn.call(fbr, args)
 	}
 
 	fn, ok := m.fn.AsGoFunc()
@@ -380,6 +395,14 @@ func (fn *GoFunc) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) 
 	}
 
 	base := len(fbr.stack)
+	entryBase, entryActive := fbr.base, fbr.active
+	defer func() {
+		if r := recover(); r != nil {
+			result, exc = Value{}, recovered(r)
+			fbr.unwind(base, entryBase, entryActive)
+		}
+	}()
+
 	for _, arg := range args {
 		box := fbr.pop()
 		*box = arg

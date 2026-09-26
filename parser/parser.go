@@ -3,6 +3,7 @@ package parser
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -13,6 +14,16 @@ import (
 )
 
 var errEOS = errors.New("EOS")
+
+// Error is a syntax error together with the line it was found on
+type Error struct {
+	Line    int
+	Message string
+}
+
+func (e *Error) Error() string {
+	return fmt.Sprintf("syntax error on line %d: %s", e.Line, e.Message)
+}
 
 type parser struct {
 	*lexer.Lexer
@@ -67,10 +78,16 @@ func Parse(input []byte) (node ast.Node, err error) {
 					err = errors.New("ParseError: invalid input")
 				}
 			default:
-				if rErr, ok := r.(error); ok {
-					err = fmt.Errorf("ParseError: %s", rErr.Error())
-				} else {
-					panic(r)
+				switch e := r.(type) {
+				case *Error:
+					err = e
+				case runtime.Error:
+					// a bug in the parser or lexer; report it instead of taking the host down
+					err = fmt.Errorf("internal parser error: %v", e)
+				case error:
+					err = fmt.Errorf("ParseError: %s", e.Error())
+				default:
+					err = &Error{Line: int(ps.last.Line), Message: fmt.Sprint(r)}
 				}
 			}
 		}
@@ -653,6 +670,10 @@ func (ps *parser) parse(precedenceLevel int, asExpr bool) (node ast.Node) {
 
 	main := ps.PeekToken()
 	if main.IsEOS() {
+		// the end of the source only ends the program; inside any construct it is an error
+		if asExpr {
+			panic(&Error{Line: int(main.Line), Message: "unexpected end of source"})
+		}
 		panic(errEOS)
 	}
 
@@ -693,8 +714,10 @@ func (ps *parser) parse(precedenceLevel int, asExpr bool) (node ast.Node) {
 
 	case main.IsSimple("`"):
 		node = ps.parseStringTemplate(ps.NextToken())
+	case main.Type == token.Invalid:
+		panic(&Error{Line: int(main.Line), Message: fmt.Sprintf("invalid token '%s'", main.Literal)})
 	default:
-		panic(main)
+		panic(&Error{Line: int(main.Line), Message: fmt.Sprintf("unexpected '%s'", main.Literal)})
 	}
 
 	// parse the left-hand side

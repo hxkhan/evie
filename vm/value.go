@@ -98,6 +98,11 @@ func BoxUserFn(fn UserFn) Value {
 	return Value{scalar: kindUserFn, pointer: unsafe.Pointer(&fn)}
 }
 
+// boxUserFnPtr boxes an existing function without copying it
+func boxUserFnPtr(fn *UserFn) Value {
+	return Value{scalar: kindUserFn, pointer: unsafe.Pointer(fn)}
+}
+
 // BoxBuiltinType boxes a Go function that is a type constructor
 func BoxBuiltinType(t *BuiltinType) Value {
 	return Value{scalar: kindBuiltinType, pointer: unsafe.Pointer(t)}
@@ -546,10 +551,8 @@ func (x Value) getField(k fieldKey) (field Value, ok bool) {
 		if value, exists := obj.GetField(k.id); exists {
 			return value, true
 		}
-		for cur := obj.InstanceOf; cur != nil; cur = cur.Parent {
-			if method, ok := cur.Methods[k.id]; ok {
-				return boxMethod(BoundMethod{this: x, fn: BoxUserFn(*method)}), true
-			}
+		if method := obj.InstanceOf.lookupMethod(k.id); method != nil {
+			return boxMethod(BoundMethod{this: x, fn: boxUserFnPtr(method)}), true
 		}
 		return Value{}, false
 
@@ -612,10 +615,8 @@ func (x Value) dotAccess(k fieldKey) (field Value) {
 		return *value.Value
 	case kindStructInstance:
 		usi := (*UserStructInstance)(x.pointer)
-		for cur := usi.InstanceOf; cur != nil; cur = cur.Parent {
-			if fn, ok := cur.Methods[k.id]; ok {
-				return BoxUserFn(*fn)
-			}
+		if method := usi.InstanceOf.lookupMethod(k.id); method != nil {
+			return boxUserFnPtr(method)
 		}
 		return Value{}
 	}

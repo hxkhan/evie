@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/hxkhan/evie/ast"
-	"github.com/hxkhan/evie/ds"
 	"github.com/hxkhan/evie/vm/fields"
 )
 
@@ -254,14 +253,7 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 			}
 
 			// create a stub for now
-			fn := BoxUserFn(UserFn{
-				funcInfoStatic: &funcInfoStatic{
-					name:       fn.Name,
-					args:       fn.Args,
-					isVariadic: fn.IsVariadic,
-					vm:         vm,
-				},
-			})
+			fn := BoxUserFn(UserFn{funcInfoStatic: vm.newFuncInfo(fn.Name, fn.Args, fn.IsVariadic, false)})
 			this.globals[index] = Global{Value: &fn, IsPublic: true, IsStatic: true}
 		}
 
@@ -324,31 +316,7 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 		if fn, isFn := node.(ast.Fn); isFn {
 			global := this.globals[fields.Get(fn.Name)]
 			ufn := (*UserFn)(global.pointer)
-
-			vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: ufn.funcInfoStatic})
-			vm.cp.closures.Last(0).scope.OpenBlock()
-
-			// declare the fn arguments and only then compile the code
-			for _, arg := range fn.Args {
-				vm.cp.closures.Last(0).scope.Declare(arg, false)
-			}
-
-			ufn.code = vm.compile(fn.Action)
-			closure := vm.cp.closures.Pop()
-			capacity := closure.scope.Capacity()
-			ufn.locals = make([]bool, capacity)
-
-			// mark escapee variables
-			recyclable := 0
-			for index := range capacity {
-				if closure.freeVars.Has(index) {
-					ufn.locals[index] = true
-					vm.log.escapesf("CT: fn %v => Local(%v) escapes\n", fn.Name, index)
-				} else {
-					recyclable++
-				}
-			}
-			ufn.recyclable = recyclable
+			vm.compileFunction(ufn.funcInfoStatic, fn.Args, fn.Action, nil)
 		}
 	}
 

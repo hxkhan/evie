@@ -72,4 +72,3 @@ func (node ArrayLiteral) String() string {
 	out.WriteString("]")
 	return out.String()
 }
-

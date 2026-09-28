@@ -13,7 +13,6 @@ type Fn struct {
 	Args       []string
 	IsVariadic bool
 	Action     Node
-	IsPublic   bool
 	UsedAsExpr bool // if true then create and return, else declare
 }
 

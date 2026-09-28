@@ -103,3 +103,45 @@ func TestFibersAreResetBetweenUses(t *testing.T) {
 		env.ReleaseFiber(fbr)
 	}
 }
+
+// a function stored in an object field is called as a plain function
+func TestFunctionsInObjectFieldsAreNotMethods(t *testing.T) {
+	cases := map[string]string{
+		"fn id(this) => this\nfn main() { o := { f: id }\n return o.f(7) }":                     "7",
+		"fn main() { o := { f: fn(a, b) => a + b }\n return o.f(1, 2) }":                        "3",
+		"fn main() { o := { s: string }\n return o.s(42) }":                                     "42",
+		"fn main() { o := { k: {}.keys }\n return o.k().len() }":                                "0",
+		"struct P(n) { fn get() => this.n }\nfn main() { o := { g: P(5).get }\n return o.g() }": "5",
+	}
+	for code, want := range cases {
+		val, err := runCode("package main\n" + code)
+		if err != nil {
+			t.Errorf("%q: %v", code, err)
+			continue
+		}
+		if val.String() != want {
+			t.Errorf("%q: got %v, want %v", code, val, want)
+		}
+	}
+}
+
+// object literal fields are evaluated in the order they are written
+func TestObjectLiteralEvaluationOrder(t *testing.T) {
+	code := `package main
+	var log := ""
+	fn tap(x) { log += string(x)
+		return x }
+	fn main() {
+		o := { c: tap(3), a: tap(1), b: tap(2), d: tap(4) }
+		return log + ":" + string(o.a + o.b + o.c + o.d)
+	}`
+	for i := 0; i < 20; i++ {
+		val, err := runCode(code)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if val.String() != "3124:10" {
+			t.Fatalf("got %v, want 3124:10", val)
+		}
+	}
+}

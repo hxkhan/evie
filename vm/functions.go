@@ -2,7 +2,6 @@ package vm
 
 import (
 	"fmt"
-	"reflect"
 )
 
 type capture struct {
@@ -20,8 +19,9 @@ func (c capture) String() string {
 // funcInfoStatic holds static function information
 type funcInfoStatic struct {
 	name       string      // name of the function
-	args       []string    // argument names
+	args       []string    // argument names, including the receiver of a method
 	isVariadic bool        // variadic function (...args)
+	isMethod   bool        // declared inside a struct; args[0] is the receiver
 	locals     []bool      // all locals & true for those that escape
 	captures   []capture   // captured references
 	recyclable int         // number of non-escaping locals
@@ -142,77 +142,14 @@ func (fn *UserFn) call(fbr *Fiber, args []Value) (result Value, err Exception) {
 	}
 }
 
-func (fn *UserFn) SaveInto(ptr any) (err error) {
-	if fn.isVariadic {
-		return CustomError("cannot reflect variadic function")
-	}
-
-	fun := reflect.ValueOf(ptr).Elem()
-
-	if len(fn.args) != fun.Type().NumIn() {
-		return fn.accepts(fun.Type().NumIn())
-	}
-
-	resultKind := fun.Type().Out(0).Kind()
-
-	wrapper := reflect.MakeFunc(fun.Type(), func(in []reflect.Value) (out []reflect.Value) {
-		args := make([]Value, len(in))
-		for idx, v := range in {
-			switch v.Kind() {
-			case reflect.Int, reflect.Int32, reflect.Int64:
-				args[idx] = BoxNumber(float64(v.Int()))
-			case reflect.Float32, reflect.Float64:
-				args[idx] = BoxNumber(v.Float())
-			case reflect.String:
-				args[idx] = BoxString(v.String())
-			default:
-				panic("Call: Unsuported types supplied!")
-			}
-		}
-
-		result, err := fn.Call(nil, args...)
-
-		out = make([]reflect.Value, 2)
-		errType := reflect.TypeOf((*error)(nil)).Elem()
-		if err == nil {
-			out[1] = reflect.Zero(errType)
-		} else {
-			out[1] = reflect.ValueOf(err).Convert(errType)
-		}
-
-		switch resultKind {
-		case reflect.Int:
-			f, _ := result.AsFloat64()
-			out[0] = reflect.ValueOf(int(f))
-
-		case reflect.Float64:
-			f, _ := result.AsFloat64()
-			out[0] = reflect.ValueOf(f)
-
-		default:
-			panic("Call: Unsuported types returned!")
-		}
-
-		return out
-	})
-
-	reflect.ValueOf(ptr).Elem().Set(wrapper)
-	return nil
-}
-
 type BoundMethod struct {
 	this Value
 	fn   Value
 }
 
-// isMethod reports whether a user function expects a receiver as its first argument
-func (fn *UserFn) isMethod() bool {
-	return len(fn.args) > 0 && fn.args[0] == "this"
-}
-
 func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (result Value, exc Exception) {
 	if ufn, isUserFn := m.fn.AsUserFn(); isUserFn {
-		if ufn.isMethod() {
+		if ufn.isMethod {
 			if exc := ufn.accepts(1 + len(arguments)); exc != nil {
 				return Value{}, exc
 			}
@@ -248,7 +185,21 @@ func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (result Value, ex
 
 	fn, ok := m.fn.AsGoFunc()
 	if !ok {
-		return Value{}, CustomError("property is not a callable method: %v", m.fn)
+		// whatever else a field holds is called as a plain value
+		args := make([]Value, len(arguments))
+		for i, arg := range arguments {
+			v, exc := arg(fbr)
+			if exc != nil {
+				return v, exc
+			}
+			args[i] = v
+		}
+		return m.fn.Call(fbr, args...)
+	}
+
+	// a native stored in an object field is a plain function, not a method of the object
+	if !fn.IsMethod {
+		return fn.call(fbr, arguments)
 	}
 
 	if exc := fn.accepts(1 + len(arguments)); exc != nil {
@@ -289,7 +240,7 @@ func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (result Value, ex
 
 func (m BoundMethod) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) {
 	if ufn, isUserFn := m.fn.AsUserFn(); isUserFn {
-		if ufn.isMethod() {
+		if ufn.isMethod {
 			allArgs := make([]Value, 1+len(args))
 			allArgs[0] = m.this
 			copy(allArgs[1:], args)
@@ -300,7 +251,11 @@ func (m BoundMethod) Call(fbr *Fiber, args ...Value) (result Value, exc Exceptio
 
 	fn, ok := m.fn.AsGoFunc()
 	if !ok {
-		return Value{}, CustomError("property is not a callable method: %v", m.fn)
+		return m.fn.Call(fbr, args...)
+	}
+
+	if !fn.IsMethod {
+		return fn.Call(fbr, args...)
 	}
 
 	allArgs := make([]Value, 1+len(args))

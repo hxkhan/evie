@@ -13,10 +13,8 @@ import (
 
 func main() {
 	inline := flag.Bool("inline", true, "Optimise the program by inlining certain instruction combinations")
-	m := flag.Bool("m", false, "Print metrics")
 	t := flag.Bool("t", false, "Print execution time")
 	logCaptures := flag.Bool("log-captures", false, "Log when and what is captured")
-	logCache := flag.Bool("log-cache", false, "Log cache hits/misses")
 	flag.Parse()
 
 	if flag.NArg() < 1 {
@@ -28,9 +26,7 @@ func main() {
 
 	loader := evie.NewLoader(evie.LoaderOptions{
 		Inline:      *inline,
-		Metrics:     *m,
 		LogCaptures: *logCaptures,
-		LogCache:    *logCache,
 	})
 
 	before := time.Now()
@@ -57,11 +53,8 @@ func main() {
 		fmt.Println(res)
 	}
 
-	if *m || *t {
-		fmt.Println("------------------------------")
-	}
-
 	if *t {
+		fmt.Println("------------------------------")
 		fmt.Printf("Execution time: %v\n", difference)
 	}
 }

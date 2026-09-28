@@ -3,7 +3,6 @@ package vm
 import (
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/ds"
-	"github.com/hxkhan/evie/vm/fields"
 )
 
 func (vm *Instance) emitFn(node ast.Fn) instruction {
@@ -106,6 +105,7 @@ func (vm *Instance) compileStructMethod(ustruct *UserStruct, node ast.Fn) *UserF
 		name:       node.Name,
 		args:       methodArgs,
 		isVariadic: node.IsVariadic,
+		isMethod:   true,
 		vm:         vm,
 	}
 
@@ -343,26 +343,11 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 		// try struct
 		if us, isUserStruct := value.AsUserStruct(); isUserStruct {
 			if len(us.Fields) != len(arguments) {
-				panic(CustomError("struct '%v' requires %v argument(s), %v provided", us.Name, len(us.Fields), len(arguments)))
+				panic(CompileErrorf("struct '%v' requires %v argument(s), %v provided on line %v", us.Name, len(us.Fields), len(arguments), node.Line()))
 			}
 
-			numFields := len(us.Fields)
 			return func(fbr *Fiber) (Value, Exception) {
-				usi := &UserStructInstance{
-					InstanceOf: us,
-					Fields:     make([]Value, numFields),
-				}
-
-				for i := range numFields {
-					v, exc := arguments[i](fbr)
-					if exc != nil {
-						return v, exc
-					}
-
-					usi.Fields[i] = v
-				}
-
-				return BoxUserStructInstance(usi), nil
+				return us.construct(fbr, arguments)
 			}
 		}
 
@@ -379,11 +364,11 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 	// optimise: calling methods (avoids heap allocation of Method{})
 	if iFA, ok := node.Fn.(ast.FieldAccess); ok {
 		if lhs, ok := vm.evaluate(iFA.Lhs).(local); ok {
-			index := fields.Get(iFA.Rhs)
+			key := fieldKeyOf(iFA.Rhs)
 			return func(fbr *Fiber) (Value, Exception) {
 				obj := fbr.get(lhs)
 				if pkg, ok := obj.asPackage(); ok {
-					value, exists := pkg.globals[index]
+					value, exists := pkg.globals[key.id]
 					if !exists {
 						return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", iFA.Rhs, iFA)
 					}
@@ -406,7 +391,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				}
 
 				// 100% method
-				value := obj.dotAccess(index)
+				value := obj.dotAccess(key)
 				if value.IsNil() {
 					return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", iFA.Rhs, iFA)
 				}
@@ -501,6 +486,14 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 		// try method
 		if m, isMethod := value.asMethod(); isMethod {
 			return m.call(fbr, arguments)
+		}
+
+		// try struct and builtin types as constructors
+		if us, isUserStruct := value.AsUserStruct(); isUserStruct {
+			return us.construct(fbr, arguments)
+		}
+		if bt, isBuiltinType := value.AsBuiltinType(); isBuiltinType {
+			return bt.Constructor.call(fbr, arguments)
 		}
 
 		return Value{}, CustomError("cannot call a non-function '%v'", value)

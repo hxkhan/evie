@@ -20,11 +20,6 @@ var StandardLibraryConstructors = map[string]func() vm.Package{
 }
 
 var Defaults = vm.Options{
-	LogCache:        false,
-	LogCaptures:     false,
-	DisableInlining: false,
-	Metrics:         false,
-	TopLevelLogic:   true,
 	ImportsResolver: StandardLibraryResolver,
 }
 

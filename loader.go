@@ -17,9 +17,7 @@ type LoaderOptions struct {
 	RootDir         string             // project root directory
 	ImportsResolver vm.PackageResolver // custom host package resolver
 	Inline          bool               // enable instruction inlining optimization
-	Metrics         bool               // collect execution metrics
 	LogCaptures     bool               // log captured variables
-	LogCache        bool               // log cache hits/misses
 }
 
 // Loader manages package resolution, multi-file program loading, and script execution.
@@ -54,11 +52,8 @@ func NewLoader(opts ...LoaderOptions) *Loader {
 	}
 
 	vmOpts := vm.Options{
-		LogCache:        opt.LogCache,
 		LogCaptures:     opt.LogCaptures,
 		DisableInlining: !opt.Inline,
-		Metrics:         opt.Metrics,
-		TopLevelLogic:   true,
 		PackageResolver: l.Resolve,
 	}
 

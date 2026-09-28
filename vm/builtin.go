@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"sort"
 	"strconv"
 	"strings"
 
@@ -430,7 +429,7 @@ var typeArray = NewBuiltinType("array", &GoFunc{
 var typeObject = NewBuiltinType("object", &GoFunc{
 	Name: "object",
 	Fn: func(fbr *Fiber) (Value, Exception) {
-		return BoxObject(make(map[fields.ID]Value)), nil
+		return BoxObject(make(map[string]Value)), nil
 	},
 	Arguments: 0,
 }, map[fields.ID]Value{
@@ -440,11 +439,7 @@ var typeObject = NewBuiltinType("object", &GoFunc{
 		IsMethod:  true,
 		Fn: func(fbr *Fiber) (Value, Exception) {
 			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
-				keys := make([]string, 0, len(obj))
-				for k := range obj {
-					keys = append(keys, fields.Lookup(k))
-				}
-				sort.Strings(keys)
+				keys := sortedKeys(obj)
 				arr := make([]Value, len(keys))
 				for i, k := range keys {
 					arr[i] = BoxString(k)
@@ -461,14 +456,10 @@ var typeObject = NewBuiltinType("object", &GoFunc{
 		IsMethod:  true,
 		Fn: func(fbr *Fiber) (Value, Exception) {
 			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
-				keys := make([]string, 0, len(obj))
-				for k := range obj {
-					keys = append(keys, fields.Lookup(k))
-				}
-				sort.Strings(keys)
+				keys := sortedKeys(obj)
 				arr := make([]Value, len(keys))
 				for i, k := range keys {
-					arr[i] = obj[fields.Get(k)]
+					arr[i] = obj[k]
 				}
 				return BoxArray(NewArray(arr...)), nil
 			}
@@ -488,83 +479,11 @@ var typeObject = NewBuiltinType("object", &GoFunc{
 		},
 	}),
 
-	fields.Get("has"): BoxGoFunc(&GoFunc{
-		Name:      "has",
-		Arguments: 2,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
-				keyStr, ok := fbr.GetLocal(1).AsString()
-				if !ok {
-					return BoxBool(false), nil
-				}
-				_, exists := obj[fields.Get(keyStr)]
-				return BoxBool(exists), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
+	fields.Get("has"):      objectHasFunc,
+	fields.Get("contains"): objectHasFunc,
 
-	fields.Get("contains"): BoxGoFunc(&GoFunc{
-		Name:      "contains",
-		Arguments: 2,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
-				keyStr, ok := fbr.GetLocal(1).AsString()
-				if !ok {
-					return BoxBool(false), nil
-				}
-				_, exists := obj[fields.Get(keyStr)]
-				return BoxBool(exists), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("remove"): BoxGoFunc(&GoFunc{
-		Name:      "remove",
-		Arguments: 2,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
-				keyStr, ok := fbr.GetLocal(1).AsString()
-				if !ok {
-					return Value{}, nil
-				}
-				fid := fields.Get(keyStr)
-				val, exists := obj[fid]
-				if exists {
-					delete(obj, fid)
-					return val, nil
-				}
-				return Value{}, nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("delete"): BoxGoFunc(&GoFunc{
-		Name:      "delete",
-		Arguments: 2,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
-				keyStr, ok := fbr.GetLocal(1).AsString()
-				if !ok {
-					return Value{}, nil
-				}
-				fid := fields.Get(keyStr)
-				val, exists := obj[fid]
-				if exists {
-					delete(obj, fid)
-					return val, nil
-				}
-				return Value{}, nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
+	fields.Get("remove"): objectRemoveFunc,
+	fields.Get("delete"): objectRemoveFunc,
 
 	fields.Get("clear"): BoxGoFunc(&GoFunc{
 		Name:      "clear",
@@ -572,14 +491,50 @@ var typeObject = NewBuiltinType("object", &GoFunc{
 		IsMethod:  true,
 		Fn: func(fbr *Fiber) (Value, Exception) {
 			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
-				for k := range obj {
-					delete(obj, k)
-				}
+				clear(obj)
 				return fbr.GetLocal(0), nil
 			}
 			return Value{}, ErrTypes
 		},
 	}),
+})
+
+var objectHasFunc = BoxGoFunc(&GoFunc{
+	Name:      "has",
+	Arguments: 2,
+	IsMethod:  true,
+	Fn: func(fbr *Fiber) (Value, Exception) {
+		if obj, ok := fbr.GetLocal(0).AsObject(); ok {
+			keyStr, ok := fbr.GetLocal(1).AsString()
+			if !ok {
+				return BoxBool(false), nil
+			}
+			_, exists := obj[keyStr]
+			return BoxBool(exists), nil
+		}
+		return Value{}, ErrTypes
+	},
+})
+
+var objectRemoveFunc = BoxGoFunc(&GoFunc{
+	Name:      "remove",
+	Arguments: 2,
+	IsMethod:  true,
+	Fn: func(fbr *Fiber) (Value, Exception) {
+		if obj, ok := fbr.GetLocal(0).AsObject(); ok {
+			keyStr, ok := fbr.GetLocal(1).AsString()
+			if !ok {
+				return Value{}, nil
+			}
+			val, exists := obj[keyStr]
+			if exists {
+				delete(obj, keyStr)
+				return val, nil
+			}
+			return Value{}, nil
+		}
+		return Value{}, ErrTypes
+	},
 })
 
 var typeBuffer = NewBuiltinType("buffer", &GoFunc{

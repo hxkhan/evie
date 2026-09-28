@@ -1,12 +1,15 @@
 package vm
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/hxkhan/evie/vm/fields"
 )
 
+// BuiltinType is a type known to the runtime: it constructs values when called
+// and holds the methods of the values it describes
 type BuiltinType struct {
 	Name        string
 	Constructor *GoFunc
@@ -32,612 +35,320 @@ var builtins = map[string]*Value{
 	"bool":   BoxBuiltinType(typeBool).Allocate(),
 }
 
-var typeNumber = NewBuiltinType("number", &GoFunc{
-	Name: "number",
-	Fn: func(fbr *Fiber) (Value, Exception) {
-		arg := fbr.GetLocal(0)
-		if _, ok := arg.AsFloat64(); ok {
-			return arg, nil
-		}
-		if b, ok := arg.AsBool(); ok {
-			if b {
-				return BoxNumber(1), nil
-			}
-			return BoxNumber(0), nil
-		}
-		if s, ok := arg.AsString(); ok {
-			f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-			if err != nil {
-				return Value{}, CustomError("cannot convert '%v' to a number", s)
-			}
-			return BoxNumber(f), nil
-		}
-		return Value{}, CustomError("cannot convert %v to a number", arg.TypeOf())
-	},
-	Arguments: 1,
-}, map[fields.ID]Value{})
+// receivers of builtin methods are always of the right kind: the runtime only
+// binds a method to a value of its own type, so these conversions cannot fail
+func (x Value) mustError() *Error  { e, _ := x.AsError(); return e }
+func (x Value) mustString() string { s, _ := x.AsString(); return s }
+func (x Value) mustArray() *Array  { a, _ := x.AsArray(); return a }
+func (x Value) mustBuffer() []byte { b, _ := x.AsBuffer(); return b }
+func (x Value) mustTask() *Task    { t, _ := x.AsTask(); return t }
+func (x Value) mustObject() map[string]Value {
+	o, _ := x.AsObject()
+	return o
+}
 
-var typeBool = NewBuiltinType("bool", &GoFunc{
-	Name: "bool",
-	Fn: func(fbr *Fiber) (Value, Exception) {
-		return BoxBool(fbr.GetLocal(0).IsTruthy()), nil
-	},
-	Arguments: 1,
-}, map[fields.ID]Value{})
+var typeNumber = NewBuiltinType("number", NewFunc("number", 1, func(c Call) (Value, error) {
+	arg := c.Arg(0)
+	if _, ok := arg.AsFloat64(); ok {
+		return arg, nil
+	}
+	if b, ok := arg.AsBool(); ok {
+		if b {
+			return BoxNumber(1), nil
+		}
+		return BoxNumber(0), nil
+	}
+	if s, ok := arg.AsString(); ok {
+		f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+		if err != nil {
+			return Value{}, fmt.Errorf("cannot convert '%v' to a number", s)
+		}
+		return BoxNumber(f), nil
+	}
+	return Value{}, fmt.Errorf("cannot convert %v to a number", arg.TypeOf())
+}), methodTable())
 
-var typeError = NewBuiltinType("error", &GoFunc{
-	Name: "error",
-	Fn: func(fbr *Fiber) (Value, Exception) {
-		return BoxError(CustomError("%s", fbr.GetLocal(0).String())), nil
-	},
-	Arguments: 1,
-}, map[fields.ID]Value{
-	fields.Get("message"): BoxGoFunc(&GoFunc{
-		Name:      "message",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if this, ok := fbr.GetLocal(0).AsError(); ok {
-				return BoxString(this.Message), nil
-			}
-			return Value{}, ErrTypes
-		},
+var typeBool = NewBuiltinType("bool", NewFunc("bool", 1, func(c Call) (Value, error) {
+	return BoxBool(c.Arg(0).IsTruthy()), nil
+}), methodTable())
+
+var typeError = NewBuiltinType("error", NewFunc("error", 1, func(c Call) (Value, error) {
+	return BoxError(CustomError("%s", c.Arg(0).String())), nil
+}), methodTable(
+	NewMethod("message", 0, func(c Call) (Value, error) {
+		return BoxString(c.This().mustError().Message), nil
 	}),
-	fields.Get("string"): BoxGoFunc(&GoFunc{
-		Name:      "string",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if this, ok := fbr.GetLocal(0).AsError(); ok {
-				return BoxString(this.Message), nil
-			}
-			return Value{}, ErrTypes
-		},
+	NewMethod("string", 0, func(c Call) (Value, error) {
+		return BoxString(c.This().mustError().Message), nil
 	}),
+))
+
+var typeString = NewBuiltinType("string", NewFunc("string", 1, func(c Call) (Value, error) {
+	arg := c.Arg(0)
+	if buf, ok := arg.AsBuffer(); ok {
+		return BoxString(string(buf)), nil
+	}
+	return BoxString(arg.String()), nil
+}), methodTable(
+	NewMethod("len", 0, func(c Call) (Value, error) {
+		return BoxNumber(float64(len(c.This().mustString()))), nil
+	}),
+	NewMethod("trim", 0, func(c Call) (Value, error) {
+		return BoxString(strings.TrimSpace(c.This().mustString())), nil
+	}),
+	NewMethod("toLower", 0, func(c Call) (Value, error) {
+		return BoxString(strings.ToLower(c.This().mustString())), nil
+	}),
+	NewMethod("toUpper", 0, func(c Call) (Value, error) {
+		return BoxString(strings.ToUpper(c.This().mustString())), nil
+	}),
+	NewMethod("contains", 1, func(c Call) (Value, error) {
+		sub, err := c.String(1)
+		if err != nil {
+			return Value{}, err
+		}
+		return BoxBool(strings.Contains(c.This().mustString(), sub)), nil
+	}),
+	NewMethod("startsWith", 1, func(c Call) (Value, error) {
+		prefix, err := c.String(1)
+		if err != nil {
+			return Value{}, err
+		}
+		return BoxBool(strings.HasPrefix(c.This().mustString(), prefix)), nil
+	}),
+	NewMethod("endsWith", 1, func(c Call) (Value, error) {
+		suffix, err := c.String(1)
+		if err != nil {
+			return Value{}, err
+		}
+		return BoxBool(strings.HasSuffix(c.This().mustString(), suffix)), nil
+	}),
+	NewMethod("split", 1, func(c Call) (Value, error) {
+		sep, err := c.String(1)
+		if err != nil {
+			return Value{}, err
+		}
+		parts := strings.Split(c.This().mustString(), sep)
+		result := make([]Value, len(parts))
+		for i, part := range parts {
+			result[i] = BoxString(part)
+		}
+		return BoxArray(NewArray(result...)), nil
+	}),
+))
+
+var arrayPush = NewMethod("push", 1, func(c Call) (Value, error) {
+	arr := c.This().mustArray()
+	arr.Data = append(arr.Data, c.Arg(1))
+	return c.This(), nil
 })
 
-var typeString = NewBuiltinType("string", &GoFunc{
-	Name: "string",
-	Fn: func(fbr *Fiber) (Value, Exception) {
-		arg := fbr.GetLocal(0)
-		if buf, ok := arg.AsBuffer(); ok {
-			return BoxString(string(buf)), nil
-		}
-		return BoxString(arg.String()), nil
-	},
-	Arguments: 1,
-}, map[fields.ID]Value{
-	fields.Get("len"): BoxGoFunc(&GoFunc{
-		Name:      "len",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if this, ok := fbr.GetLocal(0).AsString(); ok {
-				return BoxNumber(float64(len(this))), nil
-			}
-			return Value{}, ErrTypes
-		},
+var typeArray = NewBuiltinType("array", NewFunc("array", 0, func(c Call) (Value, error) {
+	return BoxArray(NewArray()), nil
+}), methodTable(
+	NewMethod("len", 0, func(c Call) (Value, error) {
+		return BoxNumber(float64(len(c.This().mustArray().Data))), nil
 	}),
-
-	fields.Get("trim"): BoxGoFunc(&GoFunc{
-		Name:      "trim",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if this, ok := fbr.GetLocal(0).AsString(); ok {
-				return BoxString(strings.TrimSpace(this)), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("toLower"): BoxGoFunc(&GoFunc{
-		Name:      "toLower",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if this, ok := fbr.GetLocal(0).AsString(); ok {
-				return BoxString(strings.ToLower(this)), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("toUpper"): BoxGoFunc(&GoFunc{
-		Name:      "toUpper",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if this, ok := fbr.GetLocal(0).AsString(); ok {
-				return BoxString(strings.ToUpper(this)), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("contains"): BoxGoFunc(&GoFunc{
-		Name:      "contains",
-		Arguments: 2,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			this, ok1 := fbr.GetLocal(0).AsString()
-			substr, ok2 := fbr.GetLocal(1).AsString()
-			if ok1 && ok2 {
-				return BoxBool(strings.Contains(this, substr)), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("startsWith"): BoxGoFunc(&GoFunc{
-		Name:      "startsWith",
-		Arguments: 2,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			this, ok1 := fbr.GetLocal(0).AsString()
-			prefix, ok2 := fbr.GetLocal(1).AsString()
-			if ok1 && ok2 {
-				return BoxBool(strings.HasPrefix(this, prefix)), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("endsWith"): BoxGoFunc(&GoFunc{
-		Name:      "endsWith",
-		Arguments: 2,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			this, ok1 := fbr.GetLocal(0).AsString()
-			suffix, ok2 := fbr.GetLocal(1).AsString()
-			if ok1 && ok2 {
-				return BoxBool(strings.HasSuffix(this, suffix)), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("split"): BoxGoFunc(&GoFunc{
-		Name:      "split",
-		Arguments: 2,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			this, ok1 := fbr.GetLocal(0).AsString()
-			sep, ok2 := fbr.GetLocal(1).AsString()
-			if ok1 && ok2 {
-				parts := strings.Split(this, sep)
-				result := make([]Value, len(parts))
-				for i, part := range parts {
-					result[i] = BoxString(part)
-				}
-				return BoxArray(NewArray(result...)), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-})
-
-var arrayPushFunc = BoxGoFunc(&GoFunc{
-	Name:      "push",
-	Arguments: 2,
-	IsMethod:  true,
-	Fn: func(fbr *Fiber) (Value, Exception) {
-		parts, ok := fbr.GetLocal(0).AsArray()
-		val := fbr.GetLocal(1)
-		if ok {
-			parts.Data = append(parts.Data, val)
-			return BoxArray(parts), nil
-		}
-		return Value{}, ErrTypes
-	},
-})
-
-var typeArray = NewBuiltinType("array", &GoFunc{
-	Name: "array",
-	Fn: func(fbr *Fiber) (Value, Exception) {
-		return BoxArray(NewArray()), nil
-	},
-	Arguments: 0,
-}, map[fields.ID]Value{
-	fields.Get("len"): BoxGoFunc(&GoFunc{
-		Name:      "len",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if parts, ok := fbr.GetLocal(0).AsArray(); ok {
-				return BoxNumber(float64(len(parts.Data))), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("push"):   arrayPushFunc,
-	fields.Get("append"): arrayPushFunc,
-
-	fields.Get("pop"): BoxGoFunc(&GoFunc{
-		Name:      "pop",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if parts, ok := fbr.GetLocal(0).AsArray(); ok {
-				if len(parts.Data) == 0 {
-					return Value{}, nil
-				}
-				lastIdx := len(parts.Data) - 1
-				val := parts.Data[lastIdx]
-				parts.Data = parts.Data[:lastIdx]
-				return val, nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("slice"): BoxGoFunc(&GoFunc{
-		Name:      "slice",
-		Arguments: 3,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			parts, ok1 := fbr.GetLocal(0).AsArray()
-			startF, ok2 := fbr.GetLocal(1).AsFloat64()
-			endF, ok3 := fbr.GetLocal(2).AsFloat64()
-			if ok1 && ok2 && ok3 {
-				n := len(parts.Data)
-				start := int(startF)
-				end := int(endF)
-
-				if start < 0 {
-					start = n + start
-					if start < 0 {
-						start = 0
-					}
-				}
-				if end < 0 {
-					end = n + end
-					if end < 0 {
-						end = 0
-					}
-				}
-				if start > n {
-					start = n
-				}
-				if end > n {
-					end = n
-				}
-				if start > end {
-					return BoxArray(NewArray()), nil
-				}
-
-				sub := make([]Value, end-start)
-				copy(sub, parts.Data[start:end])
-				return BoxArray(NewArray(sub...)), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("filter"): BoxGoFunc(&GoFunc{
-		Name:      "filter",
-		Arguments: 2,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			parts, ok1 := fbr.GetLocal(0).AsArray()
-			callback := fbr.GetLocal(1)
-			if ok1 {
-				var result []Value
-				for _, part := range parts.Data {
-					v, exc := callback.Call(fbr, part)
-					if exc != nil {
-						return v, exc
-					}
-					if v.IsTruthy() {
-						result = append(result, part)
-					}
-				}
-				return BoxArray(NewArray(result...)), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("contains"): BoxGoFunc(&GoFunc{
-		Name:      "contains",
-		Arguments: 2,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			parts, ok1 := fbr.GetLocal(0).AsArray()
-			target := fbr.GetLocal(1)
-			if ok1 {
-				for _, item := range parts.Data {
-					if item.Equals(target) {
-						return BoxBool(true), nil
-					}
-				}
-				return BoxBool(false), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("reverse"): BoxGoFunc(&GoFunc{
-		Name:      "reverse",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			parts, ok1 := fbr.GetLocal(0).AsArray()
-			if ok1 {
-				n := len(parts.Data)
-				reversed := make([]Value, n)
-				for i, v := range parts.Data {
-					reversed[n-1-i] = v
-				}
-				return BoxArray(NewArray(reversed...)), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("join"): BoxGoFunc(&GoFunc{
-		Name:      "join",
-		Arguments: 2,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			parts, ok1 := fbr.GetLocal(0).AsArray()
-			sep, ok2 := fbr.GetLocal(1).AsString()
-
-			if ok1 && ok2 {
-				strs := make([]string, len(parts.Data))
-				for i, part := range parts.Data {
-					str, ok := part.AsString()
-					if !ok {
-						return Value{}, ErrTypes
-					}
-					strs[i] = str
-				}
-
-				return BoxString(strings.Join(strs, sep)), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("map"): BoxGoFunc(&GoFunc{
-		Name:      "map",
-		Arguments: 2,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (l Value, e Exception) {
-			parts, ok1 := fbr.GetLocal(0).AsArray()
-			callback := fbr.GetLocal(1)
-
-			if ok1 {
-				result := make([]Value, len(parts.Data))
-				for i, part := range parts.Data {
-					v, exc := callback.Call(fbr, part)
-					if exc != nil {
-						return v, exc
-					}
-					result[i] = v
-				}
-
-				return BoxArray(NewArray(result...)), nil
-			}
-
-			return Value{}, ErrTypes
-		},
-	}),
-})
-
-var typeObject = NewBuiltinType("object", &GoFunc{
-	Name: "object",
-	Fn: func(fbr *Fiber) (Value, Exception) {
-		return BoxObject(make(map[string]Value)), nil
-	},
-	Arguments: 0,
-}, map[fields.ID]Value{
-	fields.Get("keys"): BoxGoFunc(&GoFunc{
-		Name:      "keys",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
-				keys := sortedKeys(obj)
-				arr := make([]Value, len(keys))
-				for i, k := range keys {
-					arr[i] = BoxString(k)
-				}
-				return BoxArray(NewArray(arr...)), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("values"): BoxGoFunc(&GoFunc{
-		Name:      "values",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
-				keys := sortedKeys(obj)
-				arr := make([]Value, len(keys))
-				for i, k := range keys {
-					arr[i] = obj[k]
-				}
-				return BoxArray(NewArray(arr...)), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("len"): BoxGoFunc(&GoFunc{
-		Name:      "len",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
-				return BoxNumber(float64(len(obj))), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("has"):      objectHasFunc,
-	fields.Get("contains"): objectHasFunc,
-
-	fields.Get("remove"): objectRemoveFunc,
-	fields.Get("delete"): objectRemoveFunc,
-
-	fields.Get("clear"): BoxGoFunc(&GoFunc{
-		Name:      "clear",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if obj, ok := fbr.GetLocal(0).AsObject(); ok {
-				clear(obj)
-				return fbr.GetLocal(0), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-})
-
-var objectHasFunc = BoxGoFunc(&GoFunc{
-	Name:      "has",
-	Arguments: 2,
-	IsMethod:  true,
-	Fn: func(fbr *Fiber) (Value, Exception) {
-		if obj, ok := fbr.GetLocal(0).AsObject(); ok {
-			keyStr, ok := fbr.GetLocal(1).AsString()
-			if !ok {
-				return BoxBool(false), nil
-			}
-			_, exists := obj[keyStr]
-			return BoxBool(exists), nil
-		}
-		return Value{}, ErrTypes
-	},
-})
-
-var objectRemoveFunc = BoxGoFunc(&GoFunc{
-	Name:      "remove",
-	Arguments: 2,
-	IsMethod:  true,
-	Fn: func(fbr *Fiber) (Value, Exception) {
-		if obj, ok := fbr.GetLocal(0).AsObject(); ok {
-			keyStr, ok := fbr.GetLocal(1).AsString()
-			if !ok {
-				return Value{}, nil
-			}
-			val, exists := obj[keyStr]
-			if exists {
-				delete(obj, keyStr)
-				return val, nil
-			}
+	arrayPush,
+	alias("append", arrayPush),
+	NewMethod("pop", 0, func(c Call) (Value, error) {
+		arr := c.This().mustArray()
+		if len(arr.Data) == 0 {
 			return Value{}, nil
 		}
-		return Value{}, ErrTypes
-	},
+		last := len(arr.Data) - 1
+		val := arr.Data[last]
+		arr.Data = arr.Data[:last]
+		return val, nil
+	}),
+	NewMethod("slice", 2, func(c Call) (Value, error) {
+		start, err := c.Int(1)
+		if err != nil {
+			return Value{}, err
+		}
+		end, err := c.Int(2)
+		if err != nil {
+			return Value{}, err
+		}
+		data := c.This().mustArray().Data
+		n := len(data)
+		if start < 0 {
+			start = max(n+start, 0)
+		}
+		if end < 0 {
+			end = max(n+end, 0)
+		}
+		start, end = min(start, n), min(end, n)
+		if start > end {
+			return BoxArray(NewArray()), nil
+		}
+		sub := make([]Value, end-start)
+		copy(sub, data[start:end])
+		return BoxArray(NewArray(sub...)), nil
+	}),
+	NewMethod("filter", 1, func(c Call) (Value, error) {
+		callback, err := c.Callable(1)
+		if err != nil {
+			return Value{}, err
+		}
+		var result []Value
+		for _, item := range c.This().mustArray().Data {
+			keep, err := c.Call(callback, item)
+			if err != nil {
+				return Value{}, err
+			}
+			if keep.IsTruthy() {
+				result = append(result, item)
+			}
+		}
+		return BoxArray(NewArray(result...)), nil
+	}),
+	NewMethod("map", 1, func(c Call) (Value, error) {
+		callback, err := c.Callable(1)
+		if err != nil {
+			return Value{}, err
+		}
+		data := c.This().mustArray().Data
+		result := make([]Value, len(data))
+		for i, item := range data {
+			mapped, err := c.Call(callback, item)
+			if err != nil {
+				return Value{}, err
+			}
+			result[i] = mapped
+		}
+		return BoxArray(NewArray(result...)), nil
+	}),
+	NewMethod("contains", 1, func(c Call) (Value, error) {
+		target := c.Arg(1)
+		for _, item := range c.This().mustArray().Data {
+			if item.Equals(target) {
+				return BoxBool(true), nil
+			}
+		}
+		return BoxBool(false), nil
+	}),
+	NewMethod("reverse", 0, func(c Call) (Value, error) {
+		data := c.This().mustArray().Data
+		reversed := make([]Value, len(data))
+		for i, v := range data {
+			reversed[len(data)-1-i] = v
+		}
+		return BoxArray(NewArray(reversed...)), nil
+	}),
+	NewMethod("join", 1, func(c Call) (Value, error) {
+		sep, err := c.String(1)
+		if err != nil {
+			return Value{}, err
+		}
+		data := c.This().mustArray().Data
+		parts := make([]string, len(data))
+		for i, item := range data {
+			str, ok := item.AsString()
+			if !ok {
+				return Value{}, fmt.Errorf("join: element %d is %s, not a string", i, item.TypeOf())
+			}
+			parts[i] = str
+		}
+		return BoxString(strings.Join(parts, sep)), nil
+	}),
+))
+
+var objectHas = NewMethod("has", 1, func(c Call) (Value, error) {
+	key, ok := c.Arg(1).AsString()
+	if !ok {
+		return BoxBool(false), nil
+	}
+	_, exists := c.This().mustObject()[key]
+	return BoxBool(exists), nil
 })
 
-var typeBuffer = NewBuiltinType("buffer", &GoFunc{
-	Name: "buffer",
-	Fn: func(fbr *Fiber) (Value, Exception) {
-		return BoxBuffer([]byte{}), nil
-	},
-	Arguments: 0,
-}, map[fields.ID]Value{
-	fields.Get("string"): BoxGoFunc(&GoFunc{
-		Name:      "string",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if buf, ok := fbr.GetLocal(0).AsBuffer(); ok {
-				return BoxString(string(buf)), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("len"): BoxGoFunc(&GoFunc{
-		Name:      "len",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if buf, ok := fbr.GetLocal(0).AsBuffer(); ok {
-				return BoxNumber(float64(len(buf))), nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
+var objectRemove = NewMethod("remove", 1, func(c Call) (Value, error) {
+	key, ok := c.Arg(1).AsString()
+	if !ok {
+		return Value{}, nil
+	}
+	obj := c.This().mustObject()
+	val, exists := obj[key]
+	if exists {
+		delete(obj, key)
+		return val, nil
+	}
+	return Value{}, nil
 })
 
-var typeTask = NewBuiltinType("task", &GoFunc{
-	Name: "task",
-	Fn: func(fbr *Fiber) (Value, Exception) {
-		return BoxTask(NewTaskInstance()), nil
-	},
-	Arguments: 0,
-}, map[fields.ID]Value{
-	fields.Get("done"): BoxGoFunc(&GoFunc{
-		Name:      "done",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if t, ok := fbr.GetLocal(0).AsTask(); ok {
-				return BoxBool(t.IsDone()), nil
-			}
-			return Value{}, ErrTypes
-		},
+var typeObject = NewBuiltinType("object", NewFunc("object", 0, func(c Call) (Value, error) {
+	return BoxObject(make(map[string]Value)), nil
+}), methodTable(
+	NewMethod("keys", 0, func(c Call) (Value, error) {
+		keys := sortedKeys(c.This().mustObject())
+		arr := make([]Value, len(keys))
+		for i, k := range keys {
+			arr[i] = BoxString(k)
+		}
+		return BoxArray(NewArray(arr...)), nil
 	}),
+	NewMethod("values", 0, func(c Call) (Value, error) {
+		obj := c.This().mustObject()
+		keys := sortedKeys(obj)
+		arr := make([]Value, len(keys))
+		for i, k := range keys {
+			arr[i] = obj[k]
+		}
+		return BoxArray(NewArray(arr...)), nil
+	}),
+	NewMethod("len", 0, func(c Call) (Value, error) {
+		return BoxNumber(float64(len(c.This().mustObject()))), nil
+	}),
+	objectHas,
+	alias("contains", objectHas),
+	objectRemove,
+	alias("delete", objectRemove),
+	NewMethod("clear", 0, func(c Call) (Value, error) {
+		clear(c.This().mustObject())
+		return c.This(), nil
+	}),
+))
 
-	fields.Get("isDone"): BoxGoFunc(&GoFunc{
-		Name:      "isDone",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if t, ok := fbr.GetLocal(0).AsTask(); ok {
-				return BoxBool(t.IsDone()), nil
-			}
-			return Value{}, ErrTypes
-		},
+var typeBuffer = NewBuiltinType("buffer", NewFunc("buffer", 0, func(c Call) (Value, error) {
+	return BoxBuffer([]byte{}), nil
+}), methodTable(
+	NewMethod("string", 0, func(c Call) (Value, error) {
+		return BoxString(string(c.This().mustBuffer())), nil
 	}),
+	NewMethod("len", 0, func(c Call) (Value, error) {
+		return BoxNumber(float64(len(c.This().mustBuffer()))), nil
+	}),
+))
 
-	fields.Get("result"): BoxGoFunc(&GoFunc{
-		Name:      "result",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if t, ok := fbr.GetLocal(0).AsTask(); ok {
-				res, _ := t.Result()
-				return res, nil
-			}
-			return Value{}, ErrTypes
-		},
+var typeTask = NewBuiltinType("task", NewFunc("task", 0, func(c Call) (Value, error) {
+	return BoxTask(NewTaskInstance()), nil
+}), methodTable(
+	NewMethod("done", 0, func(c Call) (Value, error) {
+		return BoxBool(c.This().mustTask().IsDone()), nil
 	}),
+	NewMethod("isDone", 0, func(c Call) (Value, error) {
+		return BoxBool(c.This().mustTask().IsDone()), nil
+	}),
+	NewMethod("result", 0, func(c Call) (Value, error) {
+		res, _ := c.This().mustTask().Result()
+		return res, nil
+	}),
+	NewMethod("error", 0, func(c Call) (Value, error) {
+		_, exc := c.This().mustTask().Result()
+		if exc != nil {
+			return BoxError(exc), nil
+		}
+		return Value{}, nil
+	}),
+	NewMethod("await", 0, func(c Call) (Value, error) {
+		return plain(c.This().mustTask().Await(c.fbr))
+	}),
+))
 
-	fields.Get("error"): BoxGoFunc(&GoFunc{
-		Name:      "error",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if t, ok := fbr.GetLocal(0).AsTask(); ok {
-				_, err := t.Result()
-				if err != nil {
-					return BoxError(CustomError("%s", err.Error())), nil
-				}
-				return Value{}, nil
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-
-	fields.Get("await"): BoxGoFunc(&GoFunc{
-		Name:      "await",
-		Arguments: 1,
-		IsMethod:  true,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			if t, ok := fbr.GetLocal(0).AsTask(); ok {
-				return t.Await(fbr)
-			}
-			return Value{}, ErrTypes
-		},
-	}),
-})
+// alias registers the same native under a second name
+func alias(name string, fn *GoFunc) *GoFunc {
+	copy := *fn
+	copy.Name = name
+	return &copy
+}

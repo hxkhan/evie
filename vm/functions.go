@@ -349,18 +349,17 @@ func (m BoundMethod) Call(fbr *Fiber, args ...Value) (Value, Exception) {
 	return m.fn.Call(fbr, args...)
 }
 
-type GoFuncSignature = func(fbr *Fiber) (Value, Exception)
-
-// GoFunc is a native function exposed to evie code. A Blocking function gives up
-// the instance runner while it executes, so it must not touch evie values that
-// other fibers can reach; use it for I/O and sleeps.
+// GoFunc is a native function exposed to evie code. Arguments counts the
+// receiver of a method. A Blocking function gives up the instance runner while
+// it executes, so it must not touch evie values that other fibers can reach;
+// use it for I/O and sleeps.
 type GoFunc struct {
 	Name       string
 	Arguments  int
 	IsVariadic bool
 	IsMethod   bool
 	Blocking   bool
-	Fn         GoFuncSignature
+	Fn         NativeFn
 }
 
 func (fn *GoFunc) accepts(n int) Exception {
@@ -385,21 +384,22 @@ func (fn *GoFunc) arityError(n int) Exception {
 // releases the frame
 func (fn *GoFunc) run(fbr *Fiber, base int, pushed int) (Value, Exception) {
 	prevBase := fbr.swapBase(base)
+	c := Call{fbr: fbr, fn: fn, base: base, n: pushed}
 
 	var result Value
-	var exc Exception
+	var err error
 	if fn.Blocking && fbr.running {
 		fbr.unlock()
-		result, exc = fn.Fn(fbr)
+		result, err = fn.Fn(c)
 		fbr.lock()
 	} else {
-		result, exc = fn.Fn(fbr)
+		result, err = fn.Fn(c)
 	}
 
 	fbr.push(pushed)
 	fbr.popStack(pushed)
 	fbr.swapBase(prevBase)
-	return result, exc
+	return result, toException(err)
 }
 
 // pushArg places one evaluated argument in a fresh box on the stack

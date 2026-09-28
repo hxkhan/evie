@@ -17,7 +17,7 @@ func main() {
 
 	// package-statics for packages that import them via the header
 	// e.g. package foo imports("bar")
-	resolver := func(name string) vm.Package {
+	resolver := func(name string) *vm.Package {
 		switch name {
 		case "io":
 			return io.Construct()

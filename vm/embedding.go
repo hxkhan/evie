@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"fmt"
 	"strings"
 )
 
@@ -55,6 +56,28 @@ func (vm *Instance) SetGlobal(pkgName, symName string, val Value) bool {
 	if pkg == nil {
 		return false
 	}
-	pkg.SetSymbol(symName, val)
+	pkg.Set(symName, val)
 	return true
+}
+
+// Call looks a callable up by path, such as "main.add", boxes the Go arguments
+// with BoxAny and calls it on a borrowed fiber. It is the simplest way to call
+// into a script from Go.
+func (vm *Instance) Call(path string, args ...any) (Value, error) {
+	fn, ok := vm.Lookup(path)
+	if !ok {
+		return Value{}, fmt.Errorf("symbol '%s' not found", path)
+	}
+	if !fn.IsCallable() {
+		return Value{}, fmt.Errorf("symbol '%s' is a %s, not a callable", path, fn.TypeOf())
+	}
+	boxed := make([]Value, len(args))
+	for i, arg := range args {
+		v, err := BoxAny(arg)
+		if err != nil {
+			return Value{}, fmt.Errorf("argument %d: %w", i+1, err)
+		}
+		boxed[i] = v
+	}
+	return plain(fn.Call(nil, boxed...))
 }

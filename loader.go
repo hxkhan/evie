@@ -26,8 +26,8 @@ type Loader struct {
 	vm           *vm.Instance
 	rootDir      string
 	dirStack     []string
-	filePackages map[string]vm.Package
-	dirPackages  map[string]vm.Package
+	filePackages map[string]*vm.Package
+	dirPackages  map[string]*vm.Package
 	loading      map[string]bool
 	cycleTrace   []string
 	loadedFiles  []string
@@ -44,8 +44,8 @@ func NewLoader(opts ...LoaderOptions) *Loader {
 		opts:         opt,
 		rootDir:      opt.RootDir,
 		dirStack:     make([]string, 0, 8),
-		filePackages: make(map[string]vm.Package),
-		dirPackages:  make(map[string]vm.Package),
+		filePackages: make(map[string]*vm.Package),
+		dirPackages:  make(map[string]*vm.Package),
 		loading:      make(map[string]bool),
 		cycleTrace:   make([]string, 0, 8),
 		loadedFiles:  make([]string, 0, 16),
@@ -72,7 +72,7 @@ func (l *Loader) LoadedFiles() []string {
 }
 
 // Resolve resolves an imported package name or path.
-func (l *Loader) Resolve(importPath string) (vm.Package, error) {
+func (l *Loader) Resolve(importPath string) (*vm.Package, error) {
 	// 1. Check if already registered by name in the VM
 	if pkg := l.vm.GetPackage(importPath); pkg != nil {
 		return pkg, nil
@@ -98,7 +98,7 @@ func (l *Loader) Resolve(importPath string) (vm.Package, error) {
 	return l.resolveFromFilesystem(importPath)
 }
 
-func (l *Loader) resolveFromFilesystem(importPath string) (vm.Package, error) {
+func (l *Loader) resolveFromFilesystem(importPath string) (*vm.Package, error) {
 	var currentDir string
 	if len(l.dirStack) > 0 {
 		currentDir = l.dirStack[len(l.dirStack)-1]
@@ -151,7 +151,7 @@ func (l *Loader) getCandidates(importPath, currentDir string) []string {
 	return candidates
 }
 
-func (l *Loader) loadFilePackage(filePath string) (vm.Package, error) {
+func (l *Loader) loadFilePackage(filePath string) (*vm.Package, error) {
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
 		return nil, err
@@ -206,7 +206,7 @@ func (l *Loader) loadFilePackage(filePath string) (vm.Package, error) {
 	return pkg, nil
 }
 
-func (l *Loader) loadDirectoryPackage(dirPath string) (vm.Package, error) {
+func (l *Loader) loadDirectoryPackage(dirPath string) (*vm.Package, error) {
 	absDir, err := filepath.Abs(dirPath)
 	if err != nil {
 		return nil, err

@@ -60,20 +60,12 @@ const (
 	kindStruct
 	kindStructInstance
 	kindError
-	kindCustom
+	kindHost
 )
 
 // scalar types
 var f64Type = unsafe.Pointer(new(byte))
 var boolType = unsafe.Pointer(new(byte))
-
-// CustomValue is an interface for evie hosts to add their own custom values to the language
-type CustomValue interface {
-	String() string
-	TypeOf() string
-	IsTruthy() bool
-	Equals(b CustomValue) bool
-}
 
 // BoxNumber boxes a float64
 func BoxNumber(f float64) Value {
@@ -143,11 +135,6 @@ func BoxError(err *Error) Value {
 	return Value{scalar: kindError, pointer: unsafe.Pointer(err)}
 }
 
-// Box boxes an evie package
-func (pkg *packageInstance) Box() Value {
-	return Value{scalar: kindPackage, pointer: unsafe.Pointer(pkg)}
-}
-
 func boxMethod(m BoundMethod) Value {
 	return Value{scalar: kindBoundMethod, pointer: unsafe.Pointer(&m)}
 }
@@ -155,11 +142,6 @@ func boxMethod(m BoundMethod) Value {
 // BoxBuffer boxes a Golang byte slice
 func BoxBuffer(bytes []byte) Value {
 	return Value{scalar: kindBuffer, pointer: unsafe.Pointer(&bytes)}
-}
-
-// BoxCustom boxes a value of a custom type
-func BoxCustom(cv CustomValue) Value {
-	return Value{scalar: kindCustom, pointer: unsafe.Pointer(&cv)}
 }
 
 func (x Value) IsNil() bool {
@@ -242,18 +224,11 @@ func (x Value) AsTask() (task *Task, ok bool) {
 	return (*Task)(x.pointer), true
 }
 
-func (x Value) asPackage() (pkg *packageInstance, ok bool) {
+func (x Value) AsPackage() (pkg *Package, ok bool) {
 	if x.scalar != kindPackage || isKnown(x.pointer) {
 		return nil, false
 	}
-	return (*packageInstance)(x.pointer), true
-}
-
-func (x Value) AsPackage() (pkg Package, ok bool) {
-	if x.scalar != kindPackage || isKnown(x.pointer) {
-		return nil, false
-	}
-	return (*packageInstance)(x.pointer), true
+	return (*Package)(x.pointer), true
 }
 
 func (x Value) AsError() (err *Error, ok bool) {
@@ -275,13 +250,6 @@ func (x Value) AsBuffer() (buffer []byte, ok bool) {
 		return nil, false
 	}
 	return *(*[]byte)(x.pointer), true
-}
-
-func (x Value) AsCustom() (cv CustomValue, ok bool) {
-	if x.scalar != kindCustom || isKnown(x.pointer) {
-		return nil, false
-	}
-	return *(*CustomValue)(x.pointer), true
 }
 
 // Allocate will copy the current value to the heap and return a pointer to it
@@ -324,9 +292,8 @@ func (x Value) IsTruthy() bool {
 	case kindBuffer:
 		buffer := *(*[]byte)(x.pointer)
 		return len(buffer) != 0
-	case kindCustom:
-		cv := *(*CustomValue)(x.pointer)
-		return cv.IsTruthy()
+	case kindHost:
+		return true
 	}
 
 	return false
@@ -350,10 +317,8 @@ func (x Value) Equals(y Value) bool {
 	switch x.scalar {
 	case kindString:
 		return *(*string)(x.pointer) == *(*string)(y.pointer)
-	case kindCustom:
-		lhs := (*(*CustomValue)(x.pointer))
-		rhs := (*(*CustomValue)(y.pointer))
-		return lhs.Equals(rhs)
+	case kindHost:
+		return x.host().equals(y.host())
 	}
 
 	// default comparison
@@ -442,9 +407,8 @@ func (x Value) String() string {
 	case kindError:
 		obj := (*Error)(x.pointer)
 		return obj.Error()
-	case kindCustom:
-		cv := (*(*CustomValue)(x.pointer))
-		return cv.String()
+	case kindHost:
+		return x.host().String()
 	}
 
 	return "<unknown>"
@@ -487,9 +451,8 @@ func (x Value) TypeOf() string {
 		return "type"
 	case kindError:
 		return "error"
-	case kindCustom:
-		cv := (*(*CustomValue)(x.pointer))
-		return cv.TypeOf()
+	case kindHost:
+		return x.host().typ.Name()
 	}
 
 	return "<unknown>"
@@ -557,7 +520,7 @@ func (x Value) getField(k fieldKey) (field Value, ok bool) {
 		return Value{}, false
 
 	case kindPackage:
-		pkg := (*packageInstance)(x.pointer)
+		pkg := (*Package)(x.pointer)
 		value, exists := pkg.globals[k.id]
 		if !exists || !value.IsPublic {
 			return Value{}, false
@@ -569,6 +532,9 @@ func (x Value) getField(k fieldKey) (field Value, ok bool) {
 			return BoxString((*Error)(x.pointer).Message), true
 		}
 		return x.boundMethod(typeError, k.id)
+
+	case kindHost:
+		return x.boundMethod(x.host().typ.typ, k.id)
 	}
 
 	return Value{}, false
@@ -606,8 +572,10 @@ func (x Value) dotAccess(k fieldKey) (field Value) {
 		return typeObject.Fields[k.id]
 	case kindError:
 		return typeError.Fields[k.id]
+	case kindHost:
+		return x.host().typ.typ.Fields[k.id]
 	case kindPackage:
-		pkg := (*packageInstance)(x.pointer)
+		pkg := (*Package)(x.pointer)
 		value := pkg.globals[k.id]
 		if !value.IsPublic {
 			return Value{}

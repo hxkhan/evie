@@ -103,20 +103,23 @@ func BoxAny(v any) (Value, error) {
 		return BoxGoFunc(val), nil
 	case GoFunc:
 		return BoxGoFunc(&val), nil
-	case GoFuncSignature:
-		return BoxGoFunc(&GoFunc{Name: "native", Fn: val}), nil
+	case NativeFn:
+		return BoxGoFunc(NewVariadic("native", 0, val)), nil
 	case *UserFn:
 		return BoxUserFn(*val), nil
 	case UserFn:
 		return BoxUserFn(val), nil
 	case *Task:
 		return BoxTask(val), nil
-	case CustomValue:
-		return BoxCustom(val), nil
 	case *Error:
 		return BoxError(val), nil
 	case error:
 		return BoxError(CustomError("%s", val.Error())), nil
+	}
+
+	// a Go type the host registered travels as it is
+	if boxed, ok := BoxHost(v); ok {
+		return boxed, nil
 	}
 
 	rv := reflect.ValueOf(v)
@@ -176,130 +179,111 @@ func BoxAny(v any) (Value, error) {
 		return BoxObject(obj), nil
 
 	case reflect.Func:
-		return wrapGoFunction(rv)
+		return BoxGoFunc(Reflect(v)), nil
 
 	default:
 		return Value{}, fmt.Errorf("cannot box type %T into Evie Value", v)
 	}
 }
 
-func wrapGoFunction(fnVal reflect.Value) (Value, error) {
+// Reflect wraps any Go function as a native through reflection, converting
+// each argument to the parameter type and boxing the results. It is the slow
+// but universal path; the typed wrappers in wrap.go avoid reflection.
+func Reflect(fn any) *GoFunc {
+	fnVal := reflect.ValueOf(fn)
 	fnType := fnVal.Type()
+	if fnType.Kind() != reflect.Func {
+		panic(fmt.Sprintf("Reflect: %T is not a function", fn))
+	}
 	numIn := fnType.NumIn()
 	isVariadic := fnType.IsVariadic()
+	fixedCount := numIn
+	if isVariadic {
+		fixedCount = numIn - 1
+	}
+	errType := reflect.TypeOf((*error)(nil)).Elem()
 
-	gf := &GoFunc{
-		Name:       "goFunc",
-		Arguments:  numIn,
-		IsVariadic: isVariadic,
-		Fn: func(fbr *Fiber) (Value, Exception) {
-			argCount := fbr.ArgCount()
-			if isVariadic {
-				if argCount < numIn-1 {
-					return Value{}, CustomError("function requires at least %d argument(s), %d provided", numIn-1, argCount)
-				}
+	gf := &GoFunc{Name: "native", Arguments: fixedCount, IsVariadic: isVariadic}
+	gf.Fn = func(c Call) (Value, error) {
+		inArgs := make([]reflect.Value, numIn)
+		for i := 0; i < fixedCount; i++ {
+			goVal, err := unmarshalToType(c.Arg(i), fnType.In(i))
+			if err != nil {
+				return Value{}, fmt.Errorf("argument %d: %v", i+1, err)
+			}
+			if goVal == nil {
+				inArgs[i] = reflect.Zero(fnType.In(i))
 			} else {
-				if argCount != numIn {
-					return Value{}, CustomError("function requires %d argument(s), %d provided", numIn, argCount)
-				}
+				inArgs[i] = reflect.ValueOf(goVal)
 			}
+		}
 
-			inArgs := make([]reflect.Value, numIn)
-			fixedCount := numIn
-			if isVariadic {
-				fixedCount = numIn - 1
-			}
-
-			for i := 0; i < fixedCount; i++ {
-				evieVal := fbr.GetLocal(int16(i))
-				goVal, err := unmarshalToType(evieVal, fnType.In(i))
+		if isVariadic {
+			elemType := fnType.In(numIn - 1).Elem()
+			varCount := c.Len() - fixedCount
+			sliceVal := reflect.MakeSlice(fnType.In(numIn-1), varCount, varCount)
+			for j := 0; j < varCount; j++ {
+				goVal, err := unmarshalToType(c.Arg(fixedCount+j), elemType)
 				if err != nil {
-					return Value{}, CustomError("argument %d: %v", i, err)
+					return Value{}, fmt.Errorf("variadic argument %d: %v", j+1, err)
 				}
 				if goVal == nil {
-					inArgs[i] = reflect.Zero(fnType.In(i))
+					sliceVal.Index(j).Set(reflect.Zero(elemType))
 				} else {
-					inArgs[i] = reflect.ValueOf(goVal)
+					sliceVal.Index(j).Set(reflect.ValueOf(goVal))
 				}
 			}
+			inArgs[numIn-1] = sliceVal
+		}
 
-			if isVariadic {
-				elemType := fnType.In(numIn - 1).Elem()
-				varCount := argCount - (numIn - 1)
-				sliceVal := reflect.MakeSlice(fnType.In(numIn-1), varCount, varCount)
-				for j := 0; j < varCount; j++ {
-					evieVal := fbr.GetLocal(int16(numIn - 1 + j))
-					goVal, err := unmarshalToType(evieVal, elemType)
-					if err != nil {
-						return Value{}, CustomError("variadic argument %d: %v", j, err)
-					}
-					if goVal == nil {
-						sliceVal.Index(j).Set(reflect.Zero(elemType))
-					} else {
-						sliceVal.Index(j).Set(reflect.ValueOf(goVal))
-					}
-				}
-				inArgs[numIn-1] = sliceVal
-			}
+		var out []reflect.Value
+		if isVariadic {
+			out = fnVal.CallSlice(inArgs)
+		} else {
+			out = fnVal.Call(inArgs)
+		}
 
-			var out []reflect.Value
-			if isVariadic {
-				out = fnVal.CallSlice(inArgs)
-			} else {
-				out = fnVal.Call(inArgs)
+		switch {
+		case len(out) == 0:
+			return Value{}, nil
+		case len(out) == 1 && out[0].Type().Implements(errType):
+			if !out[0].IsNil() {
+				return Value{}, out[0].Interface().(error)
 			}
+			return Value{}, nil
+		case len(out) == 1:
+			return BoxAny(out[0].Interface())
+		case len(out) == 2 && out[1].Type().Implements(errType):
+			if !out[1].IsNil() {
+				return Value{}, out[1].Interface().(error)
+			}
+			return BoxAny(out[0].Interface())
+		}
 
-			if len(out) == 0 {
-				return Value{}, nil
+		// multiple return values become an array
+		results := make([]Value, len(out))
+		for i, o := range out {
+			b, err := BoxAny(o.Interface())
+			if err != nil {
+				return Value{}, fmt.Errorf("return value %d: %v", i+1, err)
 			}
-
-			errType := reflect.TypeOf((*error)(nil)).Elem()
-			if len(out) == 1 {
-				if out[0].Type().Implements(errType) {
-					if !out[0].IsNil() {
-						err := out[0].Interface().(error)
-						return Value{}, CustomError("%s", err.Error())
-					}
-					return Value{}, nil
-				}
-				res, err := BoxAny(out[0].Interface())
-				if err != nil {
-					return Value{}, CustomError("return conversion error: %v", err)
-				}
-				return res, nil
-			}
-
-			if len(out) == 2 && out[1].Type().Implements(errType) {
-				if !out[1].IsNil() {
-					err := out[1].Interface().(error)
-					return Value{}, CustomError("%s", err.Error())
-				}
-				res, err := BoxAny(out[0].Interface())
-				if err != nil {
-					return Value{}, CustomError("return conversion error: %v", err)
-				}
-				return res, nil
-			}
-
-			// multiple return values: return array
-			results := make([]Value, len(out))
-			for i, o := range out {
-				b, err := BoxAny(o.Interface())
-				if err != nil {
-					return Value{}, CustomError("return conversion error at %d: %v", i, err)
-				}
-				results[i] = b
-			}
-			return BoxArray(NewArray(results...)), nil
-		},
+			results[i] = b
+		}
+		return BoxArray(NewArray(results...)), nil
 	}
-
-	return BoxGoFunc(gf), nil
+	return gf
 }
 
 func unmarshalToType(val Value, targetType reflect.Type) (any, error) {
 	if targetType == reflect.TypeOf(Value{}) {
 		return val, nil
+	}
+
+	if hv, _, ok := val.AsHost(); ok {
+		if reflect.TypeOf(hv).AssignableTo(targetType) {
+			return hv, nil
+		}
+		return nil, fmt.Errorf("cannot pass %s as %v", val.TypeOf(), targetType)
 	}
 
 	if val.IsNil() {
@@ -512,8 +496,8 @@ func (v Value) ToGo() any {
 	if gf, ok := v.AsGoFunc(); ok {
 		return gf
 	}
-	if cv, ok := v.AsCustom(); ok {
-		return cv
+	if hv, _, ok := v.AsHost(); ok {
+		return hv
 	}
 	if pkg, ok := v.AsPackage(); ok {
 		return pkg

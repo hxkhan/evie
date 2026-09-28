@@ -1,6 +1,8 @@
 package evie_test
 
 import (
+	"errors"
+	"math"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -23,7 +25,7 @@ func TestRuntimeErrorsNeverPanic(t *testing.T) {
 		"return {}.missing":               "undefined symbol 'missing'",
 		"return \"abc\".len(1)":           "argument(s)",
 		"var o := {}\nreturn o.x.y":       "undefined symbol",
-		"return [1].map(5)":               "cannot invoke a non-callable",
+		"return [1].map(5)":               "must be callable",
 		"s := \"x\"\nreturn s[\"k\"]":     "string index must be a number",
 	}
 	for code, want := range cases {
@@ -41,9 +43,9 @@ func TestRuntimeErrorsNeverPanic(t *testing.T) {
 // a panicking native is a bug in the host, which is reported, never propagated
 func TestPanickingNativeBecomesException(t *testing.T) {
 	env := evie.New()
-	env.SetStatic("boom", vm.BoxGoFunc(&vm.GoFunc{Name: "boom", Fn: func(fbr *vm.Fiber) (vm.Value, vm.Exception) {
+	env.SetStatic("boom", vm.BoxGoFunc(vm.NewFunc("boom", 0, func(c vm.Call) (vm.Value, error) {
 		panic("host bug")
-	}}))
+	})))
 	_, err := env.EvalString(`package main
 	fn direct() { return boom() }
 	fn inTask() { return await go boom() }
@@ -152,7 +154,7 @@ func TestObjectLiteralEvaluationOrder(t *testing.T) {
 func TestOneFiberRunsAtATime(t *testing.T) {
 	env := evie.New()
 	var inside, overlaps atomic.Int32
-	env.SetStatic("probe", vm.BoxGoFunc(&vm.GoFunc{Name: "probe", Fn: func(fbr *vm.Fiber) (vm.Value, vm.Exception) {
+	env.SetStatic("probe", vm.BoxGoFunc(vm.NewFunc("probe", 0, func(c vm.Call) (vm.Value, error) {
 		if inside.Add(1) != 1 {
 			overlaps.Add(1)
 		}
@@ -161,7 +163,7 @@ func TestOneFiberRunsAtATime(t *testing.T) {
 		}
 		inside.Add(-1)
 		return vm.Value{}, nil
-	}}))
+	})))
 	_, err := env.EvalString(`package main imports("time")
 	var pushes := 0
 	fn worker(id, n) {
@@ -268,5 +270,158 @@ func TestStaticArityIsCompileTime(t *testing.T) {
 	_, err := runCode("package main\nfn add(a, b) => a + b\nfn main() {\n\treturn add(1)\n}")
 	if err == nil || !strings.Contains(err.Error(), "compile error") || !strings.Contains(err.Error(), "line 4") {
 		t.Fatalf("expected a compile error naming line 4, got %v", err)
+	}
+}
+
+// typed wrappers convert arguments and results without reflection and report
+// type mismatches with the native's name
+func TestTypedWrappers(t *testing.T) {
+	env := evie.New()
+	pkg := vm.NewPackage("m")
+	pkg.Native("sqrt", vm.Func1(math.Sqrt))
+	pkg.Native("hypot", vm.Func2(math.Hypot))
+	pkg.Native("repeat", vm.Func2(strings.Repeat))
+	pkg.Native("clamp", vm.Func3(func(x, lo, hi float64) float64 { return math.Max(lo, math.Min(hi, x)) }))
+	pkg.Native("isEven", vm.Func1(func(n int) bool { return n%2 == 0 }))
+	pkg.Native("sum", vm.Func1(func(arr *vm.Array) float64 {
+		var s float64
+		for _, v := range arr.Data {
+			f, _ := v.AsFloat64()
+			s += f
+		}
+		return s
+	}))
+	pkg.Native("size", vm.Func1(func(o map[string]vm.Value) int { return len(o) }))
+	pkg.Native("pair", vm.Func2(func(k string, v any) map[string]vm.Value {
+		val, _ := vm.BoxAny(v)
+		return map[string]vm.Value{k: val}
+	}))
+	pkg.Native("div", vm.Func2E(func(a, b float64) (float64, error) {
+		if b == 0 {
+			return 0, errors.New("division by zero")
+		}
+		return a / b, nil
+	}))
+	pkg.Native("now", vm.Func0(func() string { return "tick" }))
+	env.SetStatic("m", pkg.Box())
+
+	_, err := env.EvalString(`package main
+	fn main() {
+		r := [m.sqrt(16), m.hypot(3, 4), m.repeat("ab", 3), m.clamp(15, 0, 10), m.isEven(4), m.sum([1, 2, 3.5]), m.size({a: 1, b: 2}), m.pair("k", 7).k, m.now()]
+		errs := [catch(m.div(1, 0)).message, catch(m.sqrt("x")).message, catch(m.isEven(1.5)).message]
+		return [r, errs]
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := env.Call("main.main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[[4, 5, "ababab", 10, true, 6.5, 2, 7, "tick"], ["division by zero", "sqrt: argument 1 must be a number, got string", "isEven: argument 1 must be an integer, got number"]]`
+	if res.String() != want {
+		t.Fatalf("got  %s\nwant %s", res, want)
+	}
+}
+
+// Instance.Call boxes Go arguments and borrows a fiber
+func TestInstanceCall(t *testing.T) {
+	env := evie.New()
+	if _, err := env.EvalString("package main\nfn add(a, b) => a + b\nfn greet(who) => \"hi \" + who"); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := env.Call("main.add", 2, 3.5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.String() != "5.5" {
+		t.Fatalf("got %v", sum)
+	}
+	greeting, err := env.Call("main.greet", "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if greeting.String() != "hi bob" {
+		t.Fatalf("got %v", greeting)
+	}
+	if _, err := env.Call("main.missing"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected a not-found error, got %v", err)
+	}
+	if _, err := env.Call("main.add", 1); err == nil || !strings.Contains(err.Error(), "argument") {
+		t.Fatalf("expected an arity error, got %v", err)
+	}
+}
+
+// host types travel through scripts as they are, with methods, identity, `is`
+// checks, construction, and conversion in both directions
+type counter struct{ n int }
+
+func TestHostTypes(t *testing.T) {
+	Counter := vm.NewHostType[*counter]("Counter")
+	Counter.Constructor(1, func(c vm.Call) (vm.Value, error) {
+		start, err := c.Int(0)
+		if err != nil {
+			return vm.Value{}, err
+		}
+		return Counter.Wrap(&counter{n: start}), nil
+	})
+	Counter.Method("inc", 0, func(c vm.Call) (vm.Value, error) {
+		self, err := vm.HostArg[*counter](c, 0)
+		if err != nil {
+			return vm.Value{}, err
+		}
+		self.n++
+		return c.This(), nil
+	})
+	Counter.Method("get", 0, func(c vm.Call) (vm.Value, error) {
+		self, _ := vm.HostArg[*counter](c, 0)
+		return vm.BoxNumber(float64(self.n)), nil
+	})
+	Counter.String = func(v any) string { return "Counter(" + vm.BoxNumber(float64(v.(*counter).n)).String() + ")" }
+
+	env := evie.New()
+	env.SetStatic("Counter", Counter.Box())
+	shared := &counter{n: 40}
+	env.SetStatic("shared", Counter.Wrap(shared))
+	env.SetStatic("bump", vm.BoxGoFunc(vm.Func1(func(c *counter) *counter { c.n += 10; return c })))
+
+	_, err := env.EvalString(`package main
+	fn main() {
+		c := Counter(5)
+		c.inc()
+		c.inc()
+		shared.inc()
+		same := bump(shared) == shared
+		return [c.get(), shared.get(), string(c), c is Counter, 5 is Counter, same, catch(bump(3)).message]
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := env.Call("main.main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[7, 51, "Counter(7)", true, false, true, "native: argument 1 must be a Counter, got number"]`
+	if res.String() != want {
+		t.Fatalf("got  %s\nwant %s", res, want)
+	}
+	if shared.n != 51 {
+		t.Fatalf("the host's own value was not mutated in place: %d", shared.n)
+	}
+
+	// a registered type boxes through BoxAny and Instance.Call as well
+	res, err = env.Call("main.main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.EvalString("package main\nfn peek(c) => c.get()"); err != nil {
+		t.Fatal(err)
+	}
+	res, err = env.Call("main.peek", &counter{n: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.String() != "9" {
+		t.Fatalf("got %v", res)
 	}
 }

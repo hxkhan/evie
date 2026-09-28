@@ -169,7 +169,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 			}
 
 		case Global:
-			if lhs.IsStatic {
+			if lhs.IsConstant {
 				if pkg, ok := lhs.AsPackage(); ok {
 					field, exists := pkg.globals[fields.Get(fa.Rhs)]
 					if !exists {

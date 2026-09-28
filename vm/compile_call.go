@@ -19,10 +19,16 @@ func (vm *Instance) compileFunction(info *funcInfoStatic, params []string, body 
 
 	info.code = vm.compile(body)
 	closure := vm.cp.closures.Pop()
+	vm.closeFunction(info, closure)
+	return closure
+}
+
+// closeFunction records what the compiled scope learned: which locals escape
+// into closures and what the function captures from its parents
+func (vm *Instance) closeFunction(info *funcInfoStatic, closure *closure) {
 	info.captures = closure.captures
 	capacity := closure.scope.Capacity()
 
-	// mark escapee variables
 	info.locals = make([]bool, capacity)
 	info.recyclable = 0
 	for index := range capacity {
@@ -37,7 +43,6 @@ func (vm *Instance) compileFunction(info *funcInfoStatic, params []string, body 
 	for i, ref := range closure.captures {
 		vm.log.capturef("CT: closure => Capture(%v) -> %v\n", i, ref)
 	}
-	return closure
 }
 
 func (vm *Instance) emitFn(node ast.Fn) instruction {

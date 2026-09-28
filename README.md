@@ -82,38 +82,50 @@ package main
 import (
     "fmt"
     "github.com/hxkhan/evie"
+    "github.com/hxkhan/evie/vm"
 )
 
 func main() {
-    // 1. Create a new Evie environment
-    env := evie.New()
+    // 1. A host package the script can import. Func2 wraps a Go function without reflection.
+    api := vm.NewPackage("api")
+    api.Native("fetchData", vm.Func1(func(id int) map[string]any {
+        return map[string]any{"id": id, "status": "active"}
+    }))
 
-    // 2. Expose Go functions directly via reflection
-    env.Set("fetchData", func(id float64) map[string]any {
-        return map[string]any{
-            "id":     id,
-            "status": "active",
-        }
-    })
+    // 2. An engine with the standard library and the host package
+    eng := evie.New(evie.Options{Packages: []*vm.Package{api}})
 
-    // 3. Execute Evie script
-    val, err := env.Run(`
-        package main
-        fn main() {
-            data := fetchData(42)
-            return data["status"]
-        }
-    `)
+    // 3. Load a script
+    _, err := eng.Eval(`package main imports("api")
+        fn status(id) {
+            data := api.fetchData(id)
+            return data.status
+        }`)
     if err != nil {
         panic(err)
     }
 
-    fmt.Println(val.ToGo()) // "active"
+    // 4. Call into it with Go arguments
+    val, err := eng.Call("main.status", 42)
+    fmt.Println(val, err) // active <nil>
 
-    // 4. One-line evaluation
+    // 5. One-line evaluation
     result, _ := evie.Eval("return [1, 2, 3].len() * 10")
-    fmt.Println(result.ToGo()) // 30
+    fmt.Println(result) // 30
 }
+```
+
+Natives can also be written against the call context directly, which is the fastest path and gives full control over argument checking:
+
+```go
+pkg.Func("wait", 1, func(c vm.Call) (vm.Value, error) {
+    ms, err := c.Number(0) // "wait: argument 1 must be a number, got string"
+    if err != nil {
+        return vm.Value{}, err
+    }
+    time.Sleep(time.Duration(ms) * time.Millisecond)
+    return vm.Value{}, nil
+}).Blocking = true // gives the instance to other fibers while it sleeps
 ```
 
 ---

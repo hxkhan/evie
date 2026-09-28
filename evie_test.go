@@ -33,7 +33,7 @@ func runCode(code string) (resVal vm.Value, retErr error) {
 		}
 	}()
 
-	evm := vm.New(evie.Defaults)
+	evm := evie.New()
 	trimmed := strings.TrimSpace(code)
 	script := code
 	if !strings.HasPrefix(trimmed, "package ") {
@@ -716,7 +716,7 @@ func TestErrorHandling(t *testing.T) {
 	}
 
 	// Verify compile errors return clean error without crashing/panicking
-	evm := vm.New(evie.Defaults)
+	evm := evie.New()
 	_, err = evm.EvalScript([]byte(`
 	package main
 	fn dup() {}

@@ -151,9 +151,9 @@ func bench(name, file string, warmup, runs int) Result {
 	}
 
 	once := func() (time.Duration, string, error) {
-		loader := evie.NewLoader(evie.LoaderOptions{Inline: true})
+		eng := evie.New()
 		start := time.Now()
-		v, err := loader.RunFile(file)
+		v, err := eng.RunFile(file)
 		elapsed := time.Since(start)
 		if err != nil {
 			return elapsed, "", err

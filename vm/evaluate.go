@@ -37,8 +37,8 @@ func (vm *Instance) evaluate(node ast.Node) any {
 		}
 
 		if global, isGlobal := variable.(Global); isGlobal {
-			// global statics evaluate to Value instead of Global
-			if global.IsStatic {
+			// a constant global evaluates to its value, anything else to the binding
+			if global.IsConstant {
 				return *(global.Value)
 			}
 			return global

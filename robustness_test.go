@@ -2,6 +2,7 @@ package evie_test
 
 import (
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/hxkhan/evie"
@@ -142,6 +143,87 @@ func TestObjectLiteralEvaluationOrder(t *testing.T) {
 		}
 		if val.String() != "3124:10" {
 			t.Fatalf("got %v, want 3124:10", val)
+		}
+	}
+}
+
+// fibers of one instance never execute evie code at the same time; a native
+// counts how many fibers are inside it and fails the moment it sees a second
+func TestOneFiberRunsAtATime(t *testing.T) {
+	env := evie.New()
+	var inside, overlaps atomic.Int32
+	env.SetStatic("probe", vm.BoxGoFunc(&vm.GoFunc{Name: "probe", Fn: func(fbr *vm.Fiber) (vm.Value, vm.Exception) {
+		if inside.Add(1) != 1 {
+			overlaps.Add(1)
+		}
+		for i := 0; i < 100; i++ {
+			_ = i * i
+		}
+		inside.Add(-1)
+		return vm.Value{}, nil
+	}}))
+	_, err := env.EvalString(`package main imports("time")
+	var pushes := 0
+	fn worker(id, n) {
+		var i := 0
+		while i < n {
+			probe()
+			pushes += 1
+			if i % 50 == 0 { await go probe() }
+			i += 1
+		}
+	}
+	fn sleeper() { time.wait(5) }
+	fn main() {
+		tasks := [go worker(1, 2000), go worker(2, 2000), go worker(3, 2000), go worker(4, 2000), go sleeper()]
+		await.all(tasks)
+		return pushes
+	}
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mainFn, _ := env.Lookup("main.main")
+	res, exc := mainFn.Call(nil)
+	if exc != nil {
+		t.Fatal(exc)
+	}
+	if n, _ := res.AsFloat64(); n != 8000 {
+		t.Fatalf("expected 8000 pushes, got %v", res)
+	}
+	if overlaps.Load() != 0 {
+		t.Fatalf("%d overlapping entries into a native from different fibers", overlaps.Load())
+	}
+}
+
+// several instances run in parallel without sharing anything
+func TestInstancesRunInParallel(t *testing.T) {
+	const instances = 4
+	results := make(chan float64, instances)
+	for i := 0; i < instances; i++ {
+		go func() {
+			env := evie.New()
+			_, err := env.EvalString(`package main
+			fn fib(n) { if n < 2 { return n }
+				return fib(n-1) + fib(n-2) }
+			fn main() { return fib(20) }`)
+			if err != nil {
+				t.Error(err)
+				results <- 0
+				return
+			}
+			mainFn, _ := env.Lookup("main.main")
+			res, exc := mainFn.Call(nil)
+			if exc != nil {
+				t.Error(exc)
+			}
+			n, _ := res.AsFloat64()
+			results <- n
+		}()
+	}
+	for i := 0; i < instances; i++ {
+		if n := <-results; n != 6765 {
+			t.Fatalf("expected 6765, got %v", n)
 		}
 	}
 }

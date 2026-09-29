@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/vm/fields"
 )
 
@@ -157,7 +158,7 @@ func toException(err error) Exception {
 	if exc, ok := err.(*Error); ok {
 		return exc
 	}
-	return &Error{Message: err.Error()}
+	return &Error{Report: diag.Report{Message: err.Error()}, Cause: err}
 }
 
 // NewFunc describes a native taking exactly arity arguments

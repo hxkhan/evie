@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/hxkhan/evie/ast"
+	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/parser"
 	"github.com/hxkhan/evie/vm"
 )
@@ -40,20 +41,33 @@ func (e *Engine) Eval(script string) (vm.Value, error) {
 	return e.EvalString(script)
 }
 
-// Load compiles a source that declares a package and returns the package
-func (e *Engine) Load(src []byte) (*vm.Package, error) {
-	node, err := parser.Parse(src)
+// Load compiles a source that declares a package and returns the package;
+// name is what errors call the source
+func (e *Engine) Load(name string, src []byte) (*vm.Package, error) {
+	source := diag.NewSource(name, src)
+	node, err := parser.ParseSource(source)
 	if err != nil {
 		return nil, err
 	}
 	pkgNode, isPkg := node.(ast.Package)
 	if !isPkg {
-		return nil, fmt.Errorf("source does not declare a package")
+		return nil, fmt.Errorf("%s does not declare a package", name)
 	}
-	if _, err := e.EvalNode(node); err != nil {
+	if _, err := e.EvalSource(source); err != nil {
 		return nil, err
 	}
 	return e.GetPackage(pkgNode.Name), nil
+}
+
+// display names a file the way errors should show it: relative to the working
+// directory when it is below it
+func display(path string) string {
+	if wd, err := os.Getwd(); err == nil {
+		if rel, err := filepath.Rel(wd, path); err == nil && !strings.HasPrefix(rel, "..") {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return path
 }
 
 // Close waits for every task of the engine to finish
@@ -152,12 +166,13 @@ func (e *Engine) evalFile(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to read %s: %w", path, err)
 	}
-	node, err := parser.Parse(data)
+	source := diag.NewSource(display(path), data)
+	node, err := parser.ParseSource(source)
 	if err != nil {
-		return "", fmt.Errorf("%s: %w", path, err)
+		return "", err
 	}
-	if _, err := e.EvalNode(node); err != nil {
-		return "", fmt.Errorf("%s: %w", path, err)
+	if _, err := e.EvalSource(source); err != nil {
+		return "", err
 	}
 	e.loadedFiles = append(e.loadedFiles, path)
 	if pkgNode, isPkg := node.(ast.Package); isPkg {
@@ -265,11 +280,7 @@ func (e *Engine) RunFile(filePath string) (vm.Value, error) {
 	if err != nil {
 		return vm.Value{}, fmt.Errorf("failed to read entry file: %w", err)
 	}
-	node, err := parser.Parse(data)
-	if err != nil {
-		return vm.Value{}, fmt.Errorf("%s: %w", absPath, err)
-	}
-	result, err := e.EvalNode(node)
+	result, err := e.EvalSource(diag.NewSource(display(absPath), data))
 	if err != nil {
 		return vm.Value{}, err
 	}

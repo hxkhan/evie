@@ -10,7 +10,7 @@ import (
 func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
 	index, success := vm.cp.closures.Last(0).scope.Declare(node.Name, node.IsStatic)
 	if !success {
-		panic(CompileErrorf("double declaration of %s", node.Name))
+		panic(vm.compileErrorAt(node, "double declaration of %s", node.Name))
 	}
 
 	// try to evaluate
@@ -48,7 +48,7 @@ func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
 func (vm *Instance) emitIdentGet(node ast.Ident) instruction {
 	variable, err := vm.cp.reach(node.Name)
 	if err != nil {
-		panic(err)
+		panic(vm.locate(err, node))
 	}
 
 	switch v := variable.(type) {
@@ -62,15 +62,16 @@ func (vm *Instance) emitIdentGet(node ast.Ident) instruction {
 		}
 	}
 
-	panic(CompileErrorf("cannot read '%s' on line %v", node.Name, node.Line()))
+	panic(vm.compileErrorAt(node, "cannot read '%s'", node.Name))
 }
 
 func (vm *Instance) emitAssign(node ast.Assign) instruction {
+	site := vm.at(node)
 	// handle variables
 	if iGet, isIdentGet := node.Lhs.(ast.Ident); isIdentGet {
 		variable, err := vm.cp.reach(iGet.Name)
 		if err != nil {
-			panic(err)
+			panic(vm.locate(err, iGet))
 		}
 
 		// compile new value
@@ -79,7 +80,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 		switch v := variable.(type) {
 		case local:
 			if v.isStatic {
-				panic(CompileErrorf("Assignment to constant binding '%v'.", iGet.Name))
+				panic(vm.compileErrorAt(iGet, "cannot assign to '%v' because it is a constant", iGet.Name).withHint("declare it with var to allow reassignment: var " + iGet.Name + " := ..."))
 			}
 
 			return func(fbr *Fiber) (Value, Exception) {
@@ -94,7 +95,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 
 		case Global:
 			if v.IsStatic {
-				panic(CompileErrorf("Assignment to constant binding '%v'.", iGet.Name))
+				panic(vm.compileErrorAt(iGet, "cannot assign to '%v' because it is a constant", iGet.Name).withHint("declare it with var to allow reassignment: var " + iGet.Name + " := ..."))
 			}
 
 			return func(fbr *Fiber) (Value, Exception) {
@@ -137,7 +138,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 							usi.SetField(index, v)
 							return Value{}, nil
 						}
-						return Value{}, RuntimeExceptionF("cannot assign field '%s' on %s", fa.Rhs, thisVal.TypeOf())
+						return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, thisVal.TypeOf())
 					}
 				}
 			}
@@ -165,7 +166,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 					return Value{}, nil
 				}
 
-				return Value{}, TypeErrorF("cannot assign field '%s' on %s", fa.Rhs, lhs.TypeOf())
+				return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, lhs.TypeOf())
 			}
 
 		case Global:
@@ -173,11 +174,11 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 				if pkg, ok := lhs.AsPackage(); ok {
 					field, exists := pkg.globals[fields.Get(fa.Rhs)]
 					if !exists {
-						panic(TypeErrorF("Symbol '%s' not found in package '%s'.", fa.Rhs, pkg.name))
+						panic(vm.compileErrorAt(fa, "package '%s' has no symbol '%s'", pkg.name, fa.Rhs))
 					}
 
 					if field.IsStatic {
-						panic(TypeErrorF("Assignment to constant symbol '%v' of package '%v'.", fa.Rhs, pkg.name))
+						panic(vm.compileErrorAt(fa, "cannot assign to '%s.%s' because it is a constant", pkg.name, fa.Rhs))
 					}
 
 					// compile new value & return setter
@@ -193,7 +194,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 					}
 				}
 
-				panic(CompileErrorf("cannot assign field '%s' on constant '%v' on line %v", fa.Rhs, fa.Lhs, node.Line()))
+				panic(vm.compileErrorAt(node, "cannot assign field '%s' on constant '%v'", fa.Rhs, fa.Lhs))
 			}
 
 			// compile new value & return setter
@@ -203,11 +204,11 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 				if pkg, ok := lhs.AsPackage(); ok {
 					field, exists := pkg.globals[index]
 					if !exists {
-						return Value{}, TypeErrorF("Symbol '%s' not found in package '%s'.", fa.Rhs, pkg.name)
+						return Value{}, errorAt(site, "package '%s' has no symbol '%s'", pkg.name, fa.Rhs)
 					}
 
 					if field.IsStatic {
-						return Value{}, TypeErrorF("Assignment to constant symbol '%v' of package '%v'.", fa.Rhs, pkg.name)
+						return Value{}, errorAt(site, "cannot assign to '%s.%s' because it is a constant", pkg.name, fa.Rhs)
 					}
 
 					value, err := value(fbr)
@@ -239,7 +240,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 					return Value{}, nil
 				}
 
-				return Value{}, TypeErrorF("cannot assign field '%s' on %s", fa.Rhs, lhs.TypeOf())
+				return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, lhs.TypeOf())
 			}
 		}
 	}
@@ -270,11 +271,11 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 			if arr, ok := target.AsArray(); ok {
 				idxFloat, ok := keyVal.AsFloat64()
 				if !ok {
-					return Value{}, TypeErrorF("array index must be a number, got '%s'", keyVal.TypeOf())
+					return Value{}, errorAt(site, "array index must be a number, got '%s'", keyVal.TypeOf())
 				}
 				idx := int(idxFloat)
 				if float64(idx) != idxFloat {
-					return Value{}, RuntimeExceptionF("array index must be an integer, got %v", idxFloat)
+					return Value{}, errorAt(site, "array index must be an integer, got %v", idxFloat)
 				}
 				length := len(arr.Data)
 				if idx < 0 {
@@ -282,7 +283,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 				}
 
 				if idx < 0 || idx >= length {
-					return Value{}, RuntimeExceptionF("IndexError: index %d out of bounds (length %d)", int(idxFloat), length)
+					return Value{}, errorAt(site, "IndexError: index %d out of bounds (length %d)", int(idxFloat), length)
 				}
 
 				arr.Data[idx] = newVal
@@ -293,7 +294,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 			if obj, ok := target.AsObject(); ok {
 				keyStr, ok := keyVal.AsString()
 				if !ok {
-					return Value{}, TypeErrorF("object key must be a string, got '%s'", keyVal.TypeOf())
+					return Value{}, errorAt(site, "object key must be a string, got '%s'", keyVal.TypeOf())
 				}
 
 				obj[keyStr] = newVal
@@ -304,21 +305,22 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 			if si, ok := target.AsUserStructInstance(); ok {
 				keyStr, ok := keyVal.AsString()
 				if !ok {
-					return Value{}, TypeErrorF("struct field key must be a string, got '%s'", keyVal.TypeOf())
+					return Value{}, errorAt(site, "struct field key must be a string, got '%s'", keyVal.TypeOf())
 				}
 
 				si.setFieldByName(keyStr, newVal)
 				return Value{}, nil
 			}
 
-			return Value{}, TypeErrorF("cannot assign to subscript of type '%s'", target.TypeOf())
+			return Value{}, errorAt(site, "cannot assign to subscript of type '%s'", target.TypeOf())
 		}
 	}
 
-	panic(CompileErrorf("cannot assign to '%v' on line %v", node.Lhs, node.Line()))
+	panic(vm.compileErrorAt(node, "cannot assign to '%v'", node.Lhs))
 }
 
 func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
+	site := vm.at(node)
 	key := fieldKeyOf(node.Rhs)
 	index := key.id
 
@@ -344,7 +346,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 						if field, exists := thisVal.getField(key); exists {
 							return field, nil
 						}
-						return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", node.Rhs, node)
+						return Value{}, memberError(site, node.Rhs, *thisVal)
 					}
 				}
 			}
@@ -369,7 +371,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 				if field, exists := v.getField(key); exists {
 					return field, nil
 				}
-				return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", node.Rhs, node)
+				return Value{}, memberError(site, node.Rhs, *v)
 			}
 
 		case Value:
@@ -379,7 +381,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 					return field, nil
 				}
 			}
-			panic(CompileErrorf("undefined symbol '%v' in '%v' on line %v", node.Rhs, node, node.Line()))
+			panic(vm.memberCompileError(node, node.Rhs, lhs))
 
 		case Global:
 			// global non-static binding
@@ -387,7 +389,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 				if field, exists := lhs.getField(key); exists {
 					return field, nil
 				}
-				return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", node.Rhs, node)
+				return Value{}, memberError(site, node.Rhs, *lhs.Value)
 			}
 		}
 	}
@@ -420,11 +422,12 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 			return field, nil
 		}
 
-		return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", node.Rhs, node)
+		return Value{}, memberError(site, node.Rhs, lhs)
 	}
 }
 
 func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
+	site := vm.at(node)
 	lhs := vm.compile(node.Lhs)
 	key := vm.compile(node.Key)
 
@@ -443,11 +446,11 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 		if arr, ok := target.AsArray(); ok {
 			idxFloat, ok := indexVal.AsFloat64()
 			if !ok {
-				return Value{}, TypeErrorF("array index must be a number, got '%s'", indexVal.TypeOf())
+				return Value{}, errorAt(site, "array index must be a number, got '%s'", indexVal.TypeOf())
 			}
 			idx := int(idxFloat)
 			if float64(idx) != idxFloat {
-				return Value{}, RuntimeExceptionF("array index must be an integer, got %v", idxFloat)
+				return Value{}, errorAt(site, "array index must be an integer, got %v", idxFloat)
 			}
 			length := len(arr.Data)
 			if idx < 0 {
@@ -455,7 +458,7 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 			}
 
 			if idx < 0 || idx >= length {
-				return Value{}, RuntimeExceptionF("IndexError: index %d out of bounds (length %d)", int(idxFloat), length)
+				return Value{}, errorAt(site, "IndexError: index %d out of bounds (length %d)", int(idxFloat), length)
 			}
 
 			return arr.Data[idx], nil
@@ -465,7 +468,7 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 		if obj, ok := target.AsObject(); ok {
 			keyStr, ok := indexVal.AsString()
 			if !ok {
-				return Value{}, TypeErrorF("object key must be a string, got '%s'", indexVal.TypeOf())
+				return Value{}, errorAt(site, "object key must be a string, got '%s'", indexVal.TypeOf())
 			}
 
 			val, exists := obj[keyStr]
@@ -479,12 +482,12 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 		if si, ok := target.AsUserStructInstance(); ok {
 			keyStr, ok := indexVal.AsString()
 			if !ok {
-				return Value{}, TypeErrorF("struct field key must be a string, got '%s'", indexVal.TypeOf())
+				return Value{}, errorAt(site, "struct field key must be a string, got '%s'", indexVal.TypeOf())
 			}
 
 			val, exists := si.getFieldByName(keyStr)
 			if !exists {
-				return Value{}, RuntimeExceptionF("undefined field '%s' in struct", keyStr)
+				return Value{}, errorAt(site, "undefined field '%s' in struct", keyStr)
 			}
 			return val, nil
 		}
@@ -493,11 +496,11 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 		if str, ok := target.AsString(); ok {
 			idxFloat, ok := indexVal.AsFloat64()
 			if !ok {
-				return Value{}, TypeErrorF("string index must be a number, got '%s'", indexVal.TypeOf())
+				return Value{}, errorAt(site, "string index must be a number, got '%s'", indexVal.TypeOf())
 			}
 			idx := int(idxFloat)
 			if float64(idx) != idxFloat {
-				return Value{}, RuntimeExceptionF("string index must be an integer, got %v", idxFloat)
+				return Value{}, errorAt(site, "string index must be an integer, got %v", idxFloat)
 			}
 
 			length := len(str)
@@ -506,7 +509,7 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 			}
 
 			if idx < 0 || idx >= length {
-				return Value{}, RuntimeExceptionF("IndexError: string index %d out of bounds (length %d)", int(idxFloat), length)
+				return Value{}, errorAt(site, "IndexError: string index %d out of bounds (length %d)", int(idxFloat), length)
 			}
 
 			return BoxString(string(str[idx])), nil
@@ -516,11 +519,11 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 		if buf, ok := target.AsBuffer(); ok {
 			idxFloat, ok := indexVal.AsFloat64()
 			if !ok {
-				return Value{}, TypeErrorF("buffer index must be a number, got '%s'", indexVal.TypeOf())
+				return Value{}, errorAt(site, "buffer index must be a number, got '%s'", indexVal.TypeOf())
 			}
 			idx := int(idxFloat)
 			if float64(idx) != idxFloat {
-				return Value{}, RuntimeExceptionF("buffer index must be an integer, got %v", idxFloat)
+				return Value{}, errorAt(site, "buffer index must be an integer, got %v", idxFloat)
 			}
 
 			length := len(buf)
@@ -529,13 +532,13 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 			}
 
 			if idx < 0 || idx >= length {
-				return Value{}, RuntimeExceptionF("IndexError: buffer index %d out of bounds (length %d)", int(idxFloat), length)
+				return Value{}, errorAt(site, "IndexError: buffer index %d out of bounds (length %d)", int(idxFloat), length)
 			}
 
 			return BoxNumber(float64(buf[idx])), nil
 		}
 
-		return Value{}, TypeErrorF("cannot index value of type '%s'", target.TypeOf())
+		return Value{}, errorAt(site, "cannot index value of type '%s'", target.TypeOf())
 	}
 }
 
@@ -654,7 +657,8 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 }
 
 // compoundOperator returns the arithmetic behind a compound assignment like `+=`
-func compoundOperator(node ast.MutableBinOp) func(fbr *Fiber, current, rhs Value) (Value, Exception) {
+func (vm *Instance) compoundOperator(node ast.MutableBinOp) func(fbr *Fiber, current, rhs Value) (Value, Exception) {
+	site := vm.at(node)
 	var apply func(Value, Value) (Value, bool)
 	switch node.Operator {
 	case ast.AddOp:
@@ -668,7 +672,7 @@ func compoundOperator(node ast.MutableBinOp) func(fbr *Fiber, current, rhs Value
 	case ast.ModOp:
 		apply = Value.Mod
 	default:
-		panic(CompileErrorf("unsupported compound operator '%v' on line '%v'.", node.Operator, node.Line()))
+		panic(vm.compileErrorAt(node, "unsupported compound operator '%v'", node.Operator))
 	}
 
 	symbol := node.Operator.String()
@@ -676,15 +680,16 @@ func compoundOperator(node ast.MutableBinOp) func(fbr *Fiber, current, rhs Value
 		if result, ok := apply(current, rhs); ok {
 			return result, nil
 		}
-		return Value{}, operatorError(symbol, current, rhs)
+		return Value{}, operatorError(site, symbol, current, rhs)
 	}
 }
 
 // emitCompoundFieldAssign compiles `x.field op= value`, evaluating `x` exactly once
 func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldAccess) instruction {
+	site := vm.at(node)
 	target := vm.compile(fa.Lhs)
 	rhs := vm.compile(node.Rhs)
-	apply := compoundOperator(node)
+	apply := vm.compoundOperator(node)
 	index := fields.Get(fa.Rhs)
 
 	return func(fbr *Fiber) (Value, Exception) {
@@ -703,7 +708,7 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 				return apply(fbr, current, value)
 			})
 			if !exists {
-				return Value{}, RuntimeExceptionF("undefined field '%s' on %s", fa.Rhs, usi.InstanceOf.Name)
+				return Value{}, errorAt(site, "undefined field '%s' on %s", fa.Rhs, usi.InstanceOf.Name)
 			}
 			return Value{}, exc
 		}
@@ -711,7 +716,7 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 		if m, ok := obj.AsObject(); ok {
 			current, exists := m[fa.Rhs]
 			if !exists {
-				return Value{}, RuntimeExceptionF("undefined key '%s' in object", fa.Rhs)
+				return Value{}, errorAt(site, "undefined key '%s' in object", fa.Rhs)
 			}
 			result, exc := apply(fbr, current, value)
 			if exc != nil {
@@ -724,10 +729,10 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 		if pkg, ok := obj.AsPackage(); ok {
 			field, exists := pkg.globals[index]
 			if !exists {
-				return Value{}, TypeErrorF("Symbol '%s' not found in package '%s'.", fa.Rhs, pkg.name)
+				return Value{}, errorAt(site, "Symbol '%s' not found in package '%s'.", fa.Rhs, pkg.name)
 			}
 			if field.IsStatic {
-				return Value{}, TypeErrorF("Assignment to constant symbol '%v' of package '%v'.", fa.Rhs, pkg.name)
+				return Value{}, errorAt(site, "Assignment to constant symbol '%v' of package '%v'.", fa.Rhs, pkg.name)
 			}
 			result, exc := apply(fbr, *field.Value, value)
 			if exc != nil {
@@ -737,16 +742,17 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 			return Value{}, nil
 		}
 
-		return Value{}, TypeErrorF("cannot assign field '%s' on %s", fa.Rhs, obj.TypeOf())
+		return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, obj.TypeOf())
 	}
 }
 
 // emitCompoundSubscriptAssign compiles `x[key] op= value`, evaluating `x` and `key` exactly once
 func (vm *Instance) emitCompoundSubscriptAssign(node ast.MutableBinOp, sub ast.Subscript) instruction {
+	site := vm.at(node)
 	target := vm.compile(sub.Lhs)
 	key := vm.compile(sub.Key)
 	rhs := vm.compile(node.Rhs)
-	apply := compoundOperator(node)
+	apply := vm.compoundOperator(node)
 
 	return func(fbr *Fiber) (Value, Exception) {
 		obj, exc := target(fbr)
@@ -767,18 +773,18 @@ func (vm *Instance) emitCompoundSubscriptAssign(node ast.MutableBinOp, sub ast.S
 		if arr, ok := obj.AsArray(); ok {
 			idxFloat, ok := keyVal.AsFloat64()
 			if !ok {
-				return Value{}, TypeErrorF("array index must be a number, got '%s'", keyVal.TypeOf())
+				return Value{}, errorAt(site, "array index must be a number, got '%s'", keyVal.TypeOf())
 			}
 			idx := int(idxFloat)
 			if float64(idx) != idxFloat {
-				return Value{}, RuntimeExceptionF("array index must be an integer, got %v", idxFloat)
+				return Value{}, errorAt(site, "array index must be an integer, got %v", idxFloat)
 			}
 			length := len(arr.Data)
 			if idx < 0 {
 				idx = length + idx
 			}
 			if idx < 0 || idx >= length {
-				return Value{}, RuntimeExceptionF("IndexError: index %d out of bounds (length %d)", int(idxFloat), length)
+				return Value{}, errorAt(site, "IndexError: index %d out of bounds (length %d)", int(idxFloat), length)
 			}
 
 			result, exc := apply(fbr, arr.Data[idx], value)
@@ -793,11 +799,11 @@ func (vm *Instance) emitCompoundSubscriptAssign(node ast.MutableBinOp, sub ast.S
 
 		if m, ok := obj.AsObject(); ok {
 			if !isString {
-				return Value{}, TypeErrorF("object key must be a string, got '%s'", keyVal.TypeOf())
+				return Value{}, errorAt(site, "object key must be a string, got '%s'", keyVal.TypeOf())
 			}
 			current, exists := m[keyStr]
 			if !exists {
-				return Value{}, RuntimeExceptionF("undefined key '%s' in object", keyStr)
+				return Value{}, errorAt(site, "undefined key '%s' in object", keyStr)
 			}
 			result, exc := apply(fbr, current, value)
 			if exc != nil {
@@ -809,17 +815,17 @@ func (vm *Instance) emitCompoundSubscriptAssign(node ast.MutableBinOp, sub ast.S
 
 		if usi, ok := obj.AsUserStructInstance(); ok {
 			if !isString {
-				return Value{}, TypeErrorF("struct field key must be a string, got '%s'", keyVal.TypeOf())
+				return Value{}, errorAt(site, "struct field key must be a string, got '%s'", keyVal.TypeOf())
 			}
 			exists, exc := usi.updateFieldByName(keyStr, func(current Value) (Value, Exception) {
 				return apply(fbr, current, value)
 			})
 			if !exists {
-				return Value{}, RuntimeExceptionF("undefined field '%s' on %s", keyStr, usi.InstanceOf.Name)
+				return Value{}, errorAt(site, "undefined field '%s' on %s", keyStr, usi.InstanceOf.Name)
 			}
 			return Value{}, exc
 		}
 
-		return Value{}, TypeErrorF("cannot assign to subscript of type '%s'", obj.TypeOf())
+		return Value{}, errorAt(site, "cannot assign to subscript of type '%s'", obj.TypeOf())
 	}
 }

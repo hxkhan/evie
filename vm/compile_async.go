@@ -47,9 +47,10 @@ func (vm *Instance) spawnNative(fn *GoFunc, params []Value) *Task {
 }
 
 func (vm *Instance) emitGo(node ast.Go) instruction {
+	site := vm.at(node)
 	call, isCall := node.Fn.(ast.Call)
 	if !isCall {
-		panic(CompileErrorf("go expects a function call on line %v", node.Line()))
+		panic(vm.compileErrorAt(node, "go expects a function call"))
 	}
 
 	// compile arguments
@@ -87,7 +88,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 
 		if fn, isUserFn := value.AsUserFn(); isUserFn {
 			if exc := fn.accepts(len(arguments)); exc != nil {
-				return Value{}, exc
+				return Value{}, exc.at(site)
 			}
 			params, exc := evalArgs(fbr, nil)
 			if exc != nil {
@@ -139,7 +140,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 			}
 		}
 
-		return Value{}, CustomError("cannot call a non-function '%v'", value)
+		return Value{}, errorAt(site, "cannot call %s", article(value)).labelled("this is " + article(value))
 	}
 }
 
@@ -259,6 +260,7 @@ func settle(fbr *Fiber, tasks []*Task, successOnly bool) (outcome, bool) {
 }
 
 func (vm *Instance) emitAwaitAny(node ast.AwaitAny) instruction {
+	site := vm.at(node)
 	values := make([]instruction, len(node.Tasks))
 	for i, task := range node.Tasks {
 		values[i] = vm.compile(task)
@@ -276,7 +278,7 @@ func (vm *Instance) emitAwaitAny(node ast.AwaitAny) instruction {
 
 		tasks, raw := extractTasks(evaluated)
 		if len(tasks) == 0 {
-			return Value{}, CustomError("await.any called with empty list of tasks")
+			return Value{}, errorAt(site, "await.any needs at least one task")
 		}
 
 		// Check if any item is already a resolved non-task or completed task without error
@@ -300,6 +302,7 @@ func (vm *Instance) emitAwaitAny(node ast.AwaitAny) instruction {
 }
 
 func (vm *Instance) emitAwaitRace(node ast.AwaitRace) instruction {
+	site := vm.at(node)
 	values := make([]instruction, len(node.Tasks))
 	for i, task := range node.Tasks {
 		values[i] = vm.compile(task)
@@ -317,7 +320,7 @@ func (vm *Instance) emitAwaitRace(node ast.AwaitRace) instruction {
 
 		tasks, raw := extractTasks(evaluated)
 		if len(tasks) == 0 {
-			return Value{}, CustomError("await.race called with empty list of tasks")
+			return Value{}, errorAt(site, "await.race needs at least one task")
 		}
 
 		// Check if any item is already a non-task or completed task

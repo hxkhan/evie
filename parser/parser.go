@@ -9,24 +9,26 @@ import (
 	"strings"
 
 	"github.com/hxkhan/evie/ast"
+	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/lexer"
 	"github.com/hxkhan/evie/token"
 )
 
 var errEOS = errors.New("EOS")
 
-// Error is a syntax error together with the line it was found on
+// Error is a syntax error: a report with the offending span and, where it
+// helps, the construct that was left open
 type Error struct {
-	Line    int
-	Message string
+	diag.Report
 }
 
 func (e *Error) Error() string {
-	return fmt.Sprintf("syntax error on line %d: %s", e.Line, e.Message)
+	return "syntax error: " + e.Report.Error()
 }
 
 type parser struct {
 	*lexer.Lexer
+	src  *diag.Source
 	last token.Token
 }
 
@@ -61,34 +63,39 @@ var precedence = map[string]int{
 	"(": 6,
 }
 
-func Parse(input []byte) (node ast.Node, err error) {
-	ps := parser{Lexer: lexer.New(input)}
+// Parse parses a script whose source has no name
+func Parse(input []byte) (ast.Node, error) {
+	return ParseSource(diag.NewSource("", input))
+}
+
+// ParseSource parses a script; errors name the source and show its text
+func ParseSource(src *diag.Source) (node ast.Node, err error) {
+	ps := parser{Lexer: lexer.New(src.Text), src: src}
 	var pack ast.Package
 	var cb ast.Block
 
 	defer func() {
 		if r := recover(); r != nil {
-			switch r {
-			case errEOS:
-				if len(cb.Code) == 0 && pack.Name != "" {
-					node = pack
-				} else if len(cb.Code) > 0 {
-					node = cb
-				} else {
-					err = errors.New("ParseError: invalid input")
+			switch e := r.(type) {
+			case *Error:
+				err = e
+			case runtime.Error:
+				// a bug in the parser or lexer; report it instead of taking the host down
+				err = fmt.Errorf("internal parser error: %v", e)
+			case error:
+				if e == errEOS {
+					if len(cb.Code) == 0 && pack.Name != "" {
+						node = pack
+					} else if len(cb.Code) > 0 {
+						node = cb
+					} else {
+						err = ps.report(ps.PeekToken().Pos, "the source is empty")
+					}
+					return
 				}
+				err = fmt.Errorf("ParseError: %s", e.Error())
 			default:
-				switch e := r.(type) {
-				case *Error:
-					err = e
-				case runtime.Error:
-					// a bug in the parser or lexer; report it instead of taking the host down
-					err = fmt.Errorf("internal parser error: %v", e)
-				case error:
-					err = fmt.Errorf("ParseError: %s", e.Error())
-				default:
-					err = &Error{Line: int(ps.last.Line), Message: fmt.Sprint(r)}
-				}
+				err = ps.report(ps.last.Pos, fmt.Sprint(r))
 			}
 		}
 	}()
@@ -105,6 +112,30 @@ func Parse(input []byte) (node ast.Node, err error) {
 	for {
 		cb.Code = append(cb.Code, ps.parse(0, false))
 	}
+}
+
+// report builds a syntax error at a position
+func (ps *parser) report(pos token.Pos, msg string, notes ...diag.Note) *Error {
+	return &Error{Report: diag.Report{Message: msg, Source: ps.src, Pos: pos, Notes: notes}}
+}
+
+// fail stops parsing with an error at a position
+func (ps *parser) fail(pos token.Pos, msg string, notes ...diag.Note) {
+	panic(ps.report(pos, msg, notes...))
+}
+
+// expected stops parsing because the next token is not what the grammar needs
+// here; opened, when known, points at the construct being parsed
+func (ps *parser) expected(what string, opened token.Token, context string) {
+	next := ps.PeekToken()
+	msg := fmt.Sprintf("expected %s, found %s", what, next.Describe())
+	if next.IsEOS() {
+		msg = fmt.Sprintf("expected %s, but the source ends here", what)
+	}
+	if opened.Pos.Known() && context != "" {
+		ps.fail(next.Pos, msg, diag.Note{Source: ps.src, Pos: opened.Pos, Text: context})
+	}
+	ps.fail(next.Pos, msg)
 }
 
 // consume will either try to consume a simple or a word
@@ -124,62 +155,61 @@ func (ps *parser) consumeName(lit string) bool {
 	return false
 }
 
-func (ps *parser) parsePackage() ast.Package {
-	line := ps.last.Line
-	if ps.PeekToken().Type != token.Word {
-		panic(fmt.Errorf("expected name after package on line %v, got '%v'", line, ps.PeekToken().Literal))
+// name consumes an identifier or fails saying what it was needed for
+func (ps *parser) name(purpose string) token.Token {
+	next := ps.PeekToken()
+	if next.Type != token.Word {
+		ps.expected(purpose, token.Token{}, "")
 	}
+	if slices.Contains(keywords, next.Literal) {
+		ps.fail(next.Pos, fmt.Sprintf("'%s' is a keyword and cannot be used as %s", next.Literal, purpose))
+	}
+	ps.last = ps.NextToken()
+	return ps.last
+}
 
-	pack := ast.Package{Pos: line, Name: ps.NextToken().Literal}
-	if ps.consume("imports") && ps.consume("(") && !ps.consume(")") {
-		pack.Imports = ps.parseStringList()
+func (ps *parser) parsePackage() ast.Package {
+	keyword := ps.last
+	name := ps.name("the package name")
+	pack := ast.Package{Pos: keyword.Pos.To(name.Pos), Name: name.Literal}
+	if ps.consume("imports") {
+		imports := ps.last
+		if !ps.consume("(") {
+			ps.expected("'(' after imports", imports, "")
+		}
+		open := ps.last
+		if !ps.consume(")") {
+			pack.Imports = ps.parseStringList(open)
+		}
 	}
 	return pack
 }
 
 // helper to parse comma-separated string lists
-func (ps *parser) parseStringList() []string {
+func (ps *parser) parseStringList(open token.Token) []string {
 	var imports []string
 	for {
-		next := ps.NextToken()
+		next := ps.PeekToken()
 		if next.Type != token.String {
-			panic(fmt.Errorf("expected string on line %v, got '%v'", next.Line, next.Literal))
+			ps.expected("a package name in quotes", open, "in this import list")
 		}
-
-		// success: add import
+		ps.NextToken()
 		imports = append(imports, next.Literal)
 
 		if ps.consume(")") {
 			break
 		}
 		if !ps.consume(",") {
-			panic(fmt.Errorf("expected ',' or ')' on line %v, got '%v'", next.Line, ps.PeekToken().Literal))
+			ps.expected("',' or ')'", open, "this '(' opens the import list")
 		}
 	}
 	return imports
 }
 
-func (ps *parser) panic(main token.Token, expected string) {
-	context := map[string]string{
-		"fn":     "function",
-		"if":     "if statement",
-		"else":   "else statement",
-		".":      "operator '.'",
-		"struct": "struct definition",
-		"for":    "for loop",
-		"while":  "while loop",
-	}
-	what := context[main.Literal]
-	if what == "" {
-		what = main.Literal
-	}
-	panic(fmt.Errorf("%v on line %v expected %v, got '%v'", what, main.Line, expected, ps.PeekToken().Literal))
-}
-
-func (ps *parser) parseFloat(literal string) float64 {
-	num, err := strconv.ParseFloat(literal, 64)
+func (ps *parser) parseFloat(tok token.Token) float64 {
+	num, err := strconv.ParseFloat(tok.Literal, 64)
 	if err != nil {
-		panic(fmt.Errorf("error parsing number: %v", err))
+		ps.fail(tok.Pos, fmt.Sprintf("'%s' is not a valid number", tok.Literal))
 	}
 	return num
 }
@@ -187,21 +217,21 @@ func (ps *parser) parseFloat(literal string) float64 {
 func (ps *parser) handleWords(main token.Token, asExpr bool, precedenceLevel int) ast.Node {
 	switch main.Literal {
 	case "echo":
-		return ast.Echo{Pos: main.Line, Value: ps.parse(0, true)}
+		return ast.Echo{Pos: main.Pos, Value: ps.parse(0, true)}
 	case "fn":
 		return ps.parseFn(main, asExpr)
 	case "struct":
 		return ps.parseStruct(main)
 	case "go":
-		return ast.Go{Pos: main.Line, Fn: ps.parse(0, true)}
+		return ast.Go{Pos: main.Pos, Fn: ps.parse(0, true)}
 	case "await":
 		return ps.parseAwait(main)
 	case "nil":
-		return ps.parseInfixExpression(ast.Input[struct{}]{Pos: main.Line}, precedenceLevel)
+		return ps.parseInfixExpression(ast.Input[struct{}]{Pos: main.Pos}, precedenceLevel)
 	case "true":
-		return ps.parseInfixExpression(ast.Input[bool]{Pos: main.Line, Value: true}, precedenceLevel)
+		return ps.parseInfixExpression(ast.Input[bool]{Pos: main.Pos, Value: true}, precedenceLevel)
 	case "false":
-		return ps.parseInfixExpression(ast.Input[bool]{Pos: main.Line, Value: false}, precedenceLevel)
+		return ps.parseInfixExpression(ast.Input[bool]{Pos: main.Pos, Value: false}, precedenceLevel)
 	case "if":
 		return ps.parseConditional(main)
 	case "while":
@@ -211,55 +241,59 @@ func (ps *parser) handleWords(main token.Token, asExpr bool, precedenceLevel int
 	case "switch":
 		return ps.parseSwitch(main)
 	case "break":
-		return ast.Break{Pos: main.Line}
+		return ast.Break{Pos: main.Pos}
 	case "continue":
-		return ast.Continue{Pos: main.Line}
+		return ast.Continue{Pos: main.Pos}
 	case "return":
-		ret := ast.Return{Pos: main.Line}
+		ret := ast.Return{Pos: main.Pos}
 		if !ps.PeekToken().IsSimple("}") {
 			ret.Value = ps.parse(0, true)
 		} else {
-			ret.Value = ast.Input[struct{}]{Pos: main.Line}
+			ret.Value = ast.Input[struct{}]{Pos: main.Pos}
 		}
 		return ret
 
 	case "catch":
 		var node ast.Node
 		if ps.consume("{") {
-			node = ast.Catch{Pos: main.Line, Action: ps.parseBlock()}
+			open := ps.last
+			node = ast.Catch{Pos: main.Pos, Action: ps.parseBlock(open)}
 		} else if ps.consume("(") {
+			open := ps.last
 			e := ps.parse(0, true)
 			if !ps.consume(")") {
-				panic(fmt.Errorf("'catch' expected ')' on line %v, got '%v'", ps.PeekToken().Line, ps.PeekToken().Literal))
+				ps.expected("')'", open, "this '(' opens the catch")
 			}
-			node = ast.Catch{Pos: main.Line, Action: e}
+			node = ast.Catch{Pos: main.Pos.To(ps.last.Pos), Action: e}
 		} else {
-			panic(fmt.Errorf("'catch' expected '(' or '{' on line %v, got '%v'", ps.PeekToken().Line, ps.PeekToken().Literal))
+			ps.expected("'(' or '{' after catch", main, "")
 		}
 		return ps.parseInfixExpression(node, precedenceLevel)
 
 	case "throw":
-		th := ast.Throw{Pos: main.Line}
+		th := ast.Throw{Pos: main.Pos}
 		if ps.PeekToken().Line == main.Line && !ps.PeekToken().IsSimple("}") {
 			th.Value = ps.parse(0, true)
 		} else {
-			th.Value = ast.Input[string]{Pos: main.Line, Value: "error"}
+			th.Value = ast.Input[string]{Pos: main.Pos, Value: "error"}
 		}
 		return th
 
 	case "var":
-		name := ps.NextToken()
+		name := ps.name("a name after var")
 		if !ps.consume(":=") {
-			panic(fmt.Errorf("expected ':=' after 'var %v' on line %v, got '%v' instead", name.Literal, main.Line, ps.PeekToken().Literal))
+			ps.expected(fmt.Sprintf("':=' after 'var %s'", name.Literal), main, "")
 		}
-		return ast.Decl{Pos: main.Line, Name: name.Literal, IsStatic: false, Value: ps.parse(0, true)}
+		return ast.Decl{Pos: name.Pos, Name: name.Literal, IsStatic: false, Value: ps.parse(0, true)}
+
 	case "const":
 		// `const x := v` says explicitly what `x := v` already means
-		name := ps.NextToken()
-		if name.Type != token.Word || !ps.consume(":=") {
-			panic(&Error{Line: int(main.Line), Message: fmt.Sprintf("expected 'name := value' after 'const', got '%v'", name.Literal)})
+		name := ps.name("a name after const")
+		if !ps.consume(":=") {
+			ps.expected(fmt.Sprintf("':=' after 'const %s'", name.Literal), main, "")
 		}
-		return ast.Decl{Pos: main.Line, Name: name.Literal, IsStatic: true, Value: ps.parse(0, true)}
+		return ast.Decl{Pos: name.Pos, Name: name.Literal, IsStatic: true, Value: ps.parse(0, true)}
+
 	default:
 		return ps.parseIdent(main, precedenceLevel)
 	}
@@ -267,6 +301,7 @@ func (ps *parser) handleWords(main token.Token, asExpr bool, precedenceLevel int
 
 func (ps *parser) parseStringTemplate(main token.Token) (st ast.StringTemplate) {
 	format := strings.Builder{}
+	st.Pos = main.Pos
 
 	for {
 		if ps.consume("`") {
@@ -275,16 +310,17 @@ func (ps *parser) parseStringTemplate(main token.Token) (st ast.StringTemplate) 
 			lb := ps.last
 			st.Args = append(st.Args, ps.parse(0, true))
 			if !ps.consume("}") {
-				ps.panic(lb, "'}'")
+				ps.expected("'}'", lb, "this '{' opens an interpolation")
 			}
 			format.WriteString("%s")
 		} else if ps.PeekToken().Type == token.String {
 			format.WriteString(ps.NextToken().Literal)
 		} else {
-			ps.panic(main, "'{' or a partial string")
+			ps.expected("the closing '`'", main, "this template string is unterminated")
 		}
 	}
 
+	st.Pos = main.Pos.To(ps.last.Pos)
 	st.Format = format.String()
 	return st
 }
@@ -292,87 +328,85 @@ func (ps *parser) parseStringTemplate(main token.Token) (st ast.StringTemplate) 
 func (ps *parser) parseAwait(main token.Token) ast.Node {
 	// await.all(x, y, z), await.any(x, y, z), or await.race(x, y, z)
 	if !ps.consume(".") {
-		return ast.Await{Task: ps.parse(0, true)}
+		task := ps.parse(0, true)
+		return ast.Await{Pos: main.Pos.To(task.Where()), Task: task}
 	}
 
 	if ps.consumeName("all") {
-		return ast.AwaitAll{Pos: main.Line, Tasks: ps.parseArgsList()}
+		return ast.AwaitAll{Pos: main.Pos, Tasks: ps.parseArgsList()}
 	}
 	if ps.consumeName("any") {
-		return ast.AwaitAny{Pos: main.Line, Tasks: ps.parseArgsList()}
+		return ast.AwaitAny{Pos: main.Pos, Tasks: ps.parseArgsList()}
 	}
 	if ps.consumeName("race") {
-		return ast.AwaitRace{Pos: main.Line, Tasks: ps.parseArgsList()}
+		return ast.AwaitRace{Pos: main.Pos, Tasks: ps.parseArgsList()}
 	}
-	return ast.Await{Task: ps.parse(0, true)}
+	ps.expected("'all', 'any' or 'race' after 'await.'", main, "")
+	return nil
 }
 
 func (ps *parser) parseIdent(main token.Token, precedenceLevel int) ast.Node {
 	// handle const declarations explicitly
 	if ps.consume(":=") {
-		return ast.Decl{Pos: main.Line, Name: main.Literal, IsStatic: true, Value: ps.parse(0, true)}
+		return ast.Decl{Pos: main.Pos, Name: main.Literal, IsStatic: true, Value: ps.parse(0, true)}
 	}
 
 	// try infix stuff
-	left := ps.parseInfixExpression(ast.Ident{Pos: main.Line, Name: main.Literal}, precedenceLevel)
+	left := ps.parseInfixExpression(ast.Ident{Pos: main.Pos, Name: main.Literal}, precedenceLevel)
 
 	if ps.consume("=") {
-		return ast.Assign{Pos: main.Line, Lhs: left, Value: ps.parse(0, true)}
+		value := ps.parse(0, true)
+		return ast.Assign{Pos: left.Where().To(value.Where()), Lhs: left, Value: value}
 	}
 	if ps.consume("+=") || ps.consume("-=") || ps.consume("*=") || ps.consume("/=") || ps.consume("%=") {
 		// read the operator before parsing the rhs; the evaluation order of map indexing vs calls in a composite literal is unspecified
 		operator := operators[ps.last.Literal]
-		return ast.MutableBinOp{Pos: main.Line, Operator: operator, Lhs: left, Rhs: ps.parse(0, true)}
+		rhs := ps.parse(0, true)
+		return ast.MutableBinOp{Pos: left.Where().To(rhs.Where()), Operator: operator, Lhs: left, Rhs: rhs}
 	}
 
 	return left
 }
 
 func (ps *parser) parseConditional(main token.Token) ast.Node {
-	node := ast.Conditional{Pos: main.Line}
+	node := ast.Conditional{Pos: main.Pos}
 	node.Condition = ps.parse(0, true)
 	if !ps.consume("{") {
-		ps.panic(main, "'{'")
+		ps.expected("'{' after the condition", main, "in this if")
 	}
-	node.Action = ps.parseBlock()
+	node.Action = ps.parseBlock(ps.last)
 	if ps.consume("else") {
+		elseTok := ps.last
 		if ps.consume("if") {
-			node.Otherwise = ps.parseConditional(main)
+			node.Otherwise = ps.parseConditional(ps.last)
 		} else {
 			if !ps.consume("{") {
-				ps.panic(ps.last, "'{'")
+				ps.expected("'{' or 'if' after else", elseTok, "")
 			}
-			node.Otherwise = ps.parseBlock()
+			node.Otherwise = ps.parseBlock(ps.last)
 		}
 	}
 	return node
 }
 
 func (ps *parser) parseWhile(main token.Token) ast.Node {
-	node := ast.While{Pos: main.Line}
+	node := ast.While{Pos: main.Pos}
 	node.Condition = ps.parse(0, true)
 	if !ps.consume("{") {
-		ps.panic(main, "'{'")
+		ps.expected("'{' after the condition", main, "in this while")
 	}
-	node.Action = ps.parseBlock()
+	node.Action = ps.parseBlock(ps.last)
 	return node
 }
 
 func (ps *parser) parseFor(main token.Token) ast.Node {
 	hasParen := ps.consume("(")
-	first := ps.NextToken()
-	if first.Type != token.Word {
-		panic(fmt.Errorf("for loop on line %v expected variable name, got '%v'", main.Line, first.Literal))
-	}
+	first := ps.name("the loop variable")
 
 	var indexVar, itemVar string
 	if ps.consume(",") {
 		indexVar = first.Literal
-		second := ps.NextToken()
-		if second.Type != token.Word {
-			panic(fmt.Errorf("for loop on line %v expected variable name after ',', got '%v'", main.Line, second.Literal))
-		}
-		itemVar = second.Literal
+		itemVar = ps.name("the item variable after ','").Literal
 	} else {
 		itemVar = first.Literal
 	}
@@ -383,23 +417,23 @@ func (ps *parser) parseFor(main token.Token) ast.Node {
 	}
 
 	if !ps.consume("in") {
-		panic(fmt.Errorf("for loop on line %v expected 'in', got '%v'", main.Line, ps.PeekToken().Literal))
+		ps.expected("'in'", main, "in this for loop")
 	}
 
 	col := ps.parse(0, true)
 	if hasParen && !varsClosedParen {
 		if !ps.consume(")") {
-			ps.panic(main, "')'")
+			ps.expected("')'", main, "in this for loop")
 		}
 	}
 
 	if !ps.consume("{") {
-		ps.panic(main, "'{'")
+		ps.expected("'{' after the collection", main, "in this for loop")
 	}
-	body := ps.parseBlock()
+	body := ps.parseBlock(ps.last)
 
 	return ast.For{
-		Pos:        main.Line,
+		Pos:        main.Pos,
 		IndexVar:   indexVar,
 		ItemVar:    itemVar,
 		Collection: col,
@@ -408,22 +442,39 @@ func (ps *parser) parseFor(main token.Token) ast.Node {
 }
 
 func (ps *parser) parseSwitch(main token.Token) ast.Node {
-	sw := ast.Switch{Pos: main.Line}
+	sw := ast.Switch{Pos: main.Pos}
 
 	// Check if this is a value switch or a tagless switch
 	// If the next token is '{', it's a tagless switch (switch { ... })
 	if !ps.consume("{") {
 		sw.Value = ps.parse(0, true)
 		if !ps.consume("{") {
-			ps.panic(main, "'{'")
+			ps.expected("'{'", main, "in this switch")
 		}
+	}
+	open := ps.last
+
+	caseBody := func() ast.Block {
+		var block ast.Block
+		for {
+			ps.consume(";")
+			next := ps.PeekToken()
+			if next.IsWord("case") || next.IsWord("default") || next.IsSimple("}") {
+				break
+			}
+			if next.IsEOS() {
+				ps.expected("'}'", open, "this '{' opens the switch")
+			}
+			block.Code = append(block.Code, ps.parse(0, true))
+			ps.consume(";")
+		}
+		return block
 	}
 
 	for !ps.consume("}") {
 		tok := ps.PeekToken()
 		if tok.IsWord("case") {
 			ps.NextToken() // consume 'case'
-			casePos := tok.Line
 			var exprs []ast.Node
 			for {
 				exprs = append(exprs, ps.parse(0, true))
@@ -432,55 +483,33 @@ func (ps *parser) parseSwitch(main token.Token) ast.Node {
 				}
 			}
 			if !ps.consume(":") && !ps.consume("=>") {
-				ps.panic(tok, "':'")
+				ps.expected("':' after the case values", tok, "")
 			}
-
-			var caseBlock ast.Block
-			for {
-				ps.consume(";")
-				next := ps.PeekToken()
-				if next.IsWord("case") || next.IsWord("default") || next.IsSimple("}") || next.IsEOS() {
-					break
-				}
-				caseBlock.Code = append(caseBlock.Code, ps.parse(0, true))
-				ps.consume(";")
-			}
-			sw.Cases = append(sw.Cases, ast.SwitchCase{
-				Pos:    casePos,
-				Values: exprs,
-				Action: caseBlock,
-			})
+			sw.Cases = append(sw.Cases, ast.SwitchCase{Pos: tok.Pos, Values: exprs, Action: caseBody()})
 		} else if tok.IsWord("default") {
 			ps.NextToken() // consume 'default'
 			if sw.Default != nil {
-				panic(fmt.Errorf("multiple default cases in switch on line %d", tok.Line))
+				ps.fail(tok.Pos, "a switch can have only one default case")
 			}
 			if !ps.consume(":") && !ps.consume("=>") {
-				ps.panic(tok, "':'")
+				ps.expected("':' after default", tok, "")
 			}
-			var defBlock ast.Block
-			for {
-				ps.consume(";")
-				next := ps.PeekToken()
-				if next.IsWord("case") || next.IsWord("default") || next.IsSimple("}") || next.IsEOS() {
-					break
-				}
-				defBlock.Code = append(defBlock.Code, ps.parse(0, true))
-				ps.consume(";")
-			}
-			sw.Default = defBlock
+			sw.Default = caseBody()
 		} else {
-			ps.panic(tok, "'case', 'default', or '}'")
+			ps.expected("'case', 'default' or '}'", open, "this '{' opens the switch")
 		}
 	}
 
 	return sw
 }
 
-// helper to parse a block or single statement
-func (ps *parser) parseBlock() ast.Node {
-	var block ast.Block
+// parseBlock parses statements up to the '}' that closes open
+func (ps *parser) parseBlock(open token.Token) ast.Node {
+	block := ast.Block{Pos: open.Pos}
 	for !ps.consume("}") {
+		if ps.PeekToken().IsEOS() {
+			ps.expected("'}'", open, "this '{' is never closed")
+		}
 		block.Code = append(block.Code, ps.parse(0, true))
 	}
 	return block
@@ -488,55 +517,56 @@ func (ps *parser) parseBlock() ast.Node {
 
 // helper to parse an fn
 func (ps *parser) parseFn(main token.Token, asExpr bool) ast.Node {
-	fn := ast.Fn{Pos: main.Line, UsedAsExpr: asExpr}
+	fn := ast.Fn{Pos: main.Pos, UsedAsExpr: asExpr}
 	if ps.PeekToken().Type == token.Word {
-		fn.Name = ps.NextToken().Literal
+		name := ps.NextToken()
+		fn.Name = name.Literal
+		fn.Pos = main.Pos.To(name.Pos)
 	}
-	fn.Args, fn.IsVariadic = ps.parseNamesList(main)
+	fn.Args, fn.IsVariadic = ps.parseNamesList(main, "the parameter list")
 
 	if ps.consume("{") {
-		fn.Action = ps.parseBlock()
+		fn.Action = ps.parseBlock(ps.last)
 	} else if ps.consume("=>") {
-		fn.Action = ast.Return{Pos: main.Line, Value: ps.parse(0, true)}
+		fn.Action = ast.Return{Pos: ps.last.Pos, Value: ps.parse(0, true)}
 	} else {
-		ps.panic(main, "'{' or '=>'")
+		ps.expected("'{' or '=>' after the parameters", main, "in this function")
 	}
 	return fn
 }
 
 // helper to parse a struct
 func (ps *parser) parseStruct(main token.Token) ast.Node {
-	str := ast.StructDefinition{Pos: main.Line}
+	str := ast.StructDefinition{Pos: main.Pos}
 	if ps.PeekToken().Type == token.Word {
-		str.Name = ps.NextToken().Literal
+		name := ps.NextToken()
+		str.Name = name.Literal
+		str.Pos = main.Pos.To(name.Pos)
 	}
 	var isVariadic bool
-	str.Args, isVariadic = ps.parseNamesList(main)
+	str.Args, isVariadic = ps.parseNamesList(main, "the field list")
 	if isVariadic {
-		ps.panic(main, "struct fields cannot be variadic")
+		ps.fail(ps.last.Pos, "struct fields cannot be variadic")
 	}
 
 	if ps.consume(":") {
-		if ps.PeekToken().Type != token.Word {
-			ps.panic(main, "parent struct name after ':'")
-		}
-		str.Parent = ps.NextToken().Literal
+		str.Parent = ps.name("the parent struct after ':'").Literal
 	}
 
-	if ps.consume("{") {
-		str.Action = ps.parseBlock()
-	} else {
-		ps.panic(main, "'{'")
+	if !ps.consume("{") {
+		ps.expected("'{' for the struct body", main, "in this struct")
 	}
+	str.Action = ps.parseBlock(ps.last)
 
 	return str
 }
 
 // helper to parse names surrounded by parentheses
-func (ps *parser) parseNamesList(main token.Token) ([]string, bool) {
+func (ps *parser) parseNamesList(main token.Token, what string) ([]string, bool) {
 	if !ps.consume("(") {
-		ps.panic(main, "'('")
+		ps.expected("'(' to open "+what, main, "")
 	}
+	open := ps.last
 
 	var args []string
 	if ps.consume(")") {
@@ -547,26 +577,20 @@ func (ps *parser) parseNamesList(main token.Token) ([]string, bool) {
 	for {
 		if ps.consume("...") {
 			isVariadic = true
-			if ps.PeekToken().Type != token.Word {
-				ps.panic(main, "parameter name after '...'")
-			}
-			args = append(args, ps.NextToken().Literal)
+			args = append(args, ps.name("a parameter name after '...'").Literal)
 			if !ps.consume(")") {
-				ps.panic(main, "')' after variadic parameter")
+				ps.expected("')' after the variadic parameter", open, "this '(' opens "+what)
 			}
 			break
 		}
 
-		if ps.PeekToken().Type != token.Word {
-			ps.panic(main, "names in parentheses")
-		}
-		args = append(args, ps.NextToken().Literal)
+		args = append(args, ps.name("a name").Literal)
 
 		if ps.consume(")") {
 			break
 		}
 		if !ps.consume(",") {
-			ps.panic(main, "',' or ')'")
+			ps.expected("',' or ')'", open, "this '(' opens "+what)
 		}
 	}
 	return args, isVariadic
@@ -574,98 +598,93 @@ func (ps *parser) parseNamesList(main token.Token) ([]string, bool) {
 
 func (ps *parser) parseArgsList() []ast.Node {
 	if !ps.consume("(") {
-		panic(fmt.Errorf("'(' expected ')' on line %v, got '%v'", ps.PeekToken().Line, ps.PeekToken().Literal))
+		ps.expected("'('", ps.last, "")
 	}
+	open := ps.last
 
 	var args []ast.Node
 	if !ps.PeekToken().IsSimple(")") {
 		for {
-			arg := ps.parse(0, true)
-			args = append(args, arg)
-
-			if ps.PeekToken().IsSimple(",") {
-				ps.NextToken() // consume ','
-			} else {
+			args = append(args, ps.parse(0, true))
+			if !ps.consume(",") {
 				break
 			}
 		}
 	}
 
 	if !ps.consume(")") {
-		panic(fmt.Errorf("'(' expected ')' on line %v, got '%v'", ps.PeekToken().Line, ps.PeekToken().Literal))
+		ps.expected("',' or ')'", open, "this '(' opens the argument list")
 	}
 
 	return args
-
 }
 
 func (ps *parser) parseObject(main token.Token) ast.Node {
-	obj := ast.Object{Pos: main.Line}
+	obj := ast.Object{Pos: main.Pos}
 
 	// empty object {}
 	if ps.consume("}") {
+		obj.Pos = main.Pos.To(ps.last.Pos)
 		return obj
 	}
 
 	for {
-		keyTok := ps.NextToken()
-		if keyTok.Type != token.Word {
-			panic(fmt.Errorf("object expected field name on line %v, got '%v'", main.Line, keyTok.Literal))
-		}
-
+		key := ps.name("a field name")
 		if !ps.consume(":") {
-			panic(fmt.Errorf("object expected ':' after key '%v' on line %v, got '%v'", keyTok.Literal, main.Line, ps.PeekToken().Literal))
+			ps.expected(fmt.Sprintf("':' after the field name '%s'", key.Literal), main, "in this object")
 		}
 
 		value := ps.parse(0, true)
-		obj.Fields = append(obj.Fields, ast.ObjectField{Key: keyTok.Literal, Value: value})
+		obj.Fields = append(obj.Fields, ast.ObjectField{Key: key.Literal, Value: value})
 
 		if ps.consume("}") {
 			break
 		}
 		if !ps.consume(",") {
-			panic(fmt.Errorf("object expected ',' or '}' on line %v, got '%v'", main.Line, ps.PeekToken().Literal))
+			ps.expected("',' or '}'", main, "this '{' opens the object")
 		}
 	}
 
+	obj.Pos = main.Pos.To(ps.last.Pos)
 	return obj
 }
 
 func (ps *parser) parseArrayLiteral(main token.Token) ast.Node {
-	arr := ast.ArrayLiteral{Pos: main.Line}
+	arr := ast.ArrayLiteral{Pos: main.Pos}
 
 	// empty array []
 	if ps.consume("]") {
+		arr.Pos = main.Pos.To(ps.last.Pos)
 		return arr
 	}
 
 	for {
-		elem := ps.parse(0, true)
-		arr.Elements = append(arr.Elements, elem)
+		arr.Elements = append(arr.Elements, ps.parse(0, true))
 
 		if ps.consume("]") {
 			break
 		}
 		if !ps.consume(",") {
-			panic(fmt.Errorf("array expected ',' or ']' on line %v, got '%v'", main.Line, ps.PeekToken().Literal))
+			ps.expected("',' or ']'", main, "this '[' opens the array")
 		}
 		if ps.consume("]") {
 			break
 		}
 	}
 
+	arr.Pos = main.Pos.To(ps.last.Pos)
 	return arr
 }
 
 func (ps *parser) parse(precedenceLevel int, asExpr bool) (node ast.Node) {
 	// handle parentheses explicitly
 	if ps.consume("(") {
-		line := ps.last.Line
+		open := ps.last
 		// reset precedence to 0 inside parentheses
 		expr := ps.parse(0, true)
 		// ensure the closing parenthesis is present
 		if !ps.consume(")") {
-			panic(fmt.Errorf("'(' expected ')' on line %v, got '%v'", line, ps.PeekToken().Literal))
+			ps.expected("')'", open, "this '(' is never closed")
 		}
 		// the sub-expression within the parentheses becomes the new left
 		return ps.parseInfixExpression(expr, precedenceLevel)
@@ -675,16 +694,16 @@ func (ps *parser) parse(precedenceLevel int, asExpr bool) (node ast.Node) {
 	if main.IsEOS() {
 		// the end of the source only ends the program; inside any construct it is an error
 		if asExpr {
-			panic(&Error{Line: int(main.Line), Message: "unexpected end of source"})
+			ps.fail(main.Pos, "unexpected end of source")
 		}
 		panic(errEOS)
 	}
 
 	switch {
 	case main.Type == token.String:
-		node = ast.Input[string]{Pos: main.Line, Value: ps.NextToken().Literal}
+		node = ast.Input[string]{Pos: main.Pos, Value: ps.NextToken().Literal}
 	case main.Type == token.Number:
-		node = ast.Input[float64]{Pos: main.Line, Value: ps.parseFloat(ps.NextToken().Literal)}
+		node = ast.Input[float64]{Pos: main.Pos, Value: ps.parseFloat(ps.NextToken())}
 
 	case main.Type == token.Word:
 		return ps.handleWords(ps.NextToken(), asExpr, precedenceLevel)
@@ -698,7 +717,8 @@ func (ps *parser) parse(precedenceLevel int, asExpr bool) (node ast.Node) {
 	case main.IsSimple("+"):
 		ps.NextToken()
 		if ps.PeekToken().Type == token.Number {
-			node = ast.Input[float64]{Pos: main.Line, Value: ps.parseFloat(ps.NextToken().Literal)}
+			num := ps.NextToken()
+			node = ast.Input[float64]{Pos: main.Pos.To(num.Pos), Value: ps.parseFloat(num)}
 		} else {
 			node = ps.parse(4, true)
 		}
@@ -706,21 +726,30 @@ func (ps *parser) parse(precedenceLevel int, asExpr bool) (node ast.Node) {
 	case main.IsSimple("-"):
 		ps.NextToken()
 		if ps.PeekToken().Type == token.Number {
-			node = ast.Input[float64]{Pos: main.Line, Value: -ps.parseFloat(ps.NextToken().Literal)}
+			num := ps.NextToken()
+			node = ast.Input[float64]{Pos: main.Pos.To(num.Pos), Value: -ps.parseFloat(num)}
 		} else {
-			node = ast.Neg{Pos: main.Line, Value: ps.parse(4, true)}
+			operand := ps.parse(4, true)
+			node = ast.Neg{Pos: main.Pos.To(operand.Where()), Value: operand}
 		}
 
 	case main.IsSimple("!"):
 		ps.NextToken()
-		node = ast.Not{Pos: main.Line, Value: ps.parse(4, true)}
+		operand := ps.parse(4, true)
+		node = ast.Not{Pos: main.Pos.To(operand.Where()), Value: operand}
 
 	case main.IsSimple("`"):
 		node = ps.parseStringTemplate(ps.NextToken())
 	case main.Type == token.Invalid:
-		panic(&Error{Line: int(main.Line), Message: fmt.Sprintf("invalid token '%s'", main.Literal)})
+		if strings.HasPrefix(main.Literal, "\"") || strings.HasPrefix(main.Literal, "`") {
+			ps.fail(main.Pos, "this string is never closed")
+		}
+		ps.fail(main.Pos, fmt.Sprintf("invalid token '%s'", main.Literal))
 	default:
-		panic(&Error{Line: int(main.Line), Message: fmt.Sprintf("unexpected '%s'", main.Literal)})
+		if main.IsSimple(")") || main.IsSimple("]") || main.IsSimple("}") {
+			ps.fail(main.Pos, fmt.Sprintf("unexpected '%s': nothing is open here", main.Literal))
+		}
+		ps.fail(main.Pos, fmt.Sprintf("unexpected '%s'", main.Literal))
 	}
 
 	// parse the left-hand side
@@ -731,13 +760,14 @@ func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) ast.N
 	for {
 		next := ps.PeekToken()
 
-		// field access
+		// field access; a member may be named like a keyword, as in task.await()
 		if next.IsSimple(".") {
 			ps.NextToken() // consume '.'
 			if ps.PeekToken().Type != token.Word {
-				panic(fmt.Errorf("dot operator expected name on line %v", next.Line))
+				ps.expected("a member name after '.'", token.Token{}, "")
 			}
-			left = ast.FieldAccess{Pos: next.Line, Lhs: left, Rhs: ps.NextToken().Literal}
+			name := ps.NextToken()
+			left = ast.FieldAccess{Pos: left.Where().To(name.Pos), Lhs: left, Rhs: name.Literal}
 			continue
 		}
 
@@ -746,16 +776,16 @@ func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) ast.N
 			ps.NextToken() // consume '['
 			key := ps.parse(0, true)
 			if !ps.consume("]") {
-				panic(fmt.Errorf("'[' expected ']' on line %v, got '%v'", next.Line, ps.PeekToken().Literal))
+				ps.expected("']'", next, "this '[' opens the index")
 			}
-			left = ast.Subscript{Pos: next.Line, Lhs: left, Key: key}
+			left = ast.Subscript{Pos: left.Where().To(ps.last.Pos), Lhs: left, Key: key}
 			continue
 		}
 
 		// existence check
 		if next.IsSimple("?") {
 			ps.NextToken() // consume '?'
-			left = ast.Exists{Pos: next.Line, Value: left}
+			left = ast.Exists{Pos: left.Where().To(next.Pos), Value: left}
 			continue
 		}
 
@@ -766,34 +796,30 @@ func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) ast.N
 				break
 			}
 			ps.NextToken() // consume 'is'
-			left = ast.IsInstanceOf{Pos: next.Line, Lhs: left, Rhs: ps.parse(currentPrec+1, true)}
+			rhs := ps.parse(currentPrec+1, true)
+			left = ast.IsInstanceOf{Pos: left.Where().To(rhs.Where()), Lhs: left, Rhs: rhs}
 			continue
 		}
 
 		// function call
 		if next.IsSimple("(") {
-			line := next.Line
 			ps.NextToken() // consume '('
 
 			var args []ast.Node
 			// parse arguments if any
 			if !ps.PeekToken().IsSimple(")") {
 				for {
-					arg := ps.parse(0, true)
-					args = append(args, arg)
-
-					if ps.PeekToken().IsSimple(",") {
-						ps.NextToken() // consume ','
-					} else {
+					args = append(args, ps.parse(0, true))
+					if !ps.consume(",") {
 						break
 					}
 				}
 			}
 
 			if !ps.consume(")") {
-				panic(fmt.Errorf("'(' expected ')' on line %v, got '%v'", line, ps.PeekToken().Literal))
+				ps.expected("',' or ')'", next, "this '(' opens the call")
 			}
-			left = ast.Call{Pos: line, Fn: left, Args: args}
+			left = ast.Call{Pos: left.Where().To(ps.last.Pos), Fn: left, Args: args}
 			continue
 		}
 
@@ -807,7 +833,7 @@ func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) ast.N
 		ps.NextToken()
 		// parse the right-hand side with higher precedence level
 		right := ps.parse(currentPrecedence+1, true)
-		left = ast.BinOp{Pos: next.Line, Lhs: left, Operator: operators[next.Literal], Rhs: right}
+		left = ast.BinOp{Pos: left.Where().To(right.Where()), Lhs: left, Operator: operators[next.Literal], Rhs: right}
 	}
 	return left
 }

@@ -21,7 +21,7 @@ func (vm *Instance) emitReturn(node ast.Return) instruction {
 		if iGet, isIdentGet := node.Value.(ast.Ident); isIdentGet {
 			variable, err := vm.cp.reach(iGet.Name)
 			if err != nil {
-				panic(err)
+				panic(vm.locate(err, iGet))
 			}
 
 			if v, isLocal := variable.(local); isLocal {
@@ -49,6 +49,7 @@ func (vm *Instance) emitReturn(node ast.Return) instruction {
 }
 
 func (vm *Instance) emitThrow(node ast.Throw) instruction {
+	site := vm.at(node)
 	what := vm.compile(node.Value)
 	return func(fbr *Fiber) (Value, Exception) {
 		v, err := what(fbr)
@@ -57,14 +58,15 @@ func (vm *Instance) emitThrow(node ast.Throw) instruction {
 		}
 
 		if e, ok := v.AsError(); ok {
-			return Value{}, e
+			return Value{}, e.at(site)
 		}
 
-		return Value{}, CustomError("%s", v.String())
+		return Value{}, errorAt(site, "%s", v.String())
 	}
 }
 
 func (vm *Instance) compileCondition(node ast.Node) func(fbr *Fiber) (bool, Exception) {
+	site := vm.at(node)
 	if val, ok := vm.evaluate(node).(Value); ok {
 		b := val.IsTruthy()
 		return func(fbr *Fiber) (bool, Exception) {
@@ -88,7 +90,7 @@ func (vm *Instance) compileCondition(node ast.Node) func(fbr *Fiber) (bool, Exce
 								}
 								res, ok := lhs.LessThan(rhsVal)
 								if !ok {
-									return false, operatorError("<", lhs, rhsVal)
+									return false, operatorError(site, "<", lhs, rhsVal)
 								}
 								return res.IsTruthy(), nil
 							}
@@ -100,7 +102,7 @@ func (vm *Instance) compileCondition(node ast.Node) func(fbr *Fiber) (bool, Exce
 								}
 								res, ok := lhs.LessThanOrEqualTo(rhsVal)
 								if !ok {
-									return false, operatorError("<=", lhs, rhsVal)
+									return false, operatorError(site, "<=", lhs, rhsVal)
 								}
 								return res.IsTruthy(), nil
 							}
@@ -112,7 +114,7 @@ func (vm *Instance) compileCondition(node ast.Node) func(fbr *Fiber) (bool, Exce
 								}
 								res, ok := lhs.GreaterThan(rhsVal)
 								if !ok {
-									return false, operatorError(">", lhs, rhsVal)
+									return false, operatorError(site, ">", lhs, rhsVal)
 								}
 								return res.IsTruthy(), nil
 							}
@@ -124,7 +126,7 @@ func (vm *Instance) compileCondition(node ast.Node) func(fbr *Fiber) (bool, Exce
 								}
 								res, ok := lhs.GreaterThanOrEqualTo(rhsVal)
 								if !ok {
-									return false, operatorError(">=", lhs, rhsVal)
+									return false, operatorError(site, ">=", lhs, rhsVal)
 								}
 								return res.IsTruthy(), nil
 							}
@@ -168,7 +170,7 @@ func (vm *Instance) compileCondition(node ast.Node) func(fbr *Fiber) (bool, Exce
 							}
 							res, ok := lhs.LessThan(rhs)
 							if !ok {
-								return false, operatorError("<", lhs, rhs)
+								return false, operatorError(site, "<", lhs, rhs)
 							}
 							return res.IsTruthy(), nil
 						}
@@ -180,7 +182,7 @@ func (vm *Instance) compileCondition(node ast.Node) func(fbr *Fiber) (bool, Exce
 							}
 							res, ok := lhs.LessThanOrEqualTo(rhs)
 							if !ok {
-								return false, operatorError("<=", lhs, rhs)
+								return false, operatorError(site, "<=", lhs, rhs)
 							}
 							return res.IsTruthy(), nil
 						}
@@ -192,7 +194,7 @@ func (vm *Instance) compileCondition(node ast.Node) func(fbr *Fiber) (bool, Exce
 							}
 							res, ok := lhs.GreaterThan(rhs)
 							if !ok {
-								return false, operatorError(">", lhs, rhs)
+								return false, operatorError(site, ">", lhs, rhs)
 							}
 							return res.IsTruthy(), nil
 						}
@@ -204,7 +206,7 @@ func (vm *Instance) compileCondition(node ast.Node) func(fbr *Fiber) (bool, Exce
 							}
 							res, ok := lhs.GreaterThanOrEqualTo(rhs)
 							if !ok {
-								return false, operatorError(">=", lhs, rhs)
+								return false, operatorError(site, ">=", lhs, rhs)
 							}
 							return res.IsTruthy(), nil
 						}
@@ -299,6 +301,7 @@ func (vm *Instance) emitWhile(node ast.While) instruction {
 }
 
 func (vm *Instance) emitFor(node ast.For) instruction {
+	site := vm.at(node)
 	collInst := vm.compile(node.Collection)
 
 	if vm.cp.closures.Len() == 0 {
@@ -313,14 +316,14 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 	if node.IndexVar != "" {
 		idx, ok := vm.cp.closures.Last(0).scope.Declare(node.IndexVar, false)
 		if !ok {
-			panic(CompileErrorf("double declaration of %s in for loop", node.IndexVar))
+			panic(vm.compileErrorAt(node, "double declaration of %s in for loop", node.IndexVar))
 		}
 		idxIndex = idx
 	}
 
 	itemIndex, ok := vm.cp.closures.Last(0).scope.Declare(node.ItemVar, false)
 	if !ok {
-		panic(CompileErrorf("double declaration of %s in for loop", node.ItemVar))
+		panic(vm.compileErrorAt(node, "double declaration of %s in for loop", node.ItemVar))
 	}
 
 	bodyInst := vm.compile(node.Action)
@@ -416,7 +419,7 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 			return Value{}, nil
 		}
 
-		return Value{}, TypeErrorF("cannot iterate over %s", collVal.TypeOf())
+		return Value{}, errorAt(site, "cannot iterate over %s", article(collVal)).hinted("for loops run over arrays, objects, strings and buffers")
 	}
 }
 
@@ -543,7 +546,7 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 			if iGet, isIdentGet := ret.Value.(ast.Ident); isIdentGet {
 				variable, err := vm.cp.reach(iGet.Name)
 				if err != nil {
-					panic(err)
+					panic(vm.locate(err, iGet))
 				}
 
 				if v, isLocal := variable.(local); isLocal {

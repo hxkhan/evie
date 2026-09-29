@@ -4,10 +4,43 @@ import "fmt"
 
 type Type int
 
-type Pos int
+// Pos is a span in the source: where it starts, in 1-based line and byte
+// column, and how many bytes of that line it covers. A zero Pos is unknown.
+type Pos struct {
+	Line   int
+	Column int
+	Length int
+}
 
-func (pos Pos) Line() int {
-	return int(pos)
+// Where lets any node that embeds a Pos report it
+func (p Pos) Where() Pos {
+	return p
+}
+
+// Known reports whether the position was recorded
+func (p Pos) Known() bool {
+	return p.Line > 0
+}
+
+// End is the column just past the span
+func (p Pos) End() int {
+	return p.Column + max(p.Length, 1)
+}
+
+// To extends the span to the end of another one on the same line; a span on
+// another line is left as it is, since excerpts show one line
+func (p Pos) To(end Pos) Pos {
+	if !p.Known() {
+		return end
+	}
+	if end.Known() && end.Line == p.Line && end.End() > p.End() {
+		p.Length = end.End() - p.Column
+	}
+	return p
+}
+
+func (p Pos) String() string {
+	return fmt.Sprintf("%d:%d", p.Line, p.Column)
 }
 
 const (
@@ -20,12 +53,11 @@ const (
 	Invalid
 )
 
-// A simple 3 tuple of (type, literal, line)
-// where type is one of (Simple, Keyword, Name, String, Boolean, Number, Invalid)
+// A token: its type, its text without delimiters, and where it is
 type Token struct {
 	Type    Type
 	Literal string
-	Line    Pos
+	Pos
 }
 
 // Checks if the token is signaling end-of-source
@@ -65,6 +97,21 @@ func (t Token) IsOneOfSimples(lit ...string) bool {
 		}
 	}
 	return false
+}
+
+// Describe names the token the way an error message should
+func (t Token) Describe() string {
+	switch t.Type {
+	case flag:
+		return "end of source"
+	case String:
+		return fmt.Sprintf("string %q", t.Literal)
+	case Number:
+		return "number " + t.Literal
+	case Invalid:
+		return fmt.Sprintf("invalid token '%s'", t.Literal)
+	}
+	return fmt.Sprintf("'%s'", t.Literal)
 }
 
 func (t Token) String() string {

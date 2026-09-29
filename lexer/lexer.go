@@ -42,44 +42,56 @@ func (lex *Lexer) PeekToken() (next token.Token) {
 	return next
 }
 
-func (lex *Lexer) flag(lit string, line token.Pos) token.Token {
-	return token.Token{Type: token.Type(0), Literal: lit, Line: line}
+// newline records that the byte before cursor ended a line
+func (lex *Lexer) newline() {
+	lex.line++
+	lex.lineStart = lex.cursor
+}
+
+// at builds a token spanning the bytes from start to the cursor
+func (lex *Lexer) at(typ token.Type, lit string, start int) token.Token {
+	return token.Token{Type: typ, Literal: lit, Pos: token.Pos{Line: lex.line, Column: start - lex.lineStart + 1, Length: lex.cursor - start}}
+}
+
+func (lex *Lexer) flag(lit string) token.Token {
+	return token.Token{Type: token.Type(0), Literal: lit, Pos: token.Pos{Line: lex.line, Column: lex.cursor - lex.lineStart + 1, Length: 1}}
 }
 
 func (lex *Lexer) compose() token.Token {
 START:
+	start := lex.cursor
 	current, cs := lex.advance()
 
 	switch current {
 	case iEOS:
-		return lex.flag("end of source", lex.line)
+		return lex.flag("end of source")
 	case ' ', '\t', '\r':
 		goto START
 	case '\n':
-		lex.line++
+		lex.newline()
 		goto START
 
 	case '=':
 		switch {
 		case lex.option('=', "==", "=") == "==":
-			return lex.simple("==")
+			return lex.simple("==", start)
 		case lex.option('>', "=>", "=") == "=>":
-			return lex.simple("=>")
+			return lex.simple("=>", start)
 		}
-		return lex.simple("=")
+		return lex.simple("=", start)
 	case '+':
-		return lex.simple(lex.option('=', "+=", "+"))
+		return lex.simple(lex.option('=', "+=", "+"), start)
 	case '-':
-		return lex.simple(lex.option('=', "-=", "-"))
+		return lex.simple(lex.option('=', "-=", "-"), start)
 	case '*':
-		return lex.simple(lex.option('=', "*=", "*"))
+		return lex.simple(lex.option('=', "*=", "*"), start)
 	case '/':
 		if next, ns := lex.peek(); next == '/' {
 			lex.cursor += ns
 			for current, cs := lex.peek(); current != iEOS; current, cs = lex.peek() {
 				lex.cursor += cs
 				if current == '\n' {
-					lex.line++
+					lex.newline()
 					goto START
 				}
 			}
@@ -95,59 +107,59 @@ START:
 						goto START
 					}
 				case '\n':
-					lex.line++
+					lex.newline()
 				}
 			}
 			goto START
 		}
-		return lex.simple(lex.option('=', "/=", "/"))
+		return lex.simple(lex.option('=', "/=", "/"), start)
 
 	case '?':
-		return lex.simple("?")
+		return lex.simple("?", start)
 	case '!':
-		return lex.simple(lex.option('=', "!=", "!"))
+		return lex.simple(lex.option('=', "!=", "!"), start)
 	case '%':
-		return lex.simple(lex.option('=', "%=", "%"))
+		return lex.simple(lex.option('=', "%=", "%"), start)
 
 	case '>':
-		return lex.simple(lex.option('=', ">=", ">"))
+		return lex.simple(lex.option('=', ">=", ">"), start)
 	case '<':
-		return lex.simple(lex.option('=', "<=", "<"))
+		return lex.simple(lex.option('=', "<=", "<"), start)
 
 	case '|':
-		return lex.simple(lex.option('|', "||", "|"))
+		return lex.simple(lex.option('|', "||", "|"), start)
 	case '&':
-		return lex.simple(lex.option('&', "&&", "&"))
+		return lex.simple(lex.option('&', "&&", "&"), start)
 
 	case ',':
-		return lex.simple(",")
+		return lex.simple(",", start)
 	case '.':
 		if next1, ns1 := lex.peek(); next1 == '.' {
 			if next2, ns2 := lex.get(lex.cursor + ns1); next2 == '.' {
 				lex.cursor += ns1 + ns2
-				return lex.simple("...")
+				return lex.simple("...", start)
 			}
 		}
-		return lex.simple(".")
+		return lex.simple(".", start)
 	case ':':
-		return lex.simple(lex.option('=', ":=", ":"))
+		return lex.simple(lex.option('=', ":=", ":"), start)
 	case ';':
-		return lex.simple(";")
+		return lex.simple(";", start)
 
 	case '(':
-		return lex.simple("(")
+		return lex.simple("(", start)
 	case ')':
-		return lex.simple(")")
+		return lex.simple(")", start)
 
 	case '{':
-		return lex.simple("{")
+		return lex.simple("{", start)
 	case '}':
-		return lex.simple("}")
+		return lex.simple("}", start)
 
 	case '[':
-		return lex.simple("[")
+		return lex.simple("[", start)
 	case ']':
-		return lex.simple("]")
+		return lex.simple("]", start)
 
 	case '"':
 		// get the starting position of the first character
@@ -159,14 +171,16 @@ START:
 			case iEOS:
 				// unterminated strings
 				str := unsafe.String(&lex.src[startPos-1], lex.cursor-(startPos-1))
-				return token.Token{Type: token.Invalid, Literal: str, Line: lex.line}
+				return lex.at(token.Invalid, str, start)
 			case '\\':
 				// handle escaped quotations
 				if next, ns := lex.get(lex.cursor + cs); next == '"' {
 					lex.cursor += ns
 				}
 			case '\n':
-				lex.line++
+				lex.cursor += cs
+				lex.newline()
+				continue
 			}
 			lex.cursor += cs
 		}
@@ -174,33 +188,27 @@ START:
 		// extract string
 		str := unsafe.String(&lex.src[startPos], lex.cursor-startPos)
 		lex.cursor++ // add 1 for the terminating quotation
-		return token.Token{Type: token.String, Literal: str, Line: lex.line}
+		return lex.at(token.String, str, start)
 
 	case '`':
-		lex.lexTemplateString()
+		lex.lexTemplateString(start)
 		return lex.NextToken()
 
 	default:
 		// words
 		if unicode.IsLetter(current) || current == '_' {
-			// get the starting position of the first letter
-			startPos := lex.cursor - cs
-
 			// calculate word length
 			for next, ns := lex.peek(); isValidNamePart(next); next, ns = lex.peek() {
 				lex.cursor += ns
 			}
 
 			// extract string
-			str := unsafe.String(&lex.src[startPos], lex.cursor-startPos)
-			return token.Token{Type: token.Word, Literal: str, Line: lex.line}
+			str := unsafe.String(&lex.src[start], lex.cursor-start)
+			return lex.at(token.Word, str, start)
 		}
 
 		// numbers
 		if unicode.IsDigit(current) {
-			// get the starting position of the first digit
-			startPos := lex.cursor - cs
-
 			for next, ns := lex.peek(); next != iEOS; next, ns = lex.peek() {
 				if unicode.IsDigit(next) {
 					lex.cursor += ns
@@ -216,12 +224,12 @@ START:
 				break
 			}
 			// extract number content
-			num := unsafe.String(&lex.src[startPos], lex.cursor-startPos)
-			return token.Token{Type: token.Number, Literal: num, Line: lex.line}
+			num := unsafe.String(&lex.src[start], lex.cursor-start)
+			return lex.at(token.Number, num, start)
 		}
 	}
 
-	return token.Token{Type: token.Invalid, Literal: unsafe.String(&lex.src[lex.cursor-cs], 1), Line: lex.line}
+	return lex.at(token.Invalid, unsafe.String(&lex.src[start], cs), start)
 }
 
 // return yes if match else no; also consume if yes
@@ -233,17 +241,24 @@ func (lex *Lexer) option(match rune, yes string, no string) string {
 	return no
 }
 
-func (lex *Lexer) simple(lit string) token.Token {
-	return token.Token{Type: token.Simple, Literal: lit, Line: lex.line}
+func (lex *Lexer) simple(lit string, start int) token.Token {
+	return lex.at(token.Simple, lit, start)
 }
 
 // Template string
-func (lex *Lexer) lexTemplateString() {
+func (lex *Lexer) lexTemplateString(tickStart int) {
 	startPos := lex.cursor
-	startLine := lex.line
 
 	// add opening backtick
-	lex.backlog = append(lex.backlog, lex.simple("`"))
+	lex.backlog = append(lex.backlog, lex.simple("`", tickStart))
+
+	part := func() {
+		// extract the string part lexed so far, if any
+		if lex.cursor > startPos {
+			str := unsafe.String(&lex.src[startPos], lex.cursor-startPos)
+			lex.backlog = append(lex.backlog, lex.at(token.String, str, startPos))
+		}
+	}
 
 	for {
 		current, cs := lex.peek()
@@ -251,30 +266,22 @@ func (lex *Lexer) lexTemplateString() {
 		switch current {
 		case iEOS:
 			// unterminated template literal
-			str := unsafe.String(&lex.src[startPos-1], lex.cursor-(startPos-1))
-			lex.backlog = append(lex.backlog, token.Token{Type: token.Invalid, Literal: str, Line: lex.line})
+			str := unsafe.String(&lex.src[tickStart], lex.cursor-tickStart)
+			lex.backlog = append(lex.backlog, lex.at(token.Invalid, str, tickStart))
 			return
 
 		case '`':
-			// extract final string part
-			if lex.cursor > startPos {
-				str := unsafe.String(&lex.src[startPos], lex.cursor-startPos)
-				lex.backlog = append(lex.backlog, token.Token{Type: token.String, Literal: str, Line: startLine})
-			}
-
+			part()
+			braceStart := lex.cursor
 			lex.cursor += cs // consume closing backtick
-			lex.backlog = append(lex.backlog, lex.simple("`"))
+			lex.backlog = append(lex.backlog, lex.simple("`", braceStart))
 			return
 
 		case '{':
-			// extract string part before interpolation
-			if lex.cursor > startPos {
-				str := unsafe.String(&lex.src[startPos], lex.cursor-startPos)
-				lex.backlog = append(lex.backlog, token.Token{Type: token.String, Literal: str, Line: startLine})
-			}
-
+			part()
+			braceStart := lex.cursor
 			lex.cursor += cs // consume opening brace
-			lex.backlog = append(lex.backlog, lex.simple("{"))
+			lex.backlog = append(lex.backlog, lex.simple("{", braceStart))
 
 			// lex expression tokens until closing brace
 			braceDepth := 1
@@ -293,7 +300,6 @@ func (lex *Lexer) lexTemplateString() {
 
 			// update position for next string part
 			startPos = lex.cursor
-			startLine = lex.line
 
 		case '\\':
 			// handle escaped characters
@@ -304,8 +310,8 @@ func (lex *Lexer) lexTemplateString() {
 			lex.cursor += cs
 
 		case '\n':
-			lex.line++
 			lex.cursor += cs
+			lex.newline()
 
 		default:
 			lex.cursor += cs

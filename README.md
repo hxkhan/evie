@@ -60,7 +60,8 @@ Two tasks incrementing one global always end at the exact total, because fibers 
   - `if`, `else`, `while`, `break`, and `continue`.
   - `for item in collection` and `for idx, item in collection` over arrays, objects, and strings.
 - **Robust Error Handling**:
-  - `throw error("...")` and `catch(expr)` semantics with first-class `error` values.
+  - `throw error("...")` and `catch(expr)` semantics with first-class `error` values that know their file, line, column and call trace.
+  - Compiler-grade diagnostics: every error shows the offending line with the span underlined, related places, a hint, and suggestions for misspelled names.
 - **High-Performance NaN-Boxing**:
   - 64-bit NaN-boxed `Value` representation (`number`, `bool`, `string`, `buffer`, `array`, `object`, `struct`, `task`, `error`, `function`, `nil`).
 - **Seamless Go Host Embedding**:

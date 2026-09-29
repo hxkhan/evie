@@ -470,7 +470,13 @@ func fieldKeyOf(name string) fieldKey {
 	return fieldKey{id: fields.Get(name), name: name}
 }
 
-var messageID = fields.Get("message")
+var (
+	messageID = fields.Get("message")
+	lineID    = fields.Get("line")
+	columnID  = fields.Get("column")
+	fileID    = fields.Get("file")
+	traceID   = fields.Get("trace")
+)
 
 // sortedKeys returns the keys of a string-keyed map in order
 func sortedKeys[V any](m map[string]V) []string {
@@ -528,8 +534,8 @@ func (x Value) getField(k fieldKey) (field Value, ok bool) {
 		return *(value.Value), true
 
 	case kindError:
-		if k.id == messageID {
-			return BoxString((*Error)(x.pointer).Message), true
+		if v, ok := (*Error)(x.pointer).field(k.id); ok {
+			return v, true
 		}
 		return x.boundMethod(typeError, k.id)
 
@@ -538,6 +544,57 @@ func (x Value) getField(k fieldKey) (field Value, ok bool) {
 	}
 
 	return Value{}, false
+}
+
+// memberNames lists the members a value has, for suggestions
+func (x Value) memberNames() []string {
+	ids := func(table map[fields.ID]Value) []string {
+		names := make([]string, 0, len(table))
+		for id := range table {
+			names = append(names, fields.Lookup(id))
+		}
+		return names
+	}
+	if isKnown(x.pointer) {
+		return nil
+	}
+	switch x.scalar {
+	case kindString:
+		return ids(typeString.Fields)
+	case kindArray:
+		return ids(typeArray.Fields)
+	case kindBuffer:
+		return ids(typeBuffer.Fields)
+	case kindTask:
+		return ids(typeTask.Fields)
+	case kindError:
+		return append(ids(typeError.Fields), "message", "line", "column", "file", "trace")
+	case kindObject:
+		return append(sortedKeys(*(*map[string]Value)(x.pointer)), ids(typeObject.Fields)...)
+	case kindBuiltinType:
+		return ids((*BuiltinType)(x.pointer).Fields)
+	case kindHost:
+		return ids(x.host().typ.typ.Fields)
+	case kindPackage:
+		var names []string
+		for id := range (*Package)(x.pointer).globals {
+			names = append(names, fields.Lookup(id))
+		}
+		return names
+	case kindStructInstance:
+		usi := (*UserStructInstance)(x.pointer)
+		var names []string
+		for cur := usi.InstanceOf; cur != nil; cur = cur.Parent {
+			for _, f := range cur.Fields {
+				names = append(names, fields.Lookup(f))
+			}
+			for id := range cur.Methods {
+				names = append(names, fields.Lookup(id))
+			}
+		}
+		return append(names, sortedKeys(usi.Dynamic)...)
+	}
+	return nil
 }
 
 // boundMethod looks a method up on a builtin type and binds it to x

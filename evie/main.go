@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -8,8 +9,24 @@ import (
 	"time"
 
 	"github.com/hxkhan/evie"
+	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/vm"
 )
+
+// report prints an error the way a compiler does and exits
+func report(err error) {
+	palette := diag.Palette{}
+	if info, statErr := os.Stderr.Stat(); statErr == nil && info.Mode()&os.ModeCharDevice != 0 && os.Getenv("NO_COLOR") == "" {
+		palette = diag.Colors
+	}
+	var reporter interface{ Diagnostic() *diag.Report }
+	if errors.As(err, &reporter) {
+		fmt.Fprint(os.Stderr, reporter.Diagnostic().Render(palette))
+	} else {
+		fmt.Fprintln(os.Stderr, "error:", err)
+	}
+	os.Exit(1)
+}
 
 func main() {
 	inline := flag.Bool("inline", true, "Optimise the program by inlining certain instruction combinations")
@@ -45,8 +62,7 @@ func main() {
 
 	difference := time.Since(before)
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		report(err)
 	}
 
 	if !res.IsNil() {

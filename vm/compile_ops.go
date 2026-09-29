@@ -7,6 +7,7 @@ import (
 )
 
 func (vm *Instance) emitNeg(node ast.Neg) instruction {
+	site := vm.at(node)
 	if val, ok := vm.evaluate(node).(Value); ok {
 		return func(fbr *Fiber) (Value, Exception) {
 			return val, nil
@@ -24,7 +25,7 @@ func (vm *Instance) emitNeg(node ast.Neg) instruction {
 		if float, ok := value.AsFloat64(); ok {
 			return BoxNumber(-float), nil
 		}
-		return Value{}, RuntimeExceptionF("Cannot negate '%v'.", value)
+		return Value{}, errorAt(site, "cannot negate %s", article(value))
 	}
 }
 
@@ -67,6 +68,7 @@ func (vm *Instance) emitCatch(node ast.Catch) instruction {
 }
 
 func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
+	site := vm.at(node)
 	if val, ok := vm.evaluate(node).(Value); ok {
 		return func(fbr *Fiber) (Value, Exception) {
 			return val, nil
@@ -94,7 +96,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.Add(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("+", lhs, rhs)
+							return Value{}, operatorError(site, "+", lhs, rhs)
 						}
 
 					case ast.SubOp:
@@ -103,7 +105,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.Sub(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("-", lhs, rhs)
+							return Value{}, operatorError(site, "-", lhs, rhs)
 						}
 
 					case ast.MulOp:
@@ -112,7 +114,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.Mul(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("*", lhs, rhs)
+							return Value{}, operatorError(site, "*", lhs, rhs)
 						}
 
 					case ast.DivOp:
@@ -121,7 +123,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.Div(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("/", lhs, rhs)
+							return Value{}, operatorError(site, "/", lhs, rhs)
 						}
 
 					case ast.ModOp:
@@ -130,7 +132,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.Mod(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("%", lhs, rhs)
+							return Value{}, operatorError(site, "%", lhs, rhs)
 						}
 
 					case ast.EqOp:
@@ -151,7 +153,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.LessThan(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("<", lhs, rhs)
+							return Value{}, operatorError(site, "<", lhs, rhs)
 						}
 
 					case ast.GtOp:
@@ -160,7 +162,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.GreaterThan(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError(">", lhs, rhs)
+							return Value{}, operatorError(site, ">", lhs, rhs)
 						}
 
 					case ast.LtEqOp:
@@ -169,7 +171,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.LessThanOrEqualTo(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("<=", lhs, rhs)
+							return Value{}, operatorError(site, "<=", lhs, rhs)
 						}
 
 					case ast.GtEqOp:
@@ -178,7 +180,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.GreaterThanOrEqualTo(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError(">=", lhs, rhs)
+							return Value{}, operatorError(site, ">=", lhs, rhs)
 						}
 
 					case ast.OrOp:
@@ -207,7 +209,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.Add(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("+", lhs, rhs)
+							return Value{}, operatorError(site, "+", lhs, rhs)
 						}
 
 					case ast.SubOp:
@@ -216,7 +218,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.Sub(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("-", lhs, rhs)
+							return Value{}, operatorError(site, "-", lhs, rhs)
 						}
 
 					case ast.MulOp:
@@ -225,7 +227,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.Mul(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("*", lhs, rhs)
+							return Value{}, operatorError(site, "*", lhs, rhs)
 						}
 
 					case ast.DivOp:
@@ -234,7 +236,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.Div(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("/", lhs, rhs)
+							return Value{}, operatorError(site, "/", lhs, rhs)
 						}
 
 					case ast.ModOp:
@@ -243,7 +245,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.Mod(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("%", lhs, rhs)
+							return Value{}, operatorError(site, "%", lhs, rhs)
 						}
 
 					case ast.EqOp:
@@ -264,7 +266,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.LessThan(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("<", lhs, rhs)
+							return Value{}, operatorError(site, "<", lhs, rhs)
 						}
 
 					case ast.GtOp:
@@ -273,7 +275,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.GreaterThan(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("<", lhs, rhs)
+							return Value{}, operatorError(site, "<", lhs, rhs)
 						}
 
 					case ast.LtEqOp:
@@ -282,7 +284,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.LessThanOrEqualTo(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("<=", lhs, rhs)
+							return Value{}, operatorError(site, "<=", lhs, rhs)
 						}
 
 					case ast.GtEqOp:
@@ -291,7 +293,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.GreaterThanOrEqualTo(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError(">=", lhs, rhs)
+							return Value{}, operatorError(site, ">=", lhs, rhs)
 						}
 					}
 				}
@@ -307,7 +309,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.Add(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("+", lhs, rhs)
+							return Value{}, operatorError(site, "+", lhs, rhs)
 						}
 
 					case ast.SubOp:
@@ -316,7 +318,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.Sub(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("-", lhs, rhs)
+							return Value{}, operatorError(site, "-", lhs, rhs)
 						}
 
 					case ast.MulOp:
@@ -325,7 +327,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.Mul(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("*", lhs, rhs)
+							return Value{}, operatorError(site, "*", lhs, rhs)
 						}
 
 					case ast.DivOp:
@@ -334,7 +336,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.Div(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("/", lhs, rhs)
+							return Value{}, operatorError(site, "/", lhs, rhs)
 						}
 
 					case ast.ModOp:
@@ -343,7 +345,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.Mod(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("%", lhs, rhs)
+							return Value{}, operatorError(site, "%", lhs, rhs)
 						}
 
 					case ast.EqOp:
@@ -364,7 +366,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.LessThan(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("<", lhs, rhs)
+							return Value{}, operatorError(site, "<", lhs, rhs)
 						}
 
 					case ast.GtOp:
@@ -373,7 +375,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.GreaterThan(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("<", lhs, rhs)
+							return Value{}, operatorError(site, "<", lhs, rhs)
 						}
 
 					case ast.LtEqOp:
@@ -382,7 +384,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.LessThanOrEqualTo(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError("<=", lhs, rhs)
+							return Value{}, operatorError(site, "<=", lhs, rhs)
 						}
 
 					case ast.GtEqOp:
@@ -391,7 +393,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							if result, ok := lhs.GreaterThanOrEqualTo(rhs); ok {
 								return result, nil
 							}
-							return Value{}, operatorError(">=", lhs, rhs)
+							return Value{}, operatorError(site, ">=", lhs, rhs)
 						}
 					}
 				}
@@ -417,7 +419,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if result, ok := a.Add(b); ok {
 				return result, nil
 			}
-			return Value{}, operatorError("+", a, b)
+			return Value{}, operatorError(site, "+", a, b)
 		}
 
 	case ast.SubOp:
@@ -433,7 +435,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if result, ok := a.Sub(b); ok {
 				return result, nil
 			}
-			return Value{}, operatorError("-", a, b)
+			return Value{}, operatorError(site, "-", a, b)
 		}
 
 	case ast.MulOp:
@@ -449,7 +451,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if result, ok := a.Mul(b); ok {
 				return result, nil
 			}
-			return Value{}, operatorError("*", a, b)
+			return Value{}, operatorError(site, "*", a, b)
 		}
 
 	case ast.DivOp:
@@ -465,7 +467,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if result, ok := a.Div(b); ok {
 				return result, nil
 			}
-			return Value{}, operatorError("/", a, b)
+			return Value{}, operatorError(site, "/", a, b)
 		}
 
 	case ast.ModOp:
@@ -481,7 +483,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if result, ok := a.Mod(b); ok {
 				return result, nil
 			}
-			return Value{}, operatorError("%", a, b)
+			return Value{}, operatorError(site, "%", a, b)
 		}
 
 	case ast.EqOp:
@@ -523,7 +525,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if result, ok := a.LessThan(b); ok {
 				return result, nil
 			}
-			return Value{}, operatorError("<", a, b)
+			return Value{}, operatorError(site, "<", a, b)
 		}
 
 	case ast.GtOp:
@@ -539,7 +541,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if result, ok := a.GreaterThan(b); ok {
 				return result, nil
 			}
-			return Value{}, operatorError(">", a, b)
+			return Value{}, operatorError(site, ">", a, b)
 		}
 
 	case ast.LtEqOp:
@@ -555,7 +557,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if result, ok := a.LessThanOrEqualTo(b); ok {
 				return result, nil
 			}
-			return Value{}, operatorError("<=", a, b)
+			return Value{}, operatorError(site, "<=", a, b)
 		}
 
 	case ast.GtEqOp:
@@ -571,7 +573,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if result, ok := a.GreaterThanOrEqualTo(b); ok {
 				return result, nil
 			}
-			return Value{}, operatorError(">=", a, b)
+			return Value{}, operatorError(site, ">=", a, b)
 		}
 
 	case ast.OrOp:
@@ -611,6 +613,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 }
 
 func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
+	site := vm.at(node)
 	switch target := node.Lhs.(type) {
 	case ast.FieldAccess:
 		return vm.emitCompoundFieldAssign(node, target)
@@ -622,7 +625,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 		// optimise: lhs being a local
 		if lhs, ok := lhs.(local); ok {
 			if lhs.isStatic {
-				panic(CompileErrorf("Assignment to constant binding on line '%v'.", node.Line()))
+				panic(vm.compileErrorAt(node.Lhs, "cannot assign to a constant").withHint("declare it with var to allow reassignment"))
 			}
 
 			if rhs := vm.evaluate(node.Rhs); rhs != nil {
@@ -637,7 +640,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 								*lhs = result
 								return Value{}, nil
 							}
-							return Value{}, operatorError("+", *lhs, rhs)
+							return Value{}, operatorError(site, "+", *lhs, rhs)
 						}
 
 					case ast.SubOp:
@@ -648,7 +651,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 								*lhs = result
 								return Value{}, nil
 							}
-							return Value{}, operatorError("-", *lhs, rhs)
+							return Value{}, operatorError(site, "-", *lhs, rhs)
 						}
 
 					case ast.MulOp:
@@ -659,7 +662,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 								*lhs = result
 								return Value{}, nil
 							}
-							return Value{}, operatorError("*", *lhs, rhs)
+							return Value{}, operatorError(site, "*", *lhs, rhs)
 						}
 
 					case ast.DivOp:
@@ -670,7 +673,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 								*lhs = result
 								return Value{}, nil
 							}
-							return Value{}, operatorError("/", *lhs, rhs)
+							return Value{}, operatorError(site, "/", *lhs, rhs)
 						}
 
 					case ast.ModOp:
@@ -681,7 +684,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 								*lhs = result
 								return Value{}, nil
 							}
-							return Value{}, operatorError("%", *lhs, rhs)
+							return Value{}, operatorError(site, "%", *lhs, rhs)
 						}
 					}
 				}
@@ -696,7 +699,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 								*lhs = result
 								return Value{}, nil
 							}
-							return Value{}, operatorError("+", *lhs, rhs)
+							return Value{}, operatorError(site, "+", *lhs, rhs)
 						}
 
 					case ast.SubOp:
@@ -706,7 +709,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 								*lhs = result
 								return Value{}, nil
 							}
-							return Value{}, operatorError("-", *lhs, rhs)
+							return Value{}, operatorError(site, "-", *lhs, rhs)
 						}
 
 					case ast.MulOp:
@@ -716,7 +719,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 								*lhs = result
 								return Value{}, nil
 							}
-							return Value{}, operatorError("*", *lhs, rhs)
+							return Value{}, operatorError(site, "*", *lhs, rhs)
 						}
 
 					case ast.DivOp:
@@ -726,7 +729,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 								*lhs = result
 								return Value{}, nil
 							}
-							return Value{}, operatorError("/", *lhs, rhs)
+							return Value{}, operatorError(site, "/", *lhs, rhs)
 						}
 
 					case ast.ModOp:
@@ -736,7 +739,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 								*lhs = result
 								return Value{}, nil
 							}
-							return Value{}, operatorError("%", *lhs, rhs)
+							return Value{}, operatorError(site, "%", *lhs, rhs)
 						}
 					}
 				}
@@ -756,7 +759,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 						*lhs = result
 						return Value{}, nil
 					}
-					return Value{}, operatorError("+", *lhs, rhs)
+					return Value{}, operatorError(site, "+", *lhs, rhs)
 				}
 
 			case ast.SubOp:
@@ -770,7 +773,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 						*lhs = result
 						return Value{}, nil
 					}
-					return Value{}, operatorError("-", *lhs, rhs)
+					return Value{}, operatorError(site, "-", *lhs, rhs)
 				}
 
 			case ast.MulOp:
@@ -784,7 +787,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 						*lhs = result
 						return Value{}, nil
 					}
-					return Value{}, operatorError("*", *lhs, rhs)
+					return Value{}, operatorError(site, "*", *lhs, rhs)
 				}
 
 			case ast.DivOp:
@@ -798,7 +801,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 						*lhs = result
 						return Value{}, nil
 					}
-					return Value{}, operatorError("/", *lhs, rhs)
+					return Value{}, operatorError(site, "/", *lhs, rhs)
 				}
 
 			case ast.ModOp:
@@ -812,7 +815,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 						*lhs = result
 						return Value{}, nil
 					}
-					return Value{}, operatorError("%", *lhs, rhs)
+					return Value{}, operatorError(site, "%", *lhs, rhs)
 				}
 			}
 		}
@@ -820,7 +823,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 		// optimise: lhs being a global
 		if lhs, ok := lhs.(Global); ok {
 			if lhs.IsStatic {
-				panic(CompileErrorf("Assignment to constant binding on line '%v'.", node.Line()))
+				panic(vm.compileErrorAt(node.Lhs, "cannot assign to a constant").withHint("declare it with var to allow reassignment"))
 			}
 
 			lhs := lhs.Value
@@ -836,7 +839,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 						*lhs = result
 						return Value{}, nil
 					}
-					return Value{}, operatorError("+", *lhs, rhs)
+					return Value{}, operatorError(site, "+", *lhs, rhs)
 				}
 
 			case ast.SubOp:
@@ -849,7 +852,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 						*lhs = result
 						return Value{}, nil
 					}
-					return Value{}, operatorError("-", *lhs, rhs)
+					return Value{}, operatorError(site, "-", *lhs, rhs)
 				}
 
 			case ast.MulOp:
@@ -862,7 +865,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 						*lhs = result
 						return Value{}, nil
 					}
-					return Value{}, operatorError("*", *lhs, rhs)
+					return Value{}, operatorError(site, "*", *lhs, rhs)
 				}
 
 			case ast.DivOp:
@@ -875,7 +878,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 						*lhs = result
 						return Value{}, nil
 					}
-					return Value{}, operatorError("/", *lhs, rhs)
+					return Value{}, operatorError(site, "/", *lhs, rhs)
 				}
 
 			case ast.ModOp:
@@ -888,7 +891,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 						*lhs = result
 						return Value{}, nil
 					}
-					return Value{}, operatorError("%", *lhs, rhs)
+					return Value{}, operatorError(site, "%", *lhs, rhs)
 				}
 			}
 		}

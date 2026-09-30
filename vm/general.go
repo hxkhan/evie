@@ -223,8 +223,26 @@ type local struct {
 	isStatic   bool
 }
 
+// operand is what the compiler knows about an expression without running it:
+// a Value when it folds to a constant, a local when it names a stack slot, or
+// a Global when it names a package binding
+type operand interface {
+	operand()
+}
+
+// binding is an operand that names a variable: a local or a Global
+type binding interface {
+	operand
+	binding()
+}
+
+func (Value) operand()  {}
+func (local) operand()  {}
+func (local) binding()  {}
+func (Global) binding() {}
+
 // reach searches for a symbol across all scopes
-func (cp *compiler) reach(name string) (v any, err error) {
+func (cp *compiler) reach(name string) (binding, error) {
 	// 1. check stack
 	for scroll := range cp.closures.Len() {
 		closure := cp.closures.Last(scroll)

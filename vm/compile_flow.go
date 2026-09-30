@@ -1,8 +1,6 @@
 package vm
 
 import (
-	"math"
-
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/ds"
 )
@@ -65,6 +63,8 @@ func (vm *Instance) emitThrow(node ast.Throw) instruction {
 	}
 }
 
+// compileCondition compiles an expression used as a condition straight to a
+// Go bool; comparisons on locals and constants skip the boxed result
 func (vm *Instance) compileCondition(node ast.Node) func(fbr *Fiber) (bool, Exception) {
 	site := vm.at(node)
 	if val, ok := vm.evaluate(node).(Value); ok {
@@ -75,154 +75,8 @@ func (vm *Instance) compileCondition(node ast.Node) func(fbr *Fiber) (bool, Exce
 	}
 
 	if bin, ok := node.(ast.BinOp); ok {
-		switch bin.Operator {
-		case ast.LtOp, ast.LtEqOp, ast.GtOp, ast.GtEqOp, ast.EqOp, ast.NotEqOp:
-			// optimise: lhs local and rhs constant
-			if lhsLocal, isLocal := vm.evaluate(bin.Lhs).(local); isLocal {
-				if rhsVal, isVal := vm.evaluate(bin.Rhs).(Value); isVal {
-					if rhsNum, isNum := rhsVal.AsFloat64(); isNum {
-						switch bin.Operator {
-						case ast.LtOp:
-							return func(fbr *Fiber) (bool, Exception) {
-								lhs := *fbr.get(lhsLocal)
-								if lhs.pointer == f64Type {
-									return math.Float64frombits(lhs.scalar) < rhsNum, nil
-								}
-								res, ok := lhs.LessThan(rhsVal)
-								if !ok {
-									return false, operatorError(site, "<", lhs, rhsVal)
-								}
-								return res.IsTruthy(), nil
-							}
-						case ast.LtEqOp:
-							return func(fbr *Fiber) (bool, Exception) {
-								lhs := *fbr.get(lhsLocal)
-								if lhs.pointer == f64Type {
-									return math.Float64frombits(lhs.scalar) <= rhsNum, nil
-								}
-								res, ok := lhs.LessThanOrEqualTo(rhsVal)
-								if !ok {
-									return false, operatorError(site, "<=", lhs, rhsVal)
-								}
-								return res.IsTruthy(), nil
-							}
-						case ast.GtOp:
-							return func(fbr *Fiber) (bool, Exception) {
-								lhs := *fbr.get(lhsLocal)
-								if lhs.pointer == f64Type {
-									return math.Float64frombits(lhs.scalar) > rhsNum, nil
-								}
-								res, ok := lhs.GreaterThan(rhsVal)
-								if !ok {
-									return false, operatorError(site, ">", lhs, rhsVal)
-								}
-								return res.IsTruthy(), nil
-							}
-						case ast.GtEqOp:
-							return func(fbr *Fiber) (bool, Exception) {
-								lhs := *fbr.get(lhsLocal)
-								if lhs.pointer == f64Type {
-									return math.Float64frombits(lhs.scalar) >= rhsNum, nil
-								}
-								res, ok := lhs.GreaterThanOrEqualTo(rhsVal)
-								if !ok {
-									return false, operatorError(site, ">=", lhs, rhsVal)
-								}
-								return res.IsTruthy(), nil
-							}
-						case ast.EqOp:
-							return func(fbr *Fiber) (bool, Exception) {
-								lhs := *fbr.get(lhsLocal)
-								return lhs.Equals(rhsVal), nil
-							}
-						case ast.NotEqOp:
-							return func(fbr *Fiber) (bool, Exception) {
-								lhs := *fbr.get(lhsLocal)
-								return !lhs.Equals(rhsVal), nil
-							}
-						}
-					}
-
-					switch bin.Operator {
-					case ast.EqOp:
-						return func(fbr *Fiber) (bool, Exception) {
-							lhs := *fbr.get(lhsLocal)
-							return lhs.Equals(rhsVal), nil
-						}
-					case ast.NotEqOp:
-						return func(fbr *Fiber) (bool, Exception) {
-							lhs := *fbr.get(lhsLocal)
-							return !lhs.Equals(rhsVal), nil
-						}
-					}
-				}
-			}
-
-			// optimise: lhs local and rhs local
-			if lhsLocal, isLocalL := vm.evaluate(bin.Lhs).(local); isLocalL {
-				if rhsLocal, isLocalR := vm.evaluate(bin.Rhs).(local); isLocalR {
-					switch bin.Operator {
-					case ast.LtOp:
-						return func(fbr *Fiber) (bool, Exception) {
-							lhs, rhs := *fbr.get(lhsLocal), *fbr.get(rhsLocal)
-							if lhs.pointer == f64Type && rhs.pointer == f64Type {
-								return math.Float64frombits(lhs.scalar) < math.Float64frombits(rhs.scalar), nil
-							}
-							res, ok := lhs.LessThan(rhs)
-							if !ok {
-								return false, operatorError(site, "<", lhs, rhs)
-							}
-							return res.IsTruthy(), nil
-						}
-					case ast.LtEqOp:
-						return func(fbr *Fiber) (bool, Exception) {
-							lhs, rhs := *fbr.get(lhsLocal), *fbr.get(rhsLocal)
-							if lhs.pointer == f64Type && rhs.pointer == f64Type {
-								return math.Float64frombits(lhs.scalar) <= math.Float64frombits(rhs.scalar), nil
-							}
-							res, ok := lhs.LessThanOrEqualTo(rhs)
-							if !ok {
-								return false, operatorError(site, "<=", lhs, rhs)
-							}
-							return res.IsTruthy(), nil
-						}
-					case ast.GtOp:
-						return func(fbr *Fiber) (bool, Exception) {
-							lhs, rhs := *fbr.get(lhsLocal), *fbr.get(rhsLocal)
-							if lhs.pointer == f64Type && rhs.pointer == f64Type {
-								return math.Float64frombits(lhs.scalar) > math.Float64frombits(rhs.scalar), nil
-							}
-							res, ok := lhs.GreaterThan(rhs)
-							if !ok {
-								return false, operatorError(site, ">", lhs, rhs)
-							}
-							return res.IsTruthy(), nil
-						}
-					case ast.GtEqOp:
-						return func(fbr *Fiber) (bool, Exception) {
-							lhs, rhs := *fbr.get(lhsLocal), *fbr.get(rhsLocal)
-							if lhs.pointer == f64Type && rhs.pointer == f64Type {
-								return math.Float64frombits(lhs.scalar) >= math.Float64frombits(rhs.scalar), nil
-							}
-							res, ok := lhs.GreaterThanOrEqualTo(rhs)
-							if !ok {
-								return false, operatorError(site, ">=", lhs, rhs)
-							}
-							return res.IsTruthy(), nil
-						}
-					case ast.EqOp:
-						return func(fbr *Fiber) (bool, Exception) {
-							lhs, rhs := *fbr.get(lhsLocal), *fbr.get(rhsLocal)
-							return lhs.Equals(rhs), nil
-						}
-					case ast.NotEqOp:
-						return func(fbr *Fiber) (bool, Exception) {
-							lhs, rhs := *fbr.get(lhsLocal), *fbr.get(rhsLocal)
-							return !lhs.Equals(rhs), nil
-						}
-					}
-				}
-			}
+		if fast, ok := vm.compileComparison(bin, site); ok {
+			return fast
 		}
 	}
 

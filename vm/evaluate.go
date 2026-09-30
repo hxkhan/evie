@@ -6,13 +6,10 @@ import (
 	"github.com/hxkhan/evie/ast"
 )
 
-// evaluate performs compile-time constant folding and static symbol resolution.
-// It can return:
-//   - Value: a fully folded compile-time constant (number, bool, string, nil)
-//   - local: a local stack slot reference
-//   - Global: a global variable binding
-//   - nil: if the expression depends on runtime state and cannot be evaluated at compile time
-func (vm *Instance) evaluate(node ast.Node) any {
+// evaluate folds constants and resolves names while compiling. It returns a
+// Value for an expression that folds to a constant, a local or a Global for a
+// name, and nil for anything that depends on runtime state.
+func (vm *Instance) evaluate(node ast.Node) operand {
 	if !vm.cp.inline {
 		return nil
 	}
@@ -36,17 +33,11 @@ func (vm *Instance) evaluate(node ast.Node) any {
 			panic(vm.locate(err, node))
 		}
 
-		if global, isGlobal := variable.(Global); isGlobal {
-			// a constant global evaluates to its value, anything else to the binding
-			if global.IsConstant {
-				return *(global.Value)
-			}
-			return global
-		} else if local, isLocal := variable.(local); isLocal {
-			return local
+		// a constant global evaluates to its value, anything else to the binding
+		if global, isGlobal := variable.(Global); isGlobal && global.IsConstant {
+			return *global.Value
 		}
-
-		return nil
+		return variable
 
 	case ast.FieldAccess:
 		if lhs, ok := vm.evaluate(node.Lhs).(Value); ok {

@@ -22,6 +22,8 @@ type funcInfoStatic struct {
 	args       []string    // argument names, including the receiver of a method
 	isVariadic bool        // variadic function (...args)
 	isMethod   bool        // declared inside a struct; args[0] is the receiver
+	minArgs    int         // fewest arguments a call may pass, receiver included
+	maxArgs    int         // most arguments a call may pass; unbounded when variadic
 	locals     []bool      // all locals & true for those that escape
 	captures   []capture   // captured references
 	recyclable int         // number of non-escaping locals
@@ -29,23 +31,37 @@ type funcInfoStatic struct {
 	vm         *Instance   // the corresponding vm
 }
 
+// newFuncInfo describes a function before its body is compiled
+func (vm *Instance) newFuncInfo(name string, args []string, isVariadic bool, isMethod bool) *funcInfoStatic {
+	info := &funcInfoStatic{name: name, args: args, isVariadic: isVariadic, isMethod: isMethod, vm: vm}
+	info.minArgs, info.maxArgs = len(args), len(args)
+	if isVariadic {
+		info.minArgs, info.maxArgs = len(args)-1, int(^uint(0)>>1)
+	}
+	return info
+}
+
 // accepts checks a call's argument count against the signature
 func (fn *funcInfoStatic) accepts(n int) Exception {
-	if fn.isVariadic {
-		if minArgs := len(fn.args) - 1; n < minArgs {
-			return CustomError("%s requires at least %v argument(s), %v provided", fn.describe(), minArgs, n)
-		}
+	if n >= fn.minArgs && n <= fn.maxArgs {
 		return nil
 	}
-	if n != len(fn.args) {
-		return CustomError("%s requires %v argument(s), %v provided", fn.describe(), len(fn.args), n)
+	return fn.arityError(n)
+}
+
+func (fn *funcInfoStatic) arityError(n int) Exception {
+	if fn.isVariadic {
+		return CustomError("%s requires at least %v argument(s), %v provided", fn.describe(), len(fn.args)-1, n)
 	}
-	return nil
+	return CustomError("%s requires %v argument(s), %v provided", fn.describe(), len(fn.args), n)
 }
 
 func (fn *funcInfoStatic) describe() string {
 	if fn.name == "" {
 		return "callable"
+	}
+	if fn.isMethod {
+		return fmt.Sprintf("method '%v'", fn.name)
 	}
 	return fmt.Sprintf("function '%v'", fn.name)
 }
@@ -53,6 +69,39 @@ func (fn *funcInfoStatic) describe() string {
 type UserFn struct {
 	*funcInfoStatic
 	references []*Value // captured variables
+}
+
+// ---- the frame protocol ----
+//
+// Every call of an evie function is the same four steps: push the callee's
+// locals, evaluate or copy the arguments into the first slots, run the body with
+// base and active pointing at the new frame, then release the frame and
+// translate the return signal into a plain result. Go does not inline a
+// function that does all four, and a call costs about as much as the steps
+// themselves, so the entry points below spell them out instead of sharing
+// them: invoke, invokeMethod, call and the static call sites in emitCall.
+// Only the variadic tail, which allocates anyway, is shared.
+
+// evalVariadicTail evaluates the arguments from index fixed onwards into an
+// array in the slot after the fixed parameters
+func (fbr *Fiber) evalVariadicTail(base int, slot int, fixed int, arguments []instruction) Exception {
+	tail := make([]Value, len(arguments)-fixed)
+	for t := range tail {
+		arg, exc := arguments[fixed+t](fbr)
+		if exc != nil {
+			return exc
+		}
+		tail[t] = arg
+	}
+	*(fbr.stack[base+slot]) = BoxArray(&Array{Data: tail})
+	return nil
+}
+
+// storeVariadicTail packs already evaluated arguments from index fixed onwards
+func (fbr *Fiber) storeVariadicTail(base int, slot int, fixed int, args []Value) {
+	tail := make([]Value, len(args)-fixed)
+	copy(tail, args[fixed:])
+	*(fbr.stack[base+slot]) = BoxArray(&Array{Data: tail})
 }
 
 // Call invokes the function from Go. A nil fiber borrows one from the instance.
@@ -86,52 +135,40 @@ func (fn *UserFn) Call(fbr *Fiber, args ...Value) (result Value, err Exception) 
 	return fn.call(fbr, args)
 }
 
-// call runs the function on a fiber that is already running. The arguments are
-// known to match the signature and nothing here recovers from a panic; that is
-// the job of the host boundary in Call.
-func (fn *UserFn) call(fbr *Fiber, args []Value) (result Value, err Exception) {
+// call runs the function on a fiber that is already running with arguments
+// that are known to match the signature. Nothing here recovers from a panic;
+// that is the job of the host boundary in Call.
+func (fn *UserFn) call(fbr *Fiber, args []Value) (Value, Exception) {
 	base := len(fbr.stack)
-
-	// create space for all the locals
-	for idx, escapes := range fn.locals {
+	for _, escapes := range fn.locals {
 		if !escapes {
 			fbr.stack = append(fbr.stack, fbr.pop())
 		} else {
 			fbr.stack = append(fbr.stack, &Value{})
 		}
-
-		// assign arguments
-		if !fn.isVariadic {
-			if idx < len(args) {
-				*fbr.stack[base+idx] = args[idx]
-			}
-		} else {
-			variadicIdx := len(fn.args) - 1
-			if idx < variadicIdx {
-				*fbr.stack[base+idx] = args[idx]
-			} else if idx == variadicIdx {
-				tailCount := len(args) - variadicIdx
-				tail := make([]Value, tailCount)
-				copy(tail, args[variadicIdx:])
-				*fbr.stack[base+idx] = BoxArray(&Array{Data: tail})
-			}
-		}
 	}
 
-	// save current state
-	prevBase := fbr.swapBase(base)
-	prevActive := fbr.swapActive(fn)
+	if !fn.isVariadic {
+		for idx, arg := range args {
+			*(fbr.stack[base+idx]) = arg
+		}
+	} else {
+		fixed := len(fn.args) - 1
+		for idx := range fixed {
+			*(fbr.stack[base+idx]) = args[idx]
+		}
+		fbr.storeVariadicTail(base, fixed, fixed, args)
+	}
 
-	// call the function
+	prevBase, prevActive := fbr.base, fbr.active
+	fbr.base, fbr.active = base, fn
+
 	result, exc := fn.code(fbr)
 
-	// restore old state
 	fbr.push(fn.recyclable)
 	fbr.popStack(len(fn.locals))
-	fbr.swapBase(prevBase)
-	fbr.swapActive(prevActive)
+	fbr.base, fbr.active = prevBase, prevActive
 
-	// don't implicitly return the return value of the last executed instruction
 	switch exc {
 	case nil:
 		return Value{}, nil
@@ -142,126 +179,174 @@ func (fn *UserFn) call(fbr *Fiber, args []Value) (result Value, err Exception) {
 	}
 }
 
+// invoke evaluates the arguments straight into a new frame and runs the
+// function; the argument count is known to match the signature
+func (fn *UserFn) invoke(fbr *Fiber, arguments []instruction) (Value, Exception) {
+	base := len(fbr.stack)
+	for _, escapes := range fn.locals {
+		if !escapes {
+			fbr.stack = append(fbr.stack, fbr.pop())
+		} else {
+			fbr.stack = append(fbr.stack, &Value{})
+		}
+	}
+
+	fixed := len(arguments)
+	if fn.isVariadic {
+		fixed = len(fn.args) - 1
+	}
+	for idx := range fixed {
+		arg, exc := arguments[idx](fbr)
+		if exc != nil {
+			fbr.push(fn.recyclable)
+			fbr.popStack(len(fn.locals))
+			return Value{}, exc
+		}
+		*(fbr.stack[base+idx]) = arg
+	}
+	if fn.isVariadic {
+		if exc := fbr.evalVariadicTail(base, fixed, fixed, arguments); exc != nil {
+			fbr.push(fn.recyclable)
+			fbr.popStack(len(fn.locals))
+			return Value{}, exc
+		}
+	}
+
+	prevBase, prevActive := fbr.base, fbr.active
+	fbr.base, fbr.active = base, fn
+
+	result, exc := fn.code(fbr)
+
+	fbr.push(fn.recyclable)
+	fbr.popStack(len(fn.locals))
+	fbr.base, fbr.active = prevBase, prevActive
+
+	switch exc {
+	case nil:
+		return Value{}, nil
+	case signalReturn:
+		return result, nil
+	default:
+		return result, exc
+	}
+}
+
+// invokeMethod is invoke with the receiver placed in slot 0
+func (fn *UserFn) invokeMethod(fbr *Fiber, this Value, arguments []instruction) (Value, Exception) {
+	base := len(fbr.stack)
+	for _, escapes := range fn.locals {
+		if !escapes {
+			fbr.stack = append(fbr.stack, fbr.pop())
+		} else {
+			fbr.stack = append(fbr.stack, &Value{})
+		}
+	}
+	*(fbr.stack[base]) = this
+
+	fixed := len(arguments)
+	if fn.isVariadic {
+		fixed = len(fn.args) - 2
+	}
+	for idx := range fixed {
+		arg, exc := arguments[idx](fbr)
+		if exc != nil {
+			fbr.push(fn.recyclable)
+			fbr.popStack(len(fn.locals))
+			return Value{}, exc
+		}
+		*(fbr.stack[base+1+idx]) = arg
+	}
+	if fn.isVariadic {
+		if exc := fbr.evalVariadicTail(base, 1+fixed, fixed, arguments); exc != nil {
+			fbr.push(fn.recyclable)
+			fbr.popStack(len(fn.locals))
+			return Value{}, exc
+		}
+	}
+
+	prevBase, prevActive := fbr.base, fbr.active
+	fbr.base, fbr.active = base, fn
+
+	result, exc := fn.code(fbr)
+
+	fbr.push(fn.recyclable)
+	fbr.popStack(len(fn.locals))
+	fbr.base, fbr.active = prevBase, prevActive
+
+	switch exc {
+	case nil:
+		return Value{}, nil
+	case signalReturn:
+		return result, nil
+	default:
+		return result, exc
+	}
+}
+
+// BoundMethod is a member extracted from a value without calling it, such as
+// `fnVal := p.greet`; calling it supplies the receiver again
 type BoundMethod struct {
 	this Value
 	fn   Value
 }
 
-func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (result Value, exc Exception) {
+func (m BoundMethod) call(fbr *Fiber, arguments []instruction) (Value, Exception) {
 	if ufn, isUserFn := m.fn.AsUserFn(); isUserFn {
 		if ufn.isMethod {
 			if exc := ufn.accepts(1 + len(arguments)); exc != nil {
 				return Value{}, exc
 			}
-
-			args := make([]Value, 1+len(arguments))
-			args[0] = m.this
-			for i, arg := range arguments {
-				v, exc := arg(fbr)
-				if exc != nil {
-					return v, exc
-				}
-				args[1+i] = v
-			}
-
-			return ufn.call(fbr, args)
+			return ufn.invokeMethod(fbr, m.this, arguments)
 		}
-
 		if exc := ufn.accepts(len(arguments)); exc != nil {
 			return Value{}, exc
 		}
-
-		args := make([]Value, len(arguments))
-		for i, arg := range arguments {
-			v, exc := arg(fbr)
-			if exc != nil {
-				return v, exc
-			}
-			args[i] = v
-		}
-
-		return ufn.call(fbr, args)
+		return ufn.invoke(fbr, arguments)
 	}
 
-	fn, ok := m.fn.AsGoFunc()
-	if !ok {
-		// whatever else a field holds is called as a plain value
-		args := make([]Value, len(arguments))
-		for i, arg := range arguments {
-			v, exc := arg(fbr)
-			if exc != nil {
-				return v, exc
-			}
-			args[i] = v
+	if fn, isGoFunc := m.fn.AsGoFunc(); isGoFunc {
+		if fn.IsMethod {
+			return fn.callMethod(fbr, m.this, arguments)
 		}
-		return m.fn.Call(fbr, args...)
-	}
-
-	// a native stored in an object field is a plain function, not a method of the object
-	if !fn.IsMethod {
+		// a native stored in an object field is a plain function, not a method of the object
 		return fn.call(fbr, arguments)
 	}
 
-	if exc := fn.accepts(1 + len(arguments)); exc != nil {
-		return Value{}, exc
-	}
-
-	base := len(fbr.stack)
-
-	// push self
-	box := fbr.pop()
-	*box = m.this
-	fbr.stack = append(fbr.stack, box)
-
+	// whatever else a field holds is called as a plain value
+	args := make([]Value, len(arguments))
 	for i, arg := range arguments {
 		v, exc := arg(fbr)
 		if exc != nil {
-			// release self and the arguments evaluated so far
-			fbr.push(1 + i)
-			fbr.popStack(1 + i)
 			return v, exc
 		}
-
-		box := fbr.pop()
-		*box = v
-		fbr.stack = append(fbr.stack, box)
+		args[i] = v
 	}
-
-	prevBase := fbr.swapBase(base)
-	result, exc = fn.run(fbr)
-
-	totalPushed := 1 + len(arguments)
-	fbr.push(totalPushed)
-	fbr.popStack(totalPushed)
-	fbr.swapBase(prevBase)
-
-	return result, exc
+	return m.fn.Call(fbr, args...)
 }
 
-func (m BoundMethod) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) {
+func (m BoundMethod) Call(fbr *Fiber, args ...Value) (Value, Exception) {
+	withReceiver := func() []Value {
+		all := make([]Value, 1+len(args))
+		all[0] = m.this
+		copy(all[1:], args)
+		return all
+	}
+
 	if ufn, isUserFn := m.fn.AsUserFn(); isUserFn {
 		if ufn.isMethod {
-			allArgs := make([]Value, 1+len(args))
-			allArgs[0] = m.this
-			copy(allArgs[1:], args)
-			return ufn.Call(fbr, allArgs...)
+			return ufn.Call(fbr, withReceiver()...)
 		}
 		return ufn.Call(fbr, args...)
 	}
 
-	fn, ok := m.fn.AsGoFunc()
-	if !ok {
-		return m.fn.Call(fbr, args...)
-	}
-
-	if !fn.IsMethod {
+	if fn, isGoFunc := m.fn.AsGoFunc(); isGoFunc {
+		if fn.IsMethod {
+			return fn.Call(fbr, withReceiver()...)
+		}
 		return fn.Call(fbr, args...)
 	}
 
-	allArgs := make([]Value, 1+len(args))
-	allArgs[0] = m.this
-	copy(allArgs[1:], args)
-	return fn.Call(fbr, allArgs...)
+	return m.fn.Call(fbr, args...)
 }
 
 type GoFuncSignature = func(fbr *Fiber) (Value, Exception)
@@ -280,58 +365,95 @@ type GoFunc struct {
 
 func (fn *GoFunc) accepts(n int) Exception {
 	if fn.IsVariadic {
-		if n < fn.Arguments {
-			return CustomError("callable requires at least %v argument(s), %v provided", fn.Arguments, n)
+		if n >= fn.Arguments {
+			return nil
 		}
+	} else if n == fn.Arguments {
 		return nil
 	}
-	if fn.Arguments != n {
-		return CustomError("callable requires %v argument(s), %v provided", fn.Arguments, n)
-	}
-	return nil
+	return fn.arityError(n)
 }
 
-// run executes the native with its arguments already on the fiber stack
-func (fn *GoFunc) run(fbr *Fiber) (Value, Exception) {
+func (fn *GoFunc) arityError(n int) Exception {
+	if fn.IsVariadic {
+		return CustomError("callable requires at least %v argument(s), %v provided", fn.Arguments, n)
+	}
+	return CustomError("callable requires %v argument(s), %v provided", fn.Arguments, n)
+}
+
+// run executes the native on the frame at base, where its arguments are, and
+// releases the frame
+func (fn *GoFunc) run(fbr *Fiber, base int, pushed int) (Value, Exception) {
+	prevBase := fbr.swapBase(base)
+
+	var result Value
+	var exc Exception
 	if fn.Blocking && fbr.running {
 		fbr.unlock()
-		defer fbr.lock()
+		result, exc = fn.Fn(fbr)
+		fbr.lock()
+	} else {
+		result, exc = fn.Fn(fbr)
 	}
-	return fn.Fn(fbr)
+
+	fbr.push(pushed)
+	fbr.popStack(pushed)
+	fbr.swapBase(prevBase)
+	return result, exc
 }
 
-func (fn *GoFunc) call(fbr *Fiber, arguments []instruction) (result Value, exc Exception) {
+// pushArg places one evaluated argument in a fresh box on the stack
+func (fbr *Fiber) pushArg(v Value) {
+	box := fbr.pop()
+	*box = v
+	fbr.stack = append(fbr.stack, box)
+}
+
+// abandonArgs releases the n argument boxes pushed so far
+func (fbr *Fiber) abandonArgs(n int) {
+	fbr.push(n)
+	fbr.popStack(n)
+}
+
+func (fn *GoFunc) call(fbr *Fiber, arguments []instruction) (Value, Exception) {
 	if exc := fn.accepts(len(arguments)); exc != nil {
 		return Value{}, exc
 	}
 	return fn.invoke(fbr, arguments)
 }
 
-// just call; no args check
-func (fn *GoFunc) invoke(fbr *Fiber, arguments []instruction) (result Value, exc Exception) {
+// invoke evaluates the arguments onto the stack and runs the native; the
+// argument count is known to match
+func (fn *GoFunc) invoke(fbr *Fiber, arguments []instruction) (Value, Exception) {
 	base := len(fbr.stack)
 	for i, arg := range arguments {
 		v, exc := arg(fbr)
 		if exc != nil {
-			// release the arguments evaluated so far
-			fbr.push(i)
-			fbr.popStack(i)
+			fbr.abandonArgs(i)
 			return v, exc
 		}
+		fbr.pushArg(v)
+	}
+	return fn.run(fbr, base, len(arguments))
+}
 
-		box := fbr.pop()
-		*box = v
-		fbr.stack = append(fbr.stack, box)
+// callMethod is invoke with the receiver as the first argument
+func (fn *GoFunc) callMethod(fbr *Fiber, this Value, arguments []instruction) (Value, Exception) {
+	if exc := fn.accepts(1 + len(arguments)); exc != nil {
+		return Value{}, exc
 	}
 
-	prevBase := fbr.swapBase(base)
-	result, exc = fn.run(fbr)
-
-	fbr.push(len(arguments))
-	fbr.popStack(len(arguments))
-	fbr.swapBase(prevBase)
-
-	return result, exc
+	base := len(fbr.stack)
+	fbr.pushArg(this)
+	for i, arg := range arguments {
+		v, exc := arg(fbr)
+		if exc != nil {
+			fbr.abandonArgs(1 + i)
+			return v, exc
+		}
+		fbr.pushArg(v)
+	}
+	return fn.run(fbr, base, 1+len(arguments))
 }
 
 // Call invokes the native from Go; a nil fiber is not allowed because a native
@@ -359,17 +481,7 @@ func (fn *GoFunc) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) 
 	}()
 
 	for _, arg := range args {
-		box := fbr.pop()
-		*box = arg
-		fbr.stack = append(fbr.stack, box)
+		fbr.pushArg(arg)
 	}
-
-	prevBase := fbr.swapBase(base)
-	result, exc = fn.run(fbr)
-
-	fbr.push(len(args))
-	fbr.popStack(len(args))
-	fbr.swapBase(prevBase)
-
-	return result, exc
+	return fn.run(fbr, base, len(args))
 }

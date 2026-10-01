@@ -227,3 +227,46 @@ func TestInstancesRunInParallel(t *testing.T) {
 		}
 	}
 }
+
+// calling through a local receiver: fields holding callables, methods through
+// inheritance, and a call site that sees several struct types in turn
+func TestMemberCalls(t *testing.T) {
+	code := `package main
+	struct Animal(name) {
+		fn speak() => this.name + " makes a sound"
+	}
+	struct Dog(name, trick) : Animal {
+		fn speak() => this.name + " barks"
+	}
+	struct Holder(cb) {}
+	fn main() {
+		animals := [Animal("Generic"), Dog("Rex", fn(x) => x * 2), Animal("Other"), Dog("Fido", fn(x) => x + 1)]
+		var out := ""
+		for a in animals {
+			out += a.speak() + ";"
+		}
+		h := Holder(fn(a, b) => a - b)
+		out += string(h.cb(10, 4)) + ";"
+		d := animals[1]
+		out += string(d.trick(21)) + ";"
+		d.extra = fn() => "dynamic"
+		out += d.extra()
+		return out
+	}`
+	val, err := runCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Generic makes a sound;Rex barks;Other makes a sound;Fido barks;6;42;dynamic"
+	if val.String() != want {
+		t.Fatalf("got %q, want %q", val, want)
+	}
+}
+
+// wrong argument counts at static call sites are compile errors that name the line
+func TestStaticArityIsCompileTime(t *testing.T) {
+	_, err := runCode("package main\nfn add(a, b) => a + b\nfn main() {\n\treturn add(1)\n}")
+	if err == nil || !strings.Contains(err.Error(), "compile error") || !strings.Contains(err.Error(), "line 4") {
+		t.Fatalf("expected a compile error naming line 4, got %v", err)
+	}
+}

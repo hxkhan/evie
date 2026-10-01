@@ -29,48 +29,7 @@ func (fbr *Fiber) runTask(fn *UserFn, params []Value) (result Value, exc Excepti
 		}
 	}()
 
-	fbr.active = fn
-
-	// setup stack locals
-	for idx, escapes := range fn.locals {
-		if !escapes {
-			fbr.stack = append(fbr.stack, fbr.pop())
-		} else {
-			fbr.stack = append(fbr.stack, &Value{})
-		}
-
-		// assign arguments
-		if !fn.isVariadic {
-			if idx < len(params) {
-				*(fbr.stack[idx]) = params[idx]
-			}
-		} else {
-			variadicIdx := len(fn.args) - 1
-			if idx < variadicIdx {
-				*(fbr.stack[idx]) = params[idx]
-			} else if idx == variadicIdx {
-				tailCount := len(params) - variadicIdx
-				tail := make([]Value, tailCount)
-				copy(tail, params[variadicIdx:])
-				*(fbr.stack[idx]) = BoxArray(&Array{Data: tail})
-			}
-		}
-	}
-
-	result, exc = fn.code(fbr)
-
-	fbr.push(fn.recyclable)
-	fbr.popStack(len(fn.locals))
-
-	// return result but catch relevant signals
-	switch exc {
-	case nil:
-		return Value{}, nil
-	case signalReturn:
-		return result, nil
-	default:
-		return result, exc
-	}
+	return fn.call(fbr, params)
 }
 
 // spawnNative runs a native function with params on a fiber of its own

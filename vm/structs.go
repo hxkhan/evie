@@ -40,6 +40,16 @@ func (us *UserStruct) construct(fbr *Fiber, arguments []instruction) (Value, Exc
 	return BoxUserStructInstance(usi), nil
 }
 
+// lookupMethod finds a method on the struct or one of its ancestors
+func (us *UserStruct) lookupMethod(f fields.ID) *UserFn {
+	for cur := us; cur != nil; cur = cur.Parent {
+		if fn, ok := cur.Methods[f]; ok {
+			return fn
+		}
+	}
+	return nil
+}
+
 // slot returns the index of a declared field, looked up by its interned id
 func (us *UserStruct) slot(f fields.ID) (int, bool) {
 	slot, ok := us.FieldOffsets[f]

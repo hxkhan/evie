@@ -1,0 +1,62 @@
+// Method dispatch: a monomorphic site, a site alternating between two struct types, methods of zero to two arguments, methods calling methods on fields, and in-place updates.
+// expect: 6700000
+package main
+
+struct Circle(r) {
+    fn area() => 3 * this.r * this.r
+    fn grow(d) {
+        this.r += d
+    }
+    fn scaled(k, d) => this.r * k + d
+}
+
+struct Square(s) {
+    fn area() => this.s * this.s
+    fn grow(d) {
+        this.s += d
+    }
+    fn scaled(k, d) => this.s * k - d
+}
+
+struct Pair(a, b) {
+    fn total() => this.a.area() + this.b.area()
+}
+
+fn main() {
+    var total := 0
+
+    // one type at the call site
+    c := Circle(1)
+    var i := 0
+    while i < 300000 {
+        total += c.area() + c.scaled(2, 1)
+        i += 1
+    }
+
+    // two types at the same call site
+    shapes := [Circle(2), Square(3)]
+    i = 0
+    while i < 300000 {
+        s := shapes[i % 2]
+        total += s.area() + s.scaled(1, 1)
+        i += 1
+    }
+
+    // methods calling methods on fields
+    p := Pair(Circle(1), Square(1))
+    i = 0
+    while i < 200000 {
+        total += p.total()
+        i += 1
+    }
+
+    // updates through a method
+    sq := Square(0)
+    i = 0
+    while i < 200000 {
+        sq.grow(1)
+        i += 1
+    }
+    total += sq.s
+    return total
+}

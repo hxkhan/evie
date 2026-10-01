@@ -314,7 +314,9 @@ func (ps *parser) parseStringTemplate(main token.Token) (st ast.StringTemplate) 
 			}
 			format.WriteString("%s")
 		} else if ps.PeekToken().Type == token.String {
-			format.WriteString(ps.NextToken().Literal)
+			part := ps.NextToken()
+			text := ps.unescape(part.Literal, part.Pos, "`{}")
+			format.WriteString(strings.ReplaceAll(text, "%", "%%"))
 		} else {
 			ps.expected("the closing '`'", main, "this template string is unterminated")
 		}
@@ -701,7 +703,10 @@ func (ps *parser) parse(precedenceLevel int, asExpr bool) (node ast.Node) {
 
 	switch {
 	case main.Type == token.String:
-		node = ast.Input[string]{Pos: main.Pos, Value: ps.NextToken().Literal}
+		tok := ps.NextToken()
+		text := tok.Pos
+		text.Column++ // the text starts after the opening quote
+		node = ast.Input[string]{Pos: tok.Pos, Value: ps.unescape(tok.Literal, text, "")}
 	case main.Type == token.Number:
 		node = ast.Input[float64]{Pos: main.Pos, Value: ps.parseFloat(ps.NextToken())}
 

@@ -254,11 +254,12 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 		panic(vm.compileErrorAt(node, "cannot call '%v'", node.Fn))
 	}
 
-	// optimise: calling a member of a local, as in `obj.method(...)`
+	// optimise: calling a member, as in `obj.method(...)` or `this.items[i].update()`
 	if iFA, ok := node.Fn.(ast.FieldAccess); ok {
 		if lhs, ok := vm.evaluate(iFA.Lhs).(local); ok {
 			return vm.emitMemberCall(iFA, lhs, arguments)
 		}
+		return vm.emitMemberCallOn(iFA, vm.compile(iFA.Lhs), arguments)
 	}
 
 	// generic compilation: the target is a runtime value, most often a function
@@ -351,61 +352,82 @@ func callValue(fbr *Fiber, site site, value Value, arguments []instruction) (Val
 	return Value{}, errorAt(site, "cannot call %s", article(value)).labelled("this is " + article(value))
 }
 
-// emitMemberCall compiles `local.name(args)`. The receiver is evaluated once,
-// a struct method is placed directly into the callee's frame with no bound
-// method or argument slice, and the method lookup is cached per call site.
-func (vm *Instance) emitMemberCall(iFA ast.FieldAccess, lhs local, arguments []instruction) instruction {
-	key := fieldKeyOf(iFA.Rhs)
-	site := vm.at(iFA)
+// memberSite is one `receiver.name(args)` call site. It remembers the last
+// struct type it saw and the method that resolved to, so a call site that
+// keeps seeing one type skips the lookup.
+type memberSite struct {
+	key          fieldKey
+	name         string
+	site         site
+	cachedStruct *UserStruct
+	cachedMethod *UserFn
+}
 
-	// the call site remembers the last struct type it saw and the method it resolved to
-	var cachedStruct *UserStruct
-	var cachedMethod *UserFn
+func (vm *Instance) newMemberSite(iFA ast.FieldAccess) *memberSite {
+	return &memberSite{key: fieldKeyOf(iFA.Rhs), name: iFA.Rhs, site: vm.at(iFA)}
+}
 
-	undefined := func(obj Value) (Value, Exception) {
-		return Value{}, memberError(site, iFA.Rhs, obj)
+// call calls the member on obj. A struct method is placed directly into the
+// callee's frame with no bound method or argument slice; the arguments are
+// evaluated by the callee, after the receiver.
+func (m *memberSite) call(fbr *Fiber, obj Value, arguments []instruction) (Value, Exception) {
+	if usi, ok := obj.AsUserStructInstance(); ok {
+		// a field holding a callable wins over a method of the same name
+		if slot, ok := usi.InstanceOf.slot(m.key.id); ok {
+			return callValue(fbr, m.site, usi.Fields[slot], arguments)
+		}
+		if usi.Dynamic != nil {
+			if field, ok := usi.Dynamic[m.key.name]; ok {
+				return callValue(fbr, m.site, field, arguments)
+			}
+		}
+
+		if usi.InstanceOf != m.cachedStruct {
+			m.cachedStruct = usi.InstanceOf
+			m.cachedMethod = usi.InstanceOf.lookupMethod(m.key.id)
+		}
+		if m.cachedMethod == nil {
+			return Value{}, memberError(m.site, m.name, obj)
+		}
+		if exc := m.cachedMethod.accepts(1 + len(arguments)); exc != nil {
+			return Value{}, exc.at(m.site)
+		}
+		return m.cachedMethod.invokeMethod(fbr, m.site, obj, arguments)
 	}
 
+	if pkg, ok := obj.AsPackage(); ok {
+		value, exists := pkg.globals[m.key.id]
+		if !exists {
+			return Value{}, memberError(m.site, m.name, obj)
+		}
+		return callValue(fbr, m.site, *value.Value, arguments)
+	}
+
+	// builtin methods and object fields
+	member := obj.dotAccess(m.key)
+	if member.IsNil() {
+		return Value{}, memberError(m.site, m.name, obj)
+	}
+	return BoundMethod{this: obj, fn: member}.call(fbr, m.site, arguments)
+}
+
+// emitMemberCall compiles `local.name(args)`
+func (vm *Instance) emitMemberCall(iFA ast.FieldAccess, lhs local, arguments []instruction) instruction {
+	m := vm.newMemberSite(iFA)
 	return func(fbr *Fiber) (Value, Exception) {
-		obj := fbr.get(lhs)
+		return m.call(fbr, *fbr.get(lhs), arguments)
+	}
+}
 
-		if usi, ok := obj.AsUserStructInstance(); ok {
-			// a field holding a callable wins over a method of the same name
-			if slot, ok := usi.InstanceOf.slot(key.id); ok {
-				return callValue(fbr, site, usi.Fields[slot], arguments)
-			}
-			if usi.Dynamic != nil {
-				if field, ok := usi.Dynamic[key.name]; ok {
-					return callValue(fbr, site, field, arguments)
-				}
-			}
-
-			if usi.InstanceOf != cachedStruct {
-				cachedStruct = usi.InstanceOf
-				cachedMethod = usi.InstanceOf.lookupMethod(key.id)
-			}
-			if cachedMethod == nil {
-				return undefined(*obj)
-			}
-			if exc := cachedMethod.accepts(1 + len(arguments)); exc != nil {
-				return Value{}, exc.at(site)
-			}
-			return cachedMethod.invokeMethod(fbr, site, *obj, arguments)
+// emitMemberCallOn compiles `expr.name(args)` for a receiver that has to be
+// evaluated, such as `this.items[i].update()` or `make().run()`
+func (vm *Instance) emitMemberCallOn(iFA ast.FieldAccess, receiver instruction, arguments []instruction) instruction {
+	m := vm.newMemberSite(iFA)
+	return func(fbr *Fiber) (Value, Exception) {
+		obj, exc := receiver(fbr)
+		if exc != nil {
+			return obj, exc
 		}
-
-		if pkg, ok := obj.AsPackage(); ok {
-			value, exists := pkg.globals[key.id]
-			if !exists {
-				return undefined(*obj)
-			}
-			return callValue(fbr, site, *value.Value, arguments)
-		}
-
-		// builtin methods and object fields
-		member := obj.dotAccess(key)
-		if member.IsNil() {
-			return undefined(*obj)
-		}
-		return BoundMethod{this: *obj, fn: member}.call(fbr, site, arguments)
+		return m.call(fbr, obj, arguments)
 	}
 }

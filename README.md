@@ -148,8 +148,9 @@ pkg.Func("wait", 1, func(c vm.Call) (vm.Value, error) {
 - [x] Scoping (global, package, function, block, captured closures)
 - [x] Error handling (`throw`, `catch(expr)`, `error` type)
 - [x] Go Host Embedding (bidirectional marshaling, function reflection, struct unmarshaling)
-- [ ] Package management / module imports ⏳
-- [ ] Standard library expansion (`std/json`, `std/math`, `std/fs`) ⏳
+- [x] Standard library (`io`, `fs`, `math`, `strings`, `time`, `lists`, `json`)
+- [x] Compiler-style diagnostics (source excerpts, spans, hints, did-you-mean, stack traces)
+- [ ] Package management ⏳
 
 ---
 
@@ -164,15 +165,17 @@ For a comprehensive guide covering grammar, types, standard methods, and concurr
 
 | Language | fib(35)  | Host Language |
 | :-       | :-       | :-            |
-| [**Evie**](https://github.com/hxkhan/evie) | `392ms` | Go |
-| [PUC Lua 5.4.2](https://lua.org/) | `507ms` | C | 
-| [JS - V8 Ignition](https://v8.dev/docs/ignition) | `665ms` | C++ | 
-| [JS - QuickJS](https://bellard.org/quickjs/) | `703ms` | C | 
-| [Python 3.13](https://python.org/) | `826ms` | C |
-| [Wren](https://wren.io/) | `893ms` | C |
-| [Tengo](https://github.com/d5/tengo) | `1603ms` | Go |
+| [**Evie**](https://github.com/hxkhan/evie) | `457ms` | Go |
+| [PUC Lua 5.4.2](https://lua.org/) | `587ms` | C |
+| [JS - QuickJS](https://bellard.org/quickjs/) | `693ms` | C |
+| [JS - V8 Ignition](https://v8.dev/docs/ignition) (`node --jitless`) | `779ms` | C++ |
+| [Python 3.13](https://python.org/) | `983ms` | C |
+| [Wren](https://wren.io/) | `1030ms` | C |
+| [Tengo](https://github.com/d5/tengo) | `1826ms` | Go |
 
-> Benchmarks ran on an Intel i5-13400F. Each language was executed 10 times and the average was recorded.
+> Measured on an Intel i5-13400F under Windows 11 with the programs in [examples/](./examples) (`fib.ev`, `fib.lua`, `fib.js`, ...). Each figure is the median wall time of five runs after a warm-up, process start included.
+
+The [benchmark suite](./benchmarks) tracks 30 programs covering calls, closures, structs, method dispatch, host calls, strings, objects, errors and tasks; [results/latest.md](./benchmarks/results/latest.md) has the current numbers.
 
 Why `fib(35)`? Because micro-benchmarks measure fundamental VM metrics:
 - Function invocation and call-frame overhead (`29,860,703` recursive calls)
@@ -185,7 +188,7 @@ Why `fib(35)`? Because micro-benchmarks measure fundamental VM metrics:
 ## Setup & Quick Start
 
 ### Prerequisites
-- Go 1.20+ installed ([go.dev/doc/install](https://go.dev/doc/install))
+- Go 1.26+ installed ([go.dev/doc/install](https://go.dev/doc/install))
 
 ### Build & Run
 ```bash
@@ -198,6 +201,13 @@ go build ./evie
 
 # Run an example
 ./evie ./examples/fib.ev
+
+# Run code without a file; the standard packages it names are imported for it
+./evie -e 'math.sqrt(2)'
+./evie -e 'for w in strings.fields("go evie go") { io.println(strings.upper(w)) }'
+
+# Print the version, or the commit the binary was built from
+./evie --version
 ```
 
 ### Run Tests

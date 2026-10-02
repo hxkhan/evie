@@ -6,7 +6,7 @@ Provides some basic knowledge needed to be productive with embedding this langua
 Understanding this is crucial to knowing how variables are resolved.
 ```go
 {
-    // universal-statics.
+    // the prelude: the builtin types such as `string`, `number` and `error`, plus what the host adds.
     // visible to all packages implicitly (no `imports` needed).
     // cannot be reassigned by the user.
 
@@ -75,3 +75,13 @@ func main() {
 	result, exc := add.Call(nil, vm.BoxNumber(3), vm.BoxNumber(2))
 }
 ```
+
+## Compiler fast paths
+
+The compiler turns each AST node into a Go closure. A few rules keep the hot paths fast; check `go build -gcflags=-m=1 ./vm` and the benchmark suite when touching them.
+
+- **Operands that need no evaluation.** `evaluate` returns an `operand`: a `Value` for a constant, a `local` for a stack slot, a `Global` for a package binding, or nil. Emitters specialise on these, so `x + 1` reads the slot and adds the constant without calling another closure.
+- **Generated operator matrix.** Go only inlines `Value.Add` and its siblings when they are called directly from the closure; dispatching through a table of functions costs 10% to 40% on numeric loops. So `ops_gen.go` spells out every operator for every operand shape, including compound assignments and comparisons used as conditions, which compare numbers without boxing a bool. It is written by `gen_ops.go`; edit the generator and run `go generate ./vm`, never the output.
+- **Frames spelled out.** Go will not inline a frame-setup helper, and calling one costs 5% to 17% on call-heavy code, so the call protocol is written out in each entry point (`emitCall`, `UserFn.invoke`, `invokeMethod`). Arity checks are inlinable through precomputed minimum and maximum counts.
+- **Per-site method cache.** A member call remembers the struct type it last saw and the method it resolved to, so a monomorphic call site skips the lookup.
+- **Code layout moves numbers.** The same code emitted in a different order has shifted float loops by 7% either way. Run an A/B at least twice and judge by the suite's geometric mean, not one benchmark.

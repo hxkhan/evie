@@ -376,7 +376,7 @@ func (vm *Instance) emitMemberCall(iFA ast.FieldAccess, lhs local, arguments []i
 			return cachedMethod.invokeMethod(fbr, *obj, arguments)
 		}
 
-		if pkg, ok := obj.asPackage(); ok {
+		if pkg, ok := obj.AsPackage(); ok {
 			value, exists := pkg.globals[key.id]
 			if !exists {
 				return undefined()

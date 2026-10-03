@@ -168,16 +168,10 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 		}
 	}()
 
-	p, exists := vm.rt.packages[node.Name]
-	if exists {
-		if pi, ok := p.(*packageInstance); ok {
-			vm.cp.pkg = pi
-		}
+	if p, exists := vm.rt.packages[node.Name]; exists {
+		vm.cp.pkg = p
 	} else {
-		vm.cp.pkg = &packageInstance{
-			name:    node.Name,
-			globals: map[fields.ID]Global{},
-		}
+		vm.cp.pkg = NewPackage(node.Name)
 		vm.rt.packages[node.Name] = vm.cp.pkg
 	}
 

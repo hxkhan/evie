@@ -6,30 +6,26 @@ import (
 	"github.com/hxkhan/evie/vm"
 )
 
-func Construct() vm.Package {
-	pkg := vm.NewHostPackage()
-	//pkg.SetSymbol("decode", vm.BoxGoFunc(decode))
-	return pkg
-}
-
-func decode(v vm.Value) (vm.Value, vm.Exception) {
-	str, ok := v.AsString()
-	if ok {
-		var v any
-		err := json.Unmarshal([]byte(str), &v)
+// Construct builds the json package
+func Construct() *vm.Package {
+	pkg := vm.NewPackage("json")
+	pkg.Func("decode", 1, func(c vm.Call) (vm.Value, error) {
+		str, err := c.String(0)
 		if err != nil {
-			return vm.Value{}, vm.CustomError("%s", err.Error())
+			return vm.Value{}, err
 		}
-
-		switch v.(type) {
-		case []any:
-
+		var decoded any
+		if err := json.Unmarshal([]byte(str), &decoded); err != nil {
+			return vm.Value{}, err
 		}
-
-		panic("implement")
-
-		//return v, err
-	}
-
-	return vm.Value{}, vm.ErrTypes
+		return vm.BoxAny(decoded)
+	})
+	pkg.Func("encode", 1, func(c vm.Call) (vm.Value, error) {
+		data, err := json.Marshal(c.Arg(0).ToGo())
+		if err != nil {
+			return vm.Value{}, err
+		}
+		return vm.BoxString(string(data)), nil
+	})
+	return pkg
 }

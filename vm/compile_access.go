@@ -170,7 +170,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 
 		case Global:
 			if lhs.IsStatic {
-				if pkg, ok := lhs.asPackage(); ok {
+				if pkg, ok := lhs.AsPackage(); ok {
 					field, exists := pkg.globals[fields.Get(fa.Rhs)]
 					if !exists {
 						panic(TypeErrorF("Symbol '%s' not found in package '%s'.", fa.Rhs, pkg.name))
@@ -200,7 +200,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 			value := vm.compile(node.Value)
 			index := fields.Get(fa.Rhs)
 			return func(fbr *Fiber) (Value, Exception) {
-				if pkg, ok := lhs.asPackage(); ok {
+				if pkg, ok := lhs.AsPackage(); ok {
 					field, exists := pkg.globals[index]
 					if !exists {
 						return Value{}, TypeErrorF("Symbol '%s' not found in package '%s'.", fa.Rhs, pkg.name)
@@ -721,7 +721,7 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 			return Value{}, nil
 		}
 
-		if pkg, ok := obj.asPackage(); ok {
+		if pkg, ok := obj.AsPackage(); ok {
 			field, exists := pkg.globals[index]
 			if !exists {
 				return Value{}, TypeErrorF("Symbol '%s' not found in package '%s'.", fa.Rhs, pkg.name)

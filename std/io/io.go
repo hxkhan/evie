@@ -6,84 +6,45 @@ import (
 	"github.com/hxkhan/evie/vm"
 )
 
-func Construct() vm.Package {
-	pkg := vm.NewHostPackage()
-	pkg.SetSymbol("print", print)
-	pkg.SetSymbol("println", println)
-	pkg.SetSymbol("prompt", prompt)
-	pkg.SetSymbol("readln", readln)
-	pkg.SetSymbol("dec", dec)
-	return pkg
-}
-
-var print = vm.BoxGoFunc(&vm.GoFunc{
-	Name:       "print",
-	Arguments:  0,
-	IsVariadic: true,
-	IsMethod:   false,
-	Fn: func(fbr *vm.Fiber) (vm.Value, vm.Exception) {
-		count := fbr.ArgCount()
-		for i := 0; i < count; i++ {
+// Construct builds the io package: console output and input
+func Construct() *vm.Package {
+	pkg := vm.NewPackage("io")
+	pkg.Variadic("print", 0, func(c vm.Call) (vm.Value, error) {
+		for i := 0; i < c.Len(); i++ {
 			if i > 0 {
 				fmt.Print(" ")
 			}
-			fmt.Print(fbr.GetLocal(int16(i)))
+			fmt.Print(c.Arg(i))
 		}
 		return vm.Value{}, nil
-	},
-})
-
-var println = vm.BoxGoFunc(&vm.GoFunc{
-	Name:       "println",
-	Arguments:  0,
-	IsVariadic: true,
-	IsMethod:   false,
-	Fn: func(fbr *vm.Fiber) (vm.Value, vm.Exception) {
-		count := fbr.ArgCount()
-		for i := 0; i < count; i++ {
+	})
+	pkg.Variadic("println", 0, func(c vm.Call) (vm.Value, error) {
+		for i := 0; i < c.Len(); i++ {
 			if i > 0 {
 				fmt.Print(" ")
 			}
-			fmt.Print(fbr.GetLocal(int16(i)))
+			fmt.Print(c.Arg(i))
 		}
 		fmt.Println()
 		return vm.Value{}, nil
-	},
-})
-
-var prompt = vm.BoxGoFunc(&vm.GoFunc{
-	Name:      "prompt",
-	Arguments: 1,
-	Blocking:  true,
-	Fn: func(fbr *vm.Fiber) (vm.Value, vm.Exception) {
-		fmt.Print(fbr.GetLocal(0))
-
+	})
+	pkg.Func("prompt", 1, func(c vm.Call) (vm.Value, error) {
+		fmt.Print(c.Arg(0))
 		var input string
 		fmt.Scanln(&input)
 		return vm.BoxString(input), nil
-	},
-})
-
-var readln = vm.BoxGoFunc(&vm.GoFunc{
-	Name:      "readln",
-	Arguments: 0,
-	Blocking:  true,
-	Fn: func(fbr *vm.Fiber) (vm.Value, vm.Exception) {
+	}).Blocking = true
+	pkg.Func("readln", 0, func(c vm.Call) (vm.Value, error) {
 		var input string
 		fmt.Scanln(&input)
 		return vm.BoxString(input), nil
-	},
-})
-
-var dec = vm.BoxGoFunc(&vm.GoFunc{
-	Name:      "dec",
-	Arguments: 1,
-	IsMethod:  false,
-	Fn: func(fbr *vm.Fiber) (vm.Value, vm.Exception) {
-		n := fbr.GetLocal(0)
-		if f64, ok := n.AsFloat64(); ok {
-			return vm.BoxNumber(f64 - 1), nil
+	}).Blocking = true
+	pkg.Func("dec", 1, func(c vm.Call) (vm.Value, error) {
+		n, err := c.Number(0)
+		if err != nil {
+			return vm.Value{}, err
 		}
-		return vm.Value{}, vm.ErrTypes
-	},
-})
+		return vm.BoxNumber(n - 1), nil
+	})
+	return pkg
+}

@@ -994,6 +994,13 @@ func (vm *Instance) emitIsInstanceOf(node ast.IsInstanceOf) instruction {
 			return BoxBool(isBool), nil
 		}
 
+		// host types
+		if bt, isType := rhs.AsBuiltinType(); isType {
+			if _, t, isHost := lhs.AsHost(); isHost {
+				return BoxBool(t.typ == bt), nil
+			}
+		}
+
 		return BoxBool(false), nil
 	}
 }

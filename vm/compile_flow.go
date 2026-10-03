@@ -31,7 +31,7 @@ func (vm *Instance) emitReturn(node ast.Return) instruction {
 					}
 				}
 				return func(fbr *Fiber) (Value, Exception) {
-					return fbr.GetLocal(v.index), signalReturn
+					return fbr.getLocal(v.index), signalReturn
 				}
 			}
 		}
@@ -553,7 +553,7 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 						}
 					}
 					return func(fbr *Fiber) (Value, Exception) {
-						return fbr.GetLocal(v.index), signalReturn
+						return fbr.getLocal(v.index), signalReturn
 					}
 				}
 			}

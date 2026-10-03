@@ -29,23 +29,23 @@ type closure struct {
 }
 
 // PackageResolver resolves a package by import name or path.
-type PackageResolver func(name string) (Package, error)
+type PackageResolver func(name string) (*Package, error)
 
 type compiler struct {
 	inline  bool              // use dispatch inlining (combining instructions into one)
 	statics map[string]*Value // implicitly available to all user packages
 
-	pkg      *packageInstance   // the package being compiled right now
+	pkg      *Package           // the package being compiled right now
 	closures ds.Slice[*closure] // currently open closures
 
 	resolver PackageResolver
 }
 
 type runtime struct {
-	packages map[string]Package // loaded packages
-	fibers   sync.Pool          // pooled fibers for this vm
-	runner   sync.Mutex         // held by the fiber that is executing evie code
-	wg       sync.WaitGroup     // wait for all fibers to complete
+	packages map[string]*Package // loaded packages
+	fibers   sync.Pool           // pooled fibers for this vm
+	runner   sync.Mutex          // held by the fiber that is executing evie code
+	wg       sync.WaitGroup      // wait for all fibers to complete
 }
 
 // Global is just a wrapper for a global variable reference
@@ -55,21 +55,13 @@ type Global struct {
 	IsStatic bool
 }
 
-type packageInstance struct {
-	name    string               // name of the package
-	globals map[fields.ID]Global // all global symbols
-}
-
-// PackageContructor returns a new instance of a host package
-type PackageContructor func() map[string]*Value
-
 type Options struct {
 	LogCaptures     bool // log when and what is captured
 	DisableInlining bool // use dispatch inlining (combining instructions into one)
 
-	ImportsResolver  func(name string) Package // legacy/simple resolver
-	PackageResolver  PackageResolver           // robust package resolver with error return
-	UniversalStatics map[string]*Value         // implicitly visible to all user packages
+	ImportsResolver  func(name string) *Package // legacy/simple resolver
+	PackageResolver  PackageResolver            // robust package resolver with error return
+	UniversalStatics map[string]*Value          // implicitly visible to all user packages
 }
 
 func New(opts Options) (vm *Instance) {
@@ -78,7 +70,7 @@ func New(opts Options) (vm *Instance) {
 		res = opts.PackageResolver
 	} else if opts.ImportsResolver != nil {
 		legacy := opts.ImportsResolver
-		res = func(name string) (Package, error) {
+		res = func(name string) (*Package, error) {
 			p := legacy(name)
 			if p == nil {
 				return nil, fmt.Errorf("package '%v' not found", name)
@@ -95,7 +87,7 @@ func New(opts Options) (vm *Instance) {
 			closures: make(ds.Slice[*closure], 0, 6),
 		},
 		runtime{
-			packages: make(map[string]Package),
+			packages: make(map[string]*Package),
 		},
 		logger{
 			Logger:      *log.New(os.Stdout, "", 0),
@@ -196,8 +188,8 @@ func (vm *Instance) EvalScript(input []byte) (Value, error) {
 }
 
 // Packages iterates through loaded packages
-func (vm *Instance) Packages() iter.Seq[Package] {
-	return func(yield func(Package) bool) {
+func (vm *Instance) Packages() iter.Seq[*Package] {
+	return func(yield func(*Package) bool) {
 		for _, pkg := range vm.rt.packages {
 			if !yield(pkg) {
 				return
@@ -207,51 +199,12 @@ func (vm *Instance) Packages() iter.Seq[Package] {
 }
 
 // GetPackage retrieves a loaded package, if not found; then nil is returned
-func (vm *Instance) GetPackage(name string) (pkg Package) {
+func (vm *Instance) GetPackage(name string) (pkg *Package) {
 	pkg, exists := vm.rt.packages[name]
 	if !exists {
 		return nil
 	}
 	return pkg
-}
-
-func (pkg *packageInstance) Name() string {
-	return pkg.name
-}
-
-func (pkg *packageInstance) SetName(name string) {
-	pkg.name = name
-}
-
-func (pkg *packageInstance) SetSymbol(name string, value Value) (existed bool) {
-	index := fields.Get(name)
-	ref, exists := pkg.globals[index]
-	if exists {
-		*(ref.Value) = value
-	} else {
-		pkg.globals[index] = Global{Value: &value, IsPublic: true, IsStatic: true}
-	}
-	return exists
-}
-
-func (pkg *packageInstance) GetSymbol(name string) (value Global, exists bool) {
-	index := fields.Get(name)
-	v, exists := pkg.globals[index]
-	return v, exists
-}
-
-func (pkg *packageInstance) Get(name string) (value Value, exists bool) {
-	index := fields.Get(name)
-	v, exists := pkg.globals[index]
-	if !exists || v.Value == nil {
-		return Value{}, false
-	}
-	return *v.Value, true
-}
-
-func (pkg *packageInstance) HasSymbol(name string) (exists bool) {
-	_, exists = pkg.globals[fields.Get(name)]
-	return exists
 }
 
 func (vm *Instance) WaitForNoActivity() {

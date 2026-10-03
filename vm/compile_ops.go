@@ -8,6 +8,22 @@ import (
 	"github.com/hxkhan/evie/ast"
 )
 
+// assignee resolves the variable a compound assignment such as `x += 1`
+// updates; fields and subscripts are handled before it is called. It looks
+// the name up without folding a constant to its value, so a constant is
+// reported as one, and it works with the compiler's fast paths off.
+func (vm *Instance) assignee(node ast.Node) binding {
+	ident, ok := node.(ast.Ident)
+	if !ok {
+		panic(vm.compileErrorAt(node, "cannot assign to '%v'", node))
+	}
+	variable, err := vm.cp.reach(ident.Name)
+	if err != nil {
+		panic(vm.locate(err, ident))
+	}
+	return variable
+}
+
 func (vm *Instance) emitNeg(node ast.Neg) instruction {
 	site := vm.at(node)
 	if val, ok := vm.evaluate(node).(Value); ok {

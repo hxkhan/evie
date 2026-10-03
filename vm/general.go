@@ -63,7 +63,7 @@ type Options struct {
 	Prelude  *Package        // symbols visible everywhere without an import; the builtin types are added to it
 
 	LogCaptures     bool // log when and what is captured
-	DisableInlining bool // use dispatch inlining (combining instructions into one)
+	DisableInlining bool // compile without the fast paths for constants, locals and known callees; for debugging the compiler
 }
 
 func New(opts Options) (vm *Instance) {

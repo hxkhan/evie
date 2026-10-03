@@ -3,6 +3,8 @@ package evie_test
 import (
 	"errors"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -327,6 +329,127 @@ func TestMemberCallsOnComputedReceivers(t *testing.T) {
 	}
 }
 
+// a field can be assigned through any receiver, not only a named variable
+func TestFieldAssignmentOnComputedReceivers(t *testing.T) {
+	prelude := `package main
+	struct P(v, child) {
+		fn setChild(x) {
+			this.child.v = x
+		}
+	}
+	var log := []
+	fn note(tag, value) {
+		log.push(tag)
+		return value
+	}
+	`
+	for body, want := range map[string]string{
+		`o := {a: {b: 1}}; o.a.b = 2; return o.a.b`:                                     "2",
+		`arr := [{x: 1}]; arr[0].x = 5; return arr[0].x`:                                "5",
+		`p := P(1, P(2, nil)); p.child.v = 3; return p.child.v`:                         "3",
+		`p := P(1, P(2, nil)); p.setChild(4); return p.child.v`:                         "4",
+		`o := {x: 1}; f := fn() => o; f().x = 8; return o.x`:                            "8",
+		`p := P(1, P(2, nil)); p.child.extra = 9; return p.child.extra`:                 "9",
+		`o := {a: {}}; note("receiver", o).a.b = note("value", 1); return [o.a.b, log]`: `[1, ["receiver", "value"]]`,
+	} {
+		val, err := runCode(prelude + "fn main() {\n" + strings.ReplaceAll(body, "; ", "\n") + "\n}")
+		if err != nil {
+			t.Errorf("%s: %v", body, err)
+		} else if val.String() != want {
+			t.Errorf("%s = %s, want %s", body, val, want)
+		}
+	}
+
+	for body, want := range map[string]string{
+		`o := {a: nil}; o.a.b = 1`:          "cannot assign field 'b' on nil",
+		`o := {a: 5}; o.a.b = note("v", 1)`: "cannot assign field 'b' on number",
+	} {
+		_, err := runCode(prelude + "fn main() {\n" + strings.ReplaceAll(body, "; ", "\n") + "\n}")
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: want an error containing %q, got %v", body, want, err)
+		}
+	}
+
+	// with the compiler's fast paths off, every receiver takes this path
+	eng := evie.New(evie.Options{NoInline: true})
+	if _, err := eng.Load("noinline.ev", []byte("package main\nfn main() {\n\to := {a: 1}\n\to.a = 2\n\treturn o.a\n}")); err != nil {
+		t.Fatal(err)
+	}
+	if val, err := eng.Call("main.main"); err != nil || val.String() != "2" {
+		t.Fatalf("without fast paths: %v, %v", val, err)
+	}
+}
+
+// an importer sees a package's vars as they are now, can assign them, and
+// cannot assign its constants
+func TestPackageVarsThroughImports(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, src string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("util.ev", "package util\nvar count := 0\nlimit := 5\nfn inc() {\n\tcount += 1\n}\nfn get() => count\n")
+	write("main.ev", "package main imports(\"./util\")\nfn main() {\n\tutil.inc()\n\tutil.inc()\n\tbefore := util.count\n\tutil.count = 10\n\treturn [before, util.count, util.get(), util.limit]\n}\n")
+	write("bad.ev", "package main imports(\"./util\")\nfn main() {\n\tutil.limit = 3\n}\n")
+
+	val, err := evie.New().RunFile(filepath.Join(dir, "main.ev"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "[2, 10, 10, 5]"; val.String() != want {
+		t.Fatalf("got %s, want %s", val, want)
+	}
+
+	_, err = evie.New().RunFile(filepath.Join(dir, "bad.ev"))
+	if err == nil || !strings.Contains(err.Error(), "cannot assign to 'util.limit' because it is a constant") {
+		t.Fatalf("assigning a package constant: %v", err)
+	}
+}
+
+// compound assignment finds its variable by name: constants are reported as
+// constants, and nothing depends on the compiler's fast paths
+func TestCompoundAssignmentTargets(t *testing.T) {
+	for src, want := range map[string]string{
+		"package main\nlimit := 5\nfn main() {\n\tlimit += 1\n}":       "cannot assign to a constant",
+		"package main\nfn main() {\n\tx := 1\n\tx += 1\n}":             "cannot assign to a constant",
+		"package main\nfn f() => 1\nfn main() {\n\tf() += 1\n}":        "cannot assign to 'f()'",
+		"package main\nfn main() {\n\tvar count := 0\n\tcuont += 1\n}": "cannot find 'cuont'",
+	} {
+		_, err := runCode(src)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: want an error containing %q, got %v", src, want, err)
+		}
+	}
+
+	// the same programs run with the fast paths on and off
+	src := `package main
+	first := second + 1
+	second := 10
+	var total := 0
+	fn main() {
+		var x := 1
+		x += 2
+		x *= 3
+		total += x
+		total -= first
+		return [x, total, first]
+	}`
+	for _, noInline := range []bool{false, true} {
+		eng := evie.New(evie.Options{NoInline: noInline})
+		if _, err := eng.Load("compound.ev", []byte(src)); err != nil {
+			t.Fatalf("NoInline %v: %v", noInline, err)
+		}
+		val, err := eng.Call("main.main")
+		if err != nil {
+			t.Fatalf("NoInline %v: %v", noInline, err)
+		}
+		if want := "[9, -2, 11]"; val.String() != want {
+			t.Errorf("NoInline %v: got %s, want %s", noInline, val, want)
+		}
+	}
+}
+
 // calling a method on a computed receiver, or a variadic native, allocates
 // nothing per call
 func TestMemberCallsDoNotAllocate(t *testing.T) {
@@ -369,6 +492,7 @@ func TestMemberCallsDoNotAllocate(t *testing.T) {
 
 // wrong argument counts at static call sites are compile errors that name the line
 func TestStaticArityIsCompileTime(t *testing.T) {
+	needsFastPaths(t)
 	_, err := runCode("package main\nfn add(a, b) => a + b\nfn main() {\n\treturn add(1)\n}")
 	if err == nil || !strings.Contains(err.Error(), "compile error") || !strings.Contains(err.Error(), ":4:") {
 		t.Fatalf("expected a compile error naming line 4, got %v", err)

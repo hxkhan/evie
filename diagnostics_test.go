@@ -122,6 +122,7 @@ fn main() {
 }
 
 func TestRenderedArityError(t *testing.T) {
+	needsFastPaths(t)
 	expectRendering(t, `package main
 
 fn clamp(x, lo, hi) {

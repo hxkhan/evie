@@ -41,6 +41,10 @@ type Options struct {
 	NoInline    bool // disable the compiler's fast paths; for debugging the compiler
 }
 
+// testWithoutFastPaths makes every engine compile without the fast paths;
+// only the tests set it, to check that the general path gives the same results
+var testWithoutFastPaths bool
+
 // New creates an engine. With no options it offers the standard library and
 // resolves imports relative to the file being run.
 func New(opts ...Options) *Engine {
@@ -65,7 +69,7 @@ func New(opts ...Options) *Engine {
 		Resolver:        e.resolve,
 		Prelude:         opt.Prelude,
 		LogCaptures:     opt.LogCaptures,
-		DisableInlining: opt.NoInline,
+		DisableInlining: opt.NoInline || testWithoutFastPaths,
 	})
 	return e
 }

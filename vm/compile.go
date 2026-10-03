@@ -285,26 +285,32 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 			deferred[iDec.Name] = true
 		}
 	}
-	for progress := true; progress; {
-		progress = false
-		for _, node := range node.Code {
-			iDec, isIdentDec := node.(ast.Decl)
-			if !isIdentDec || !iDec.IsStatic || !deferred[iDec.Name] {
-				continue
+	// constants are resolved by folding even with the fast paths off: which
+	// bindings can be used before their declaration is part of the language
+	func() {
+		defer func(inline bool) { vm.cp.inline = inline }(vm.cp.inline)
+		vm.cp.inline = true
+		for progress := true; progress; {
+			progress = false
+			for _, node := range node.Code {
+				iDec, isIdentDec := node.(ast.Decl)
+				if !isIdentDec || !iDec.IsStatic || !deferred[iDec.Name] {
+					continue
+				}
+				value, ok := vm.evaluate(iDec.Value).(Value)
+				if !ok {
+					continue
+				}
+				index := fields.Get(iDec.Name)
+				global := this.globals[index]
+				*global.Value = value
+				global.IsConstant = true
+				this.globals[index] = global
+				delete(deferred, iDec.Name)
+				progress = true
 			}
-			value, ok := vm.evaluate(iDec.Value).(Value)
-			if !ok {
-				continue
-			}
-			index := fields.Get(iDec.Name)
-			global := this.globals[index]
-			*global.Value = value
-			global.IsConstant = true
-			this.globals[index] = global
-			delete(deferred, iDec.Name)
-			progress = true
 		}
-	}
+	}()
 
 	// 3. initialize functions
 	for _, node := range node.Code {

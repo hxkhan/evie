@@ -10,7 +10,6 @@ import (
 	"github.com/hxkhan/evie/std/fs"
 	"github.com/hxkhan/evie/std/io"
 	"github.com/hxkhan/evie/std/json"
-	"github.com/hxkhan/evie/std/lists"
 	"github.com/hxkhan/evie/std/math"
 	"github.com/hxkhan/evie/std/strings"
 	"github.com/hxkhan/evie/std/time"
@@ -23,7 +22,6 @@ var stdlib = map[string]func() *vm.Package{
 	"fs":      fs.Construct,
 	"time":    time.Construct,
 	"strings": strings.Construct,
-	"lists":   lists.Construct,
 	"json":    json.Construct,
 	"math":    math.Construct,
 }

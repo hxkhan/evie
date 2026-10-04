@@ -19,7 +19,7 @@ fn main() {
 }
 ```
 
-- Standard library packages (`io`, `fs`, `math`, `strings`, `time`, `lists`, `json`, see [section 12](#12-standard-library)) can be imported directly, as can packages the host registers and `.ev` files by relative path (`imports("./util")`).
+- Standard library packages (`io`, `fs`, `math`, `strings`, `time`, `json`, see [section 12](#12-standard-library)) can be imported directly, as can packages the host registers and `.ev` files by relative path (`imports("./util")`).
 - Every top-level function, struct and binding of a package is visible to importers under the package name (`io.println`, `time.wait`). There is no private marker; keep internal helpers in a package that is not imported. An importer always sees a package's `var` bindings as they are now and can assign them (`util.count = 0`); assigning one of its constants is a compile error.
 - Functions, structs and constants whose initializer is itself constant (`SECONDS := 60`, `MILLIS := SECONDS * 1000`) are hoisted, so they can be used before their declaration. Every other top-level binding is initialized in source order when the package loads; its initializer can call functions and build any value, and a binding read before its line has run is `nil`:
 
@@ -530,6 +530,7 @@ arr.push(4)               // [1, 2, 3, 4]
 arr.pop()                 // returns 4, arr is now [1, 2, 3]
 arr.slice(1, 3)           // [2, 3] (supports negative indices)
 arr.contains(2)           // true
+["a", "b"].join("-")      // "a-b" (elements must be strings)
 arr.reverse()             // [3, 2, 1]
 arr.map(fn(x) => x * 10)  // [30, 20, 10]
 arr.filter(fn(x) => x > 1)// [3, 2]
@@ -771,7 +772,6 @@ Strings also have the methods `len`, `trim`, `toLower`, `toUpper`, `contains`, `
 | function | does |
 | :-- | :-- |
 | `split(s, sep)`, `fields(s)`, `lines(s)`, `chars(s)` | break a string into an array |
-| `join(array, sep)` | join an array of strings |
 | `contains`, `hasPrefix`, `hasSuffix`, `count(s, sub)` | tests |
 | `index(s, sub)`, `lastIndex(s, sub)` | position of `sub`, or -1 |
 | `replace(s, old, new)`, `replaceFirst(s, old, new)` | replace every or the first occurrence |
@@ -803,8 +803,7 @@ Times are milliseconds since the Unix epoch, so they compare and subtract like a
 | `parse(text)` | an RFC 3339 time |
 | `second`, `minute`, `hour`, `day` | durations in milliseconds |
 
-### `lists` and `json`
+### `json`
 | function | does |
 | :-- | :-- |
-| `lists.join(array, sep)` | join an array of strings |
 | `json.encode(value)`, `json.decode(text)` | convert between values and JSON text |

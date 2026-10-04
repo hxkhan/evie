@@ -87,7 +87,7 @@ func main() {
 }
 
 // standard lists the standard packages -e imports when the code names them
-var standard = []string{"fs", "io", "json", "lists", "math", "strings", "time"}
+var standard = []string{"fs", "io", "json", "math", "strings", "time"}
 
 var packageUse = regexp.MustCompile(`\b(` + strings.Join(standard, "|") + `)\.`)
 

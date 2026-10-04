@@ -39,12 +39,5 @@ func Construct() *vm.Package {
 		fmt.Scanln(&input)
 		return vm.BoxString(input), nil
 	}).Blocking = true
-	pkg.Func("dec", 1, func(c vm.Call) (vm.Value, error) {
-		n, err := c.Number(0)
-		if err != nil {
-			return vm.Value{}, err
-		}
-		return vm.BoxNumber(n - 1), nil
-	})
 	return pkg
 }

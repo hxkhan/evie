@@ -1,6 +1,7 @@
 package evie
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,9 @@ import (
 // Engine is a VM instance together with everything needed to load programs:
 // host packages, the standard library and files found through imports. The
 // embedded Instance provides Call, Lookup, SetStatic and the lower-level API.
+//
+// An engine runs one program. Packages are identified by the file or folder
+// they come from, and each package name can be loaded once.
 type Engine struct {
 	*vm.Instance
 
@@ -28,7 +32,11 @@ type Engine struct {
 	loading      map[string]bool
 	cycleTrace   []string
 	loadedFiles  []string
+	ran          bool
 }
+
+// errRanAlready is returned when an engine is asked to run a second program
+var errRanAlready = errors.New("this engine already ran a program; create a new engine for each program")
 
 // LoadedFiles returns every file that has been evaluated, in order
 func (e *Engine) LoadedFiles() []string {
@@ -42,21 +50,10 @@ func (e *Engine) Eval(script string) (vm.Value, error) {
 }
 
 // Load compiles a source that declares a package and returns the package;
-// name is what errors call the source
+// name is what errors call the source. Loading a package name a second time
+// is an error.
 func (e *Engine) Load(name string, src []byte) (*vm.Package, error) {
-	source := diag.NewSource(name, src)
-	node, err := parser.ParseSource(source)
-	if err != nil {
-		return nil, err
-	}
-	pkgNode, isPkg := node.(ast.Package)
-	if !isPkg {
-		return nil, fmt.Errorf("%s does not declare a package", name)
-	}
-	if _, err := e.EvalSource(source); err != nil {
-		return nil, err
-	}
-	return e.GetPackage(pkgNode.Name), nil
+	return e.EvalPackage(diag.NewSource(name, src))
 }
 
 // display names a file the way errors should show it: relative to the working
@@ -75,17 +72,25 @@ func (e *Engine) Close() {
 	e.WaitForNoActivity()
 }
 
-// resolve finds a package for an import path: host packages first, then the
-// standard library, then the host's resolver, then the filesystem
+// resolve finds a package for an import path. A name such as "io" is looked
+// up among loaded packages, host packages, the standard library and the
+// host's resolver before the filesystem; a path such as "./util" goes to the
+// filesystem.
 func (e *Engine) resolve(importPath string) (*vm.Package, error) {
+	if vm.IsPathImport(importPath) {
+		return e.resolveFromFilesystem(importPath)
+	}
 	if pkg := e.GetPackage(importPath); pkg != nil {
 		return pkg, nil
 	}
 	if pkg, ok := e.packages[importPath]; ok {
+		e.noteShadowed(importPath, pkg, "host's")
 		return pkg, nil
 	}
 	if constructor, ok := stdlib[importPath]; ok && !e.opts.NoStdlib {
-		return constructor(), nil
+		pkg := constructor()
+		e.noteShadowed(importPath, pkg, "standard")
+		return pkg, nil
 	}
 	if e.opts.Resolve != nil {
 		pkg, err := e.opts.Resolve(importPath)
@@ -99,16 +104,29 @@ func (e *Engine) resolve(importPath string) (*vm.Package, error) {
 	return e.resolveFromFilesystem(importPath)
 }
 
-func (e *Engine) resolveFromFilesystem(importPath string) (*vm.Package, error) {
-	var currentDir string
-	if len(e.dirStack) > 0 {
-		currentDir = e.dirStack[len(e.dirStack)-1]
+// noteShadowed tells a script that asks a named package for a member it lacks
+// about a local file or folder of the same name, which needs a path import
+func (e *Engine) noteShadowed(name string, pkg *vm.Package, kind string) {
+	for _, candidate := range e.candidates(name, e.currentDir()) {
+		if _, err := os.Stat(candidate); err == nil {
+			pkg.SetMemberHint(fmt.Sprintf("imports(\"%s\") is the %s %s package; import \"./%s\" for %s", name, kind, name, name, display(candidate)))
+			return
+		}
 	}
-	if currentDir == "" {
-		currentDir = e.root
-	}
+}
 
-	for _, candidate := range e.candidates(importPath, currentDir) {
+func (e *Engine) currentDir() string {
+	if len(e.dirStack) > 0 {
+		if dir := e.dirStack[len(e.dirStack)-1]; dir != "" {
+			return dir
+		}
+	}
+	return e.root
+}
+
+func (e *Engine) resolveFromFilesystem(importPath string) (*vm.Package, error) {
+	candidates := e.candidates(importPath, e.currentDir())
+	for _, candidate := range candidates {
 		info, err := os.Stat(candidate)
 		if err != nil {
 			continue
@@ -119,7 +137,14 @@ func (e *Engine) resolveFromFilesystem(importPath string) (*vm.Package, error) {
 		return e.loadFilePackage(candidate)
 	}
 
-	return nil, fmt.Errorf("package '%s' not found (searched relative to %s)", importPath, currentDir)
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("package '%s' not found", importPath)
+	}
+	tried := make([]string, len(candidates))
+	for i, c := range candidates {
+		tried[i] = display(c)
+	}
+	return nil, fmt.Errorf("not found; looked for %s", strings.Join(tried, " and "))
 }
 
 func (e *Engine) candidates(importPath, currentDir string) []string {
@@ -160,25 +185,36 @@ func (e *Engine) enter(path string, dir string) (func(), error) {
 	}, nil
 }
 
-// evalFile parses and evaluates one file and returns the package it declared
-func (e *Engine) evalFile(path string) (string, error) {
+// readSource reads a file as a source named the way errors show it
+func readSource(path string) (*diag.Source, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("failed to read %s: %w", path, err)
+		return nil, fmt.Errorf("failed to read %s: %w", display(path), err)
 	}
-	source := diag.NewSource(display(path), data)
-	node, err := parser.ParseSource(source)
+	return diag.NewSource(display(path), data), nil
+}
+
+// packageName parses a source far enough to tell the package it declares;
+// a bare script declares none
+func packageName(src *diag.Source) (string, error) {
+	node, err := parser.ParseSource(src)
 	if err != nil {
 		return "", err
 	}
-	if _, err := e.EvalSource(source); err != nil {
-		return "", err
-	}
-	e.loadedFiles = append(e.loadedFiles, path)
-	if pkgNode, isPkg := node.(ast.Package); isPkg {
-		return pkgNode.Name, nil
+	if pkg, ok := node.(ast.Package); ok {
+		return pkg.Name, nil
 	}
 	return "", nil
+}
+
+// evalPackage compiles sources as one package and records them as loaded
+func (e *Engine) evalPackage(paths []string, sources []*diag.Source) (*vm.Package, error) {
+	pkg, err := e.EvalPackage(sources...)
+	if err != nil {
+		return nil, err
+	}
+	e.loadedFiles = append(e.loadedFiles, paths...)
+	return pkg, nil
 }
 
 func (e *Engine) loadFilePackage(filePath string) (*vm.Package, error) {
@@ -196,16 +232,22 @@ func (e *Engine) loadFilePackage(filePath string) (*vm.Package, error) {
 	}
 	defer leave()
 
-	name, err := e.evalFile(absPath)
+	src, err := readSource(absPath)
 	if err != nil {
 		return nil, err
 	}
-	if name == "" {
-		return nil, fmt.Errorf("file %s did not declare a package", absPath)
+	switch name, err := packageName(src); {
+	case err != nil:
+		return nil, err
+	case name == "":
+		return nil, fmt.Errorf("%s does not declare a package", src.Name)
+	case name == "main":
+		return nil, fmt.Errorf("%s declares package main, which cannot be imported", src.Name)
 	}
-	pkg := e.GetPackage(name)
-	if pkg == nil {
-		return nil, fmt.Errorf("package '%s' was not registered after evaluating %s", name, absPath)
+
+	pkg, err := e.evalPackage([]string{absPath}, []*diag.Source{src})
+	if err != nil {
+		return nil, err
 	}
 	e.filePackages[absPath] = pkg
 	return pkg, nil
@@ -226,45 +268,53 @@ func (e *Engine) loadDirectoryPackage(dirPath string) (*vm.Package, error) {
 	}
 	defer leave()
 
-	entries, err := os.ReadDir(absDir)
+	files, err := evFiles(absDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read directory %s: %w", absDir, err)
-	}
-	var files []string
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".ev") {
-			files = append(files, filepath.Join(absDir, entry.Name()))
-		}
+		return nil, err
 	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("no .ev files found in directory %s", absDir)
+		return nil, fmt.Errorf("no .ev files in %s", display(absDir))
 	}
-	sort.Strings(files)
-
-	var name string
-	for _, file := range files {
-		declared, err := e.evalFile(file)
-		if err != nil {
+	sources := make([]*diag.Source, len(files))
+	for i, file := range files {
+		if sources[i], err = readSource(file); err != nil {
 			return nil, err
 		}
-		if declared != "" {
-			name = declared
-		}
 	}
-	if name == "" {
-		return nil, fmt.Errorf("directory %s contained no package declarations", absDir)
-	}
-	pkg := e.GetPackage(name)
-	if pkg == nil {
-		return nil, fmt.Errorf("package '%s' was not registered after evaluating %s", name, absDir)
+
+	pkg, err := e.evalPackage(files, sources)
+	if err != nil {
+		return nil, err
 	}
 	e.dirPackages[absDir] = pkg
 	return pkg, nil
 }
 
+// evFiles lists the .ev files of a directory in name order
+func evFiles(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read directory %s: %w", display(dir), err)
+	}
+	var files []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".ev") {
+			files = append(files, filepath.Join(dir, entry.Name()))
+		}
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
 // RunFile evaluates a script file, resolving its imports relative to it, and
-// runs main.main when the program defines it
+// runs main.main when the program defines it. Only that file is loaded; use
+// RunProject for a main package spread over several files.
 func (e *Engine) RunFile(filePath string) (vm.Value, error) {
+	if e.ran {
+		return vm.Value{}, errRanAlready
+	}
+	e.ran = true
+
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
 		return vm.Value{}, err
@@ -272,41 +322,89 @@ func (e *Engine) RunFile(filePath string) (vm.Value, error) {
 	if e.root == "" {
 		e.root = filepath.Dir(absPath)
 	}
-
 	e.dirStack = append(e.dirStack, filepath.Dir(absPath))
 	defer func() { e.dirStack = e.dirStack[:len(e.dirStack)-1] }()
 
-	data, err := os.ReadFile(absPath)
-	if err != nil {
-		return vm.Value{}, fmt.Errorf("failed to read entry file: %w", err)
-	}
-	result, err := e.EvalSource(diag.NewSource(display(absPath), data))
+	src, err := readSource(absPath)
 	if err != nil {
 		return vm.Value{}, err
 	}
-	e.loadedFiles = append(e.loadedFiles, absPath)
-
-	if mainFn, ok := e.Lookup("main.main"); ok && mainFn.IsCallable() {
-		res, exc := mainFn.Call(nil)
-		e.Close()
-		if exc != nil {
-			return res, exc
-		}
-		return res, nil
+	name, err := packageName(src)
+	if err != nil {
+		return vm.Value{}, err
 	}
-	return result, nil
+	if name == "" {
+		// a bare script runs as it is and its value is the result
+		result, err := e.EvalSource(src)
+		if err != nil {
+			return vm.Value{}, err
+		}
+		e.loadedFiles = append(e.loadedFiles, absPath)
+		return result, nil
+	}
+
+	if _, err := e.evalPackage([]string{absPath}, []*diag.Source{src}); err != nil {
+		return vm.Value{}, err
+	}
+	return e.runMain()
 }
 
-// RunProject evaluates the main.ev of a project directory
+// RunProject runs the program in a directory. Every file at its top level that
+// declares package main is part of the main package; the other files and the
+// subfolders are packages the program imports by path.
 func (e *Engine) RunProject(dirPath string) (vm.Value, error) {
+	if e.ran {
+		return vm.Value{}, errRanAlready
+	}
+	e.ran = true
+
 	absDir, err := filepath.Abs(dirPath)
 	if err != nil {
 		return vm.Value{}, err
 	}
 	e.root = absDir
-	mainFile := filepath.Join(absDir, "main.ev")
-	if _, err := os.Stat(mainFile); err != nil {
-		return vm.Value{}, fmt.Errorf("main.ev not found in project directory %s", absDir)
+	e.dirStack = append(e.dirStack, absDir)
+	defer func() { e.dirStack = e.dirStack[:len(e.dirStack)-1] }()
+
+	files, err := evFiles(absDir)
+	if err != nil {
+		return vm.Value{}, err
 	}
-	return e.RunFile(mainFile)
+	var paths []string
+	var sources []*diag.Source
+	for _, file := range files {
+		src, err := readSource(file)
+		if err != nil {
+			return vm.Value{}, err
+		}
+		name, err := packageName(src)
+		if err != nil {
+			return vm.Value{}, err
+		}
+		if name == "main" {
+			paths, sources = append(paths, file), append(sources, src)
+		}
+	}
+	if len(sources) == 0 {
+		return vm.Value{}, fmt.Errorf("no file in %s declares package main", display(absDir))
+	}
+
+	if _, err := e.evalPackage(paths, sources); err != nil {
+		return vm.Value{}, err
+	}
+	return e.runMain()
+}
+
+// runMain calls main.main when the program defines it and waits for its tasks
+func (e *Engine) runMain() (vm.Value, error) {
+	mainFn, ok := e.Lookup("main.main")
+	if !ok || !mainFn.IsCallable() {
+		return vm.Value{}, nil
+	}
+	res, exc := mainFn.Call(nil)
+	e.Close()
+	if exc != nil {
+		return res, exc
+	}
+	return res, nil
 }

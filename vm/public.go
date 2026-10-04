@@ -11,6 +11,16 @@ import (
 type Package struct {
 	name    string               // name of the package
 	globals map[fields.ID]Global // all global symbols
+
+	origin     string               // the file it was compiled from, for errors
+	importedAs map[string][2]string // path name -> (import path, bound name) where they differ
+	memberHint string               // shown when a script asks for a member it lacks
+}
+
+// SetMemberHint sets the help shown when a script asks the package for a
+// member it does not have, such as which import to use instead
+func (pkg *Package) SetMemberHint(hint string) {
+	pkg.memberHint = hint
 }
 
 // NewPackage creates an empty host package. Scripts import it by the name it

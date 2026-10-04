@@ -1,12 +1,15 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 
 	"github.com/hxkhan/evie/ast"
+	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/ds"
+	"github.com/hxkhan/evie/token"
 	"github.com/hxkhan/evie/vm/fields"
 )
 
@@ -144,12 +147,33 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	panic(fmt.Errorf("implement %T", node))
 }
 
-func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
-	prevPkg := vm.cp.pkg
+// unit is one source file of a package being compiled
+type unit struct {
+	src  *diag.Source
+	node ast.Package
+}
+
+// sourced is a top-level statement and the file it comes from
+type sourced struct {
+	src  *diag.Source
+	node ast.Node
+}
+
+// IsPathImport reports whether an import names a file or folder, such as
+// "./util" or "../lib/text", rather than a package by name, such as "io"
+func IsPathImport(path string) bool {
+	return strings.HasPrefix(path, ".") || strings.ContainsAny(path, "/\\") || filepath.IsAbs(path)
+}
+
+// runPackage compiles a package from all of its files at once and runs its
+// initializers. Declarations are hoisted across the files, so any file can use
+// what another declares, and imports belong to the whole package.
+func (vm *Instance) runPackage(units []unit) (res Value, exc Exception) {
+	prevPkg, prevSrc := vm.cp.pkg, vm.cp.src
 	prevClosures := vm.cp.closures.Len()
 
 	defer func() {
-		vm.cp.pkg = prevPkg
+		vm.cp.pkg, vm.cp.src = prevPkg, prevSrc
 		for vm.cp.closures.Len() > prevClosures {
 			vm.cp.closures.Pop()
 		}
@@ -161,6 +185,8 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 				panic(r) // EvalNode reports it as what it is
 			} else if e, ok := r.(Exception); ok {
 				exc = e
+			} else if _, ok := r.(interface{ Diagnostic() *diag.Report }); ok {
+				panic(r) // an imported package's own report, such as a syntax error
 			} else if e, ok := r.(error); ok {
 				exc = CustomError("%v", e.Error())
 			} else {
@@ -169,51 +195,49 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 		}
 	}()
 
-	if p, exists := vm.rt.packages[node.Name]; exists {
-		vm.cp.pkg = p
-	} else {
-		vm.cp.pkg = NewPackage(node.Name)
-		vm.rt.packages[node.Name] = vm.cp.pkg
+	name := units[0].node.Name
+	for _, u := range units[1:] {
+		if u.node.Name != name {
+			vm.cp.src = u.src
+			panic(vm.compileErrorAt(u.node, "this file declares package '%s', but %s declares '%s'", u.node.Name, units[0].src.Name, name).
+				withHint("every file of a package declares the same name"))
+		}
 	}
 
-	this := vm.cp.pkg
-	// first make sure all static imports are resolved
-	for _, name := range node.Imports {
-		pkg := vm.rt.packages[name]
-		if pkg == nil {
-			if vm.cp.resolver == nil {
-				return Value{}, errorAt(vm.at(node), "cannot import '%v': no package resolver is configured", name)
-			}
-			vm.rt.release()
-			p, err := vm.cp.resolver(name)
-			vm.rt.acquire()
-			if err != nil {
-				return Value{}, errorAt(vm.at(node), "cannot import '%v': %v", name, err)
-			}
-			if p == nil {
-				return Value{}, errorAt(vm.at(node), "cannot import '%v': no such package", name)
-			}
-			pkg = p
-			if pkg.Name() == "" {
-				pkg.SetName(name)
-			}
-			vm.rt.packages[name] = pkg
-			if pkg.Name() != "" && pkg.Name() != name {
-				vm.rt.packages[pkg.Name()] = pkg
-			}
+	vm.cp.src = units[0].src
+	if existing, exists := vm.rt.packages[name]; exists {
+		ce := vm.compileErrorAt(units[0].node, "package '%s' is already loaded", name)
+		if existing.origin != "" {
+			ce.Message = fmt.Sprintf("package '%s' is already loaded from %s", name, existing.origin)
 		}
+		panic(ce.withHint("give each package its own name, or use a new engine to load this one again"))
+	}
 
-		v := pkg.Box()
-		bindName := pkg.Name()
-		if bindName == "" {
-			bindName = filepath.Base(name)
-			if ext := filepath.Ext(bindName); ext != "" {
-				bindName = strings.TrimSuffix(bindName, ext)
-			}
+	this := NewPackage(name)
+	this.origin = units[0].src.Name
+	vm.cp.pkg = this
+	vm.rt.packages[name] = this
+	loaded := false
+	defer func() {
+		if !loaded && vm.rt.packages[name] == this {
+			delete(vm.rt.packages, name)
 		}
-		this.globals[fields.Get(bindName)] = Global{Value: &v, IsPublic: false, IsStatic: true, IsConstant: true}
-		if bindName != name {
-			this.globals[fields.Get(name)] = Global{Value: &v, IsPublic: false, IsStatic: true, IsConstant: true}
+	}()
+
+	// imports belong to the whole package; each is resolved once
+	seen := map[string]bool{}
+	for _, u := range units {
+		vm.cp.src = u.src
+		for i, path := range u.node.Imports {
+			if seen[path] {
+				continue
+			}
+			seen[path] = true
+			var pos token.Pos
+			if i < len(u.node.ImportPos) {
+				pos = u.node.ImportPos[i]
+			}
+			vm.bindImport(this, u, path, pos)
 		}
 	}
 
@@ -225,11 +249,23 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 		   gets its value now, so uses of it fold while compiling.
 		3. Function bodies and struct methods are compiled.
 		4. The remaining initializers and any other top-level statements run in
-		   source order, so they can call functions and build any value.
+		   source order, file after file, so they can call functions and build
+		   any value.
+
+		Each step covers every file of the package before the next one starts.
 	*/
+	// the statements of every file, each with the file it comes from
+	var code []sourced
+	for _, u := range units {
+		for _, n := range u.node.Code {
+			code = append(code, sourced{u.src, n})
+		}
+	}
 
 	// 1. allocate functions & structs
-	for _, node := range node.Code {
+	for _, it := range code {
+		vm.cp.src = it.src
+		node := it.node
 		if fn, isFn := node.(ast.Fn); isFn {
 			index := fields.Get(fn.Name)
 			if _, exists := this.globals[index]; exists {
@@ -275,7 +311,9 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 	// value now, whatever the order of declarations, so uses of it fold; every
 	// other binding waits for step 4.
 	deferred := map[string]bool{}
-	for _, node := range node.Code {
+	for _, it := range code {
+		vm.cp.src = it.src
+		node := it.node
 		if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
 			index := fields.Get(iDec.Name)
 			if _, exists := this.globals[index]; exists {
@@ -292,7 +330,9 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 		vm.cp.inline = true
 		for progress := true; progress; {
 			progress = false
-			for _, node := range node.Code {
+			for _, it := range code {
+				vm.cp.src = it.src
+				node := it.node
 				iDec, isIdentDec := node.(ast.Decl)
 				if !isIdentDec || !iDec.IsStatic || !deferred[iDec.Name] {
 					continue
@@ -313,7 +353,9 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 	}()
 
 	// 3. initialize functions
-	for _, node := range node.Code {
+	for _, it := range code {
+		vm.cp.src = it.src
+		node := it.node
 		if fn, isFn := node.(ast.Fn); isFn {
 			global := this.globals[fields.Get(fn.Name)]
 			ufn := (*UserFn)(global.pointer)
@@ -322,7 +364,9 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 	}
 
 	// 3b. initialize struct methods and inheritance
-	for _, node := range node.Code {
+	for _, it := range code {
+		vm.cp.src = it.src
+		node := it.node
 		if str, isStruct := node.(ast.StructDefinition); isStruct {
 			global := this.globals[fields.Get(str.Name)]
 			ustruct := (*UserStruct)(global.pointer)
@@ -359,7 +403,12 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 	}
 
 	// 4. run the remaining initializers and statements in source order
-	if init := vm.compileInit(this, node.Code, deferred); init != nil {
+	for _, u := range units {
+		vm.cp.src = u.src
+		init := vm.compileInit(this, u.node.Code, deferred)
+		if init == nil {
+			continue
+		}
 		fbr := vm.NewFiber()
 		fbr.running = true // the runner is held by EvalNode
 		_, exc := init.call(fbr, nil)
@@ -369,7 +418,81 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 			return Value{}, exc
 		}
 	}
+	loaded = true
 	return Value{}, nil
+}
+
+// bindImport resolves one import of a package and binds it under the name the
+// imported package declares
+func (vm *Instance) bindImport(this *Package, u unit, path string, pos token.Pos) {
+	var pkg *Package
+	if !IsPathImport(path) {
+		pkg = vm.rt.packages[path]
+	}
+	if pkg == nil {
+		if vm.cp.resolver == nil {
+			panic(vm.compileErrorAtPos(pos, "cannot import '%s': no package resolver is configured", path))
+		}
+		vm.rt.release()
+		p, err := vm.cp.resolver(path)
+		vm.rt.acquire()
+		if err != nil {
+			vm.importFailed(u, path, pos, err)
+		}
+		if p == nil {
+			panic(vm.compileErrorAtPos(pos, "cannot import '%s': no such package", path))
+		}
+		pkg = p
+		if pkg.Name() == "" {
+			base := filepath.Base(path)
+			pkg.SetName(strings.TrimSuffix(base, filepath.Ext(base)))
+		}
+		if !IsPathImport(path) {
+			vm.rt.packages[path] = pkg
+		}
+		if existing, ok := vm.rt.packages[pkg.Name()]; !ok {
+			vm.rt.packages[pkg.Name()] = pkg
+		} else if existing != pkg {
+			ce := vm.compileErrorAtPos(pos, "cannot import '%s': it declares package '%s', which is already loaded", path, pkg.Name())
+			if existing.origin != "" {
+				ce.Message += " from " + existing.origin
+			}
+			panic(ce.withHint("give each package its own name"))
+		}
+	}
+
+	v := pkg.Box()
+	bindName := pkg.Name()
+	this.globals[fields.Get(bindName)] = Global{Value: &v, IsPublic: false, IsStatic: true, IsConstant: true}
+
+	// remember an import bound under another name than its path suggests, so a
+	// script that uses the path's name can be told
+	base := filepath.Base(path)
+	if base = strings.TrimSuffix(base, filepath.Ext(base)); base != bindName {
+		if this.importedAs == nil {
+			this.importedAs = map[string][2]string{}
+		}
+		this.importedAs[base] = [2]string{path, bindName}
+	}
+}
+
+// importFailed stops compiling because an import could not be loaded. An error
+// from inside the imported package keeps its own report, which gains a note
+// pointing at the import; any other error is reported at the import.
+func (vm *Instance) importFailed(u unit, path string, pos token.Pos, err error) {
+	var reporter interface{ Diagnostic() *diag.Report }
+	if errors.As(err, &reporter) {
+		r := reporter.Diagnostic()
+		if r.Source != nil {
+			r.Notes = append(r.Notes, diag.Note{Source: u.src, Pos: pos, Text: fmt.Sprintf("'%s' is imported here", path)})
+			// the frame of the importer's loading adds nothing to the trace
+			if n := len(r.Trace); n > 0 && r.Trace[n-1].Function == "" {
+				r.Trace = r.Trace[:n-1]
+			}
+			panic(err)
+		}
+	}
+	panic(vm.compileErrorAtPos(pos, "cannot import '%s': %v", path, err))
 }
 
 // compileInit compiles the top-level statements of a package that have to run:

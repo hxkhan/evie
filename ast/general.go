@@ -15,9 +15,10 @@ type Node interface {
 
 type Package struct {
 	token.Pos
-	Name    string
-	Imports []string
-	Code    []Node
+	Name      string
+	Imports   []string
+	ImportPos []token.Pos // where each import string is, for errors
+	Code      []Node
 }
 
 type Literal interface {

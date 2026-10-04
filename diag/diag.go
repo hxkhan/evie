@@ -159,6 +159,13 @@ func (r *Report) Render(p Palette) string {
 	}
 	for _, n := range r.Notes {
 		if n.Pos.Known() {
+			// a note in another file says which file first
+			if n.Source != nil && n.Source != r.Source && n.Source.Name != "" {
+				if shown {
+					fmt.Fprintf(&b, "%s %s\n", pad, gutter("|"))
+				}
+				fmt.Fprintf(&b, "%s%s %s:%d:%d\n", pad, gutter(":::"), n.Source.Name, n.Pos.Line, n.Pos.Column)
+			}
 			shown = excerpt(n.Source, n.Pos, n.Text, "-") || shown
 		} else if n.Text != "" {
 			fmt.Fprintf(&b, "%s %s note: %s\n", pad, gutter("="), n.Text)

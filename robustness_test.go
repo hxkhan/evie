@@ -640,10 +640,11 @@ func TestHostTypes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.EvalString("package main\nfn peek(c) => c.get()"); err != nil {
+	// a package is loaded once, so the addition goes in a package of its own
+	if _, err := env.EvalString("package extra\nfn peek(c) => c.get()"); err != nil {
 		t.Fatal(err)
 	}
-	res, err = env.Call("main.peek", &counter{n: 9})
+	res, err = env.Call("extra.peek", &counter{n: 9})
 	if err != nil {
 		t.Fatal(err)
 	}

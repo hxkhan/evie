@@ -1434,8 +1434,9 @@ func TestGoHostEmbedding(t *testing.T) {
 	}
 
 	// Package with main() execution via Lookup reference
+	// a package is loaded once, so the second script declares its own
 	_, err = env.EvalString(`
-	package main
+	package entry
 	fn main() {
 		return "executed main successfully"
 	}
@@ -1443,9 +1444,9 @@ func TestGoHostEmbedding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EvalString main failed: %v", err)
 	}
-	mainFn, ok := env.Lookup("main.main")
+	mainFn, ok := env.Lookup("entry.main")
 	if !ok || !mainFn.IsCallable() {
-		t.Fatalf("Lookup main.main failed")
+		t.Fatalf("Lookup entry.main failed")
 	}
 	mainRes, exc := mainFn.Call(fbr)
 	if exc != nil {

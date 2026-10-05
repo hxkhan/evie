@@ -5,7 +5,7 @@
 //
 // An operator applied to two locals, to a local and a constant, or to a
 // constant and a local is the hottest code the interpreter runs, and Go only
-// inlines Value.Add and its siblings when they are called directly from the
+// inlines Value.add and its siblings when they are called directly from the
 // closure. Calling them through a table costs 10% to 40% on numeric loops, so
 // the closures are spelled out, one per operator and shape; this program
 // spells them out so that nobody has to maintain 900 lines of copies by hand.
@@ -31,17 +31,17 @@ type op struct {
 }
 
 var ops = []op{
-	{"AddOp", "+", "Add", "method"},
-	{"SubOp", "-", "Sub", "method"},
-	{"MulOp", "*", "Mul", "method"},
-	{"DivOp", "/", "Div", "method"},
-	{"ModOp", "%", "Mod", "method"},
+	{"AddOp", "+", "add", "method"},
+	{"SubOp", "-", "sub", "method"},
+	{"MulOp", "*", "mul", "method"},
+	{"DivOp", "/", "div", "method"},
+	{"ModOp", "%", "mod", "method"},
 	{"EqOp", "==", "", "eq"},
 	{"NotEqOp", "!=", "", "noteq"},
-	{"LtOp", "<", "LessThan", "method"},
-	{"GtOp", ">", "GreaterThan", "method"},
-	{"LtEqOp", "<=", "LessThanOrEqualTo", "method"},
-	{"GtEqOp", ">=", "GreaterThanOrEqualTo", "method"},
+	{"LtOp", "<", "lessThan", "method"},
+	{"GtOp", ">", "greaterThan", "method"},
+	{"LtEqOp", "<=", "lessThanOrEqualTo", "method"},
+	{"GtEqOp", ">=", "greaterThanOrEqualTo", "method"},
 	{"OrOp", "||", "", "or"},
 	{"AndOp", "&&", "", "and"},
 }

@@ -83,3 +83,82 @@ func (pkg *Package) Has(name string) bool {
 	_, exists := pkg.globals[fields.Get(name)]
 	return exists
 }
+
+// The operators as scripts apply them, for hosts whose natives should behave
+// like the language: + adds numbers and joins strings, the others work on
+// numbers. Operands of the wrong types give the error a script would get,
+// such as "cannot apply '+' to a number and a string".
+
+// Add applies + to x and y
+func (x Value) Add(y Value) (Value, error) {
+	if z, ok := x.add(y); ok {
+		return z, nil
+	}
+	return Value{}, operatorError(unknownSite, "+", x, y)
+}
+
+// Sub applies - to x and y
+func (x Value) Sub(y Value) (Value, error) {
+	if z, ok := x.sub(y); ok {
+		return z, nil
+	}
+	return Value{}, operatorError(unknownSite, "-", x, y)
+}
+
+// Mul applies * to x and y
+func (x Value) Mul(y Value) (Value, error) {
+	if z, ok := x.mul(y); ok {
+		return z, nil
+	}
+	return Value{}, operatorError(unknownSite, "*", x, y)
+}
+
+// Div applies / to x and y
+func (x Value) Div(y Value) (Value, error) {
+	if z, ok := x.div(y); ok {
+		return z, nil
+	}
+	return Value{}, operatorError(unknownSite, "/", x, y)
+}
+
+// Mod applies % to x and y
+func (x Value) Mod(y Value) (Value, error) {
+	if z, ok := x.mod(y); ok {
+		return z, nil
+	}
+	return Value{}, operatorError(unknownSite, "%", x, y)
+}
+
+// LessThan applies < to x and y
+func (x Value) LessThan(y Value) (bool, error) {
+	z, ok := x.lessThan(y)
+	return compared(z, ok, x, y, "<")
+}
+
+// GreaterThan applies > to x and y
+func (x Value) GreaterThan(y Value) (bool, error) {
+	z, ok := x.greaterThan(y)
+	return compared(z, ok, x, y, ">")
+}
+
+// LessThanOrEqualTo applies <= to x and y
+func (x Value) LessThanOrEqualTo(y Value) (bool, error) {
+	z, ok := x.lessThanOrEqualTo(y)
+	return compared(z, ok, x, y, "<=")
+}
+
+// GreaterThanOrEqualTo applies >= to x and y
+func (x Value) GreaterThanOrEqualTo(y Value) (bool, error) {
+	z, ok := x.greaterThanOrEqualTo(y)
+	return compared(z, ok, x, y, ">=")
+}
+
+// compared turns an internal comparison result into a Go bool, or the error
+// for operands of the wrong types
+func compared(z Value, ok bool, x, y Value, op string) (bool, error) {
+	if !ok {
+		return false, operatorError(unknownSite, op, x, y)
+	}
+	b, _ := z.AsBool()
+	return b, nil
+}

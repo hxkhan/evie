@@ -19,10 +19,10 @@ Understanding this is crucial to knowing how variables are resolved.
 
         {
             // package-globals.
-            // visible only to the current package.
+            // visible in the current package and, through its name, to importers.
             // e.g. `isWorldFlat := false`.
-            // will make `isWorldFlat` visible in the current package.
             // can be reassigned if prefixed with `var`.
+            // initialized in source order when the package loads; functions and structs are hoisted.
 
             {
                 // package-closures.
@@ -36,71 +36,42 @@ Understanding this is crucial to knowing how variables are resolved.
 At each layer, you *can* shadow symbols in the previous scope.
 
 ### Example
-Here is an example of all of these
+The `evie` package wraps all of this in an `Engine`; this is the same thing on the `vm` level.
 ```go
 func main() {
-	// universal-statics
-	statics := map[string]*vm.Value{
-		"pi":   vm.BoxFloat64(3.14159).Allocate(), // constant value
-		"time": time.Construct().Box().Allocate(), // already instantiated package
-	}
+	// the prelude: visible to every package without an import
+	prelude := vm.NewPackage("prelude")
+	prelude.Set("pi", vm.BoxNumber(3.14159))
 
-	// package-statics for packages that import them via the header
-	// e.g. package foo imports("bar")
-	resolver := func(name string) *vm.Package {
+	// packages that scripts import by name, e.g. `package foo imports("io")`
+	resolver := func(name string) (*vm.Package, error) {
 		switch name {
 		case "io":
-			return io.Construct()
+			return io.Construct(), nil
+		case "time":
+			return time.Construct(), nil
 		}
-		panic(fmt.Errorf("constructor not found for '%v'", name))
+		return nil, fmt.Errorf("package '%v' not found", name)
 	}
 
-	// create a vm with our options
-	evm := vm.New(vm.Options{
-		UniversalStatics: statics,
-		ImportResolver:   resolver,
-	})
+	evm := vm.New(vm.Options{Prelude: prelude, Resolver: resolver})
 
-	// evaluate our script
-	result, err := evm.EvalScript([]byte(
-		`package main imports("io")
-		
-		fn add(a, b) {
-            io.println("add called in the evie world")
+	_, err := evm.EvalString(`package main imports("io", "time")
 
-			io.println("about to start awaiting PI seconds")
-            await time.timer(pi * 1000) // wait 3.14 seconds
-            return a + b
-		}`,
-	))
-
-	// check errors
+	fn add(a, b) {
+		io.println("add called in the evie world")
+		time.wait(pi * 1000) // wait 3.14 seconds
+		return a + b
+	}`)
 	if err != nil {
 		panic(err)
 	}
 
-	// print the result (nothing in this case)
-	if !result.IsNil() {
-		fmt.Println(result)
-	}
+	// the convenient call: Go arguments are boxed, a fiber is borrowed
+	result, err := evm.Call("main.add", 3, 2)
 
-	// look up the function reference directly
-	add, ok := evm.Lookup("main.add")
-	if !ok || !add.IsCallable() {
-		panic("symbol add not found or not callable")
-	}
-
-	fbr := evm.NewFiber()
-
-	// call it & check for errors
-	result, exc := add.Call(fbr, vm.BoxNumber(3), vm.BoxNumber(2))
-	if exc != nil {
-		panic(exc)
-	}
-
-	// print the result
-	if !result.IsNil() {
-		fmt.Println(result)
-	}
+	// the explicit call: a looked-up value and evie values
+	add, _ := evm.Lookup("main.add")
+	result, exc := add.Call(nil, vm.BoxNumber(3), vm.BoxNumber(2))
 }
 ```

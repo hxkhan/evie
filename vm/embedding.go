@@ -21,7 +21,7 @@ func (vm *Instance) Resolve(pkgName, symName string) (Value, bool) {
 
 // Lookup resolves a symbol Value from the VM.
 // If path contains a dot (e.g. "main.add", "io.println"), it resolves the symbol from that package.
-// Otherwise, it checks package "main", universal statics, and builtins in order.
+// Otherwise, it checks package "main" and then the prelude.
 func (vm *Instance) Lookup(path string) (Value, bool) {
 	if idx := strings.IndexByte(path, '.'); idx >= 0 {
 		return vm.Resolve(path[:idx], path[idx+1:])
@@ -31,23 +31,17 @@ func (vm *Instance) Lookup(path string) (Value, bool) {
 			return v, true
 		}
 	}
-	if vm.cp.statics != nil {
-		if val, ok := vm.cp.statics[path]; ok && val != nil {
-			return *val, true
-		}
-	}
-	if b, ok := builtins[path]; ok && b != nil {
-		return *b, true
-	}
-	return Value{}, false
+	return vm.cp.prelude.Get(path)
 }
 
-// SetStatic registers a universal static Value available across all packages.
+// Prelude returns the package whose symbols every script sees without an import
+func (vm *Instance) Prelude() *Package {
+	return vm.cp.prelude
+}
+
+// SetStatic binds a symbol in the prelude, visible to every package
 func (vm *Instance) SetStatic(name string, val Value) {
-	if vm.cp.statics == nil {
-		vm.cp.statics = make(map[string]*Value)
-	}
-	vm.cp.statics[name] = val.Allocate()
+	vm.cp.prelude.Set(name, val)
 }
 
 // SetGlobal sets a symbol in a loaded package. Returns false if the package is not loaded.

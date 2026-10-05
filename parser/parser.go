@@ -33,7 +33,7 @@ type parser struct {
 var keywords = []string{
 	"package", "imports",
 	"nil", "true", "false",
-	"var", "fn", "struct",
+	"var", "const", "fn", "struct",
 	"echo",
 	"return",
 	"if", "else",
@@ -253,6 +253,13 @@ func (ps *parser) handleWords(main token.Token, asExpr bool, precedenceLevel int
 			panic(fmt.Errorf("expected ':=' after 'var %v' on line %v, got '%v' instead", name.Literal, main.Line, ps.PeekToken().Literal))
 		}
 		return ast.Decl{Pos: main.Line, Name: name.Literal, IsStatic: false, Value: ps.parse(0, true)}
+	case "const":
+		// `const x := v` says explicitly what `x := v` already means
+		name := ps.NextToken()
+		if name.Type != token.Word || !ps.consume(":=") {
+			panic(&Error{Line: int(main.Line), Message: fmt.Sprintf("expected 'name := value' after 'const', got '%v'", name.Literal)})
+		}
+		return ast.Decl{Pos: main.Line, Name: name.Literal, IsStatic: true, Value: ps.parse(0, true)}
 	default:
 		return ps.parseIdent(main, precedenceLevel)
 	}

@@ -12,65 +12,40 @@ type Result struct {
 	Message string  `json:"message"`
 }
 
+// The convenient way in: Go functions wrapped without reflection, a host
+// package the script imports, Call with Go arguments, Unmarshal into a struct.
 func main() {
-	// 1. Create an Evie environment with standard library pre-configured
-	env := evie.New()
-
-	// 2. Expose a native Go function to Evie
-	greetingFn, err := vm.BoxAny(func(name string, count int) string {
+	shop := vm.NewPackage("shop")
+	shop.Native("greeting", vm.Func2(func(name string, count int) string {
 		return fmt.Sprintf("Welcome %s! You have %d notifications.", name, count)
-	})
-	if err != nil {
-		panic(err)
-	}
-	env.SetStatic("formatGreeting", greetingFn)
+	}))
+	shop.Set("taxRate", vm.BoxNumber(0.12))
 
-	// 3. Expose host data
-	env.SetStatic("taxRate", vm.BoxNumber(0.12))
+	eng := evie.New(evie.Options{Packages: []*vm.Package{shop}})
 
-	// 4. Run an Evie script defining functions and logic
-	_, err = env.EvalString(`
-	package main imports("io")
+	_, err := eng.Eval(`package main imports("io", "shop")
 
 	fn calculateOrder(subtotal, count, customerName) {
-		var total := subtotal + (subtotal * taxRate)
-		var msg := formatGreeting(customerName, count)
-
+		total := subtotal + subtotal * shop.taxRate
+		msg := shop.greeting(customerName, count)
 		io.println("[Evie]", msg)
-		io.println("[Evie] Order total with tax:", total)
-
-		return {
-			total: total,
-			message: msg
-		}
-	}
-	`)
+		return { total: total, message: msg }
+	}`)
 	if err != nil {
 		panic(err)
 	}
 
-	// 5. Look up the function reference once
-	calcOrder, ok := env.Lookup("main.calculateOrder")
-	if !ok || !calcOrder.IsCallable() {
-		panic("function calculateOrder not found or not callable")
-	}
-
-	// 6. Call the Evie function directly using its reference and a Fiber
-	fbr := env.NewFiber()
-	val, exc := calcOrder.Call(fbr, vm.BoxNumber(250.0), vm.BoxNumber(3), vm.BoxString("Alice"))
-	if exc != nil {
-		panic(exc)
-	}
-
-	// 7. Unmarshal directly into a Go struct
-	var orderResult Result
-	if err := val.Unmarshal(&orderResult); err != nil {
+	val, err := eng.Call("main.calculateOrder", 250.0, 3, "Alice")
+	if err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("[Go Host] Received: Total = $%.2f, Message = %q\n", orderResult.Total, orderResult.Message)
+	var result Result
+	if err := val.Unmarshal(&result); err != nil {
+		panic(err)
+	}
+	fmt.Printf("[Go] total = %.2f, message = %q\n", result.Total, result.Message)
 
-	// 8. One-liner script evaluation
-	quickResult, _ := evie.Eval("return [1, 2, 3, 4, 5].filter(fn(x) => x > 2).map(fn(x) => x * 10)")
-	fmt.Printf("[Go Host] Quick Eval: %v\n", quickResult)
+	quick, _ := evie.Eval("return [1, 2, 3, 4, 5].filter(fn(x) => x > 2).map(fn(x) => x * 10)")
+	fmt.Println("[Go] quick eval:", quick)
 }

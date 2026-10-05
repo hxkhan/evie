@@ -3,73 +3,38 @@ package main
 import (
 	"fmt"
 
-	"github.com/hxkhan/evie/std/io"
-	"github.com/hxkhan/evie/std/time"
+	"github.com/hxkhan/evie"
 	"github.com/hxkhan/evie/vm"
 )
 
+// The low-level way in: an engine with a prelude the scripts see everywhere,
+// a function looked up by path and called with evie values.
 func main() {
-	// universal-statics
-	statics := map[string]*vm.Value{
-		"pi":   vm.BoxNumber(3.14159).Allocate(),  // constant value
-		"time": time.Construct().Box().Allocate(), // already instantiated package
-	}
+	prelude := vm.NewPackage("prelude")
+	prelude.Set("pi", vm.BoxNumber(3.14159))
 
-	// package-statics for packages that import them via the header
-	// e.g. package foo imports("bar")
-	resolver := func(name string) *vm.Package {
-		switch name {
-		case "io":
-			return io.Construct()
-		}
-		panic(fmt.Errorf("constructor not found for '%v'", name))
-	}
+	eng := evie.New(evie.Options{Prelude: prelude})
 
-	// create a vm with our options
-	evm := vm.New(vm.Options{
-		UniversalStatics: statics,
-		ImportsResolver:  resolver,
-	})
+	_, err := eng.Eval(`package main imports("io", "time")
 
-	// evaluate our script
-	result, err := evm.EvalScript([]byte(
-		`package main imports("io")
-		
-		fn add(a, b) {
-            io.println("add called in the evie world")
-
-			io.println("about to start awaiting PI seconds")
-            await time.timer(pi * 1000) // wait 3.14 seconds
-            return a + b
-		}`,
-	))
-
-	// check errors
+	fn add(a, b) {
+		io.println("add called in the evie world")
+		io.println("about to wait pi seconds")
+		time.wait(pi * 1000)
+		return a + b
+	}`)
 	if err != nil {
 		panic(err)
 	}
 
-	// print the result (nothing in this case)
-	if !result.IsNil() {
-		fmt.Println(result)
-	}
-
-	// look up the function reference directly
-	add, exists := evm.Lookup("main.add")
-	if !exists || !add.IsCallable() {
+	add, ok := eng.Lookup("main.add")
+	if !ok || !add.IsCallable() {
 		panic("symbol add not found or not callable")
 	}
 
-	fbr := evm.NewFiber()
-
-	// call it & check for errors
-	result, exc := add.Call(fbr, vm.BoxNumber(3), vm.BoxNumber(2))
+	result, exc := add.Call(nil, vm.BoxNumber(3), vm.BoxNumber(2))
 	if exc != nil {
 		panic(exc)
 	}
-
-	// print the result
-	if !result.IsNil() {
-		fmt.Println(result)
-	}
+	fmt.Println(result)
 }

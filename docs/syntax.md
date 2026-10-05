@@ -19,8 +19,22 @@ fn main() {
 }
 ```
 
-- Standard library packages (`io`, `fs`, `time`, `strings`, `lists`) can be imported directly.
-- Package-level functions and bindings are namespaced under their package name when imported (`io.println`, `time.timer`).
+- Standard library packages (`io`, `fs`, `time`, `strings`, `lists`, `json`) can be imported directly, as can packages the host registers and `.ev` files by relative path (`imports("./util")`).
+- Every top-level function, struct and binding of a package is visible to importers under the package name (`io.println`, `time.wait`). There is no private marker; keep internal helpers in a package that is not imported.
+- Functions, structs and constants whose initializer is itself constant (`SECONDS := 60`, `MILLIS := SECONDS * 1000`) are hoisted, so they can be used before their declaration. Every other top-level binding is initialized in source order when the package loads; its initializer can call functions and build any value, and a binding read before its line has run is `nil`:
+
+```go
+package main imports("io")
+
+config := { debug: false, retries: 3 }   // any expression, run at load time
+limits := computeLimits(config.retries)
+
+fn computeLimits(n) => [n, n * 2]
+
+fn main() {
+    io.println(config.debug, limits)
+}
+```
 
 ---
 
@@ -657,41 +671,43 @@ type OrderResult struct {
 }
 
 func main() {
-    // 1. Create a VM instance
-    env := evie.New()
-
-    // 2. Expose Go functions directly to Evie
-    taxFn, _ := vm.BoxAny(func(subtotal float64) float64 {
+    // 1. An engine; the prelude holds symbols every script sees without an import
+    eng := evie.New()
+    eng.SetStatic("calculateTax", vm.BoxGoFunc(vm.Func1(func(subtotal float64) float64 {
         return subtotal * 0.15
-    })
-    env.SetStatic("calculateTax", taxFn)
+    })))
 
-    // 3. Evaluate Evie script
-    _, err := env.EvalString(`
-    package main
+    // 2. Load a script
+    _, err := eng.Eval(`package main
     fn processOrder(price) {
-        var tax := calculateTax(price)
-        return {
-            total: price + tax,
-            message: "Order processed successfully"
-        }
+        tax := calculateTax(price)
+        return { total: price + tax, message: "Order processed successfully" }
+    }`)
+    if err != nil {
+        panic(err)
     }
-    `)
 
-    // 4. Look up function reference and call it
-    fn, _ := env.Lookup("main.processOrder")
-    fbr := env.NewFiber()
-    val, _ := fn.Call(fbr, vm.BoxNumber(100.0))
-
-    // 5. Unmarshal directly into a Go struct
+    // 3. Call it with Go arguments and unmarshal the result into a struct
+    val, err := eng.Call("main.processOrder", 100.0)
     var res OrderResult
     val.Unmarshal(&res)
-
     fmt.Printf("Total: $%.2f, Status: %s\n", res.Total, res.Message)
     // Output: Total: $115.00, Status: Order processed successfully
 
-    // 6. One-line quick evaluation
+    // 4. One-line quick evaluation
     ans, _ := evie.Eval("return [1, 2, 3].map(fn(x) => x * 10)")
     fmt.Println(ans) // [10, 20, 30]
 }
 ```
+
+The pieces, from most to least convenient:
+
+| need | use |
+| :-- | :-- |
+| expose a Go function | `vm.Func0`..`Func3` and the `E` variants for `(R, error)`; `vm.Reflect` for any other signature |
+| full control of arguments and errors | `pkg.Func(name, arity, func(c vm.Call) (vm.Value, error))`; mark it `Blocking` if it sleeps or waits on I/O |
+| a group of functions scripts import by name | `vm.NewPackage("name")` passed in `evie.Options.Packages` |
+| symbols visible without an import | `eng.SetStatic` or `evie.Options.Prelude` |
+| lend a Go value to scripts as it is | `vm.NewHostType[T]("Name")` with `Method`, `Constructor`, `Wrap` |
+| call a script function | `eng.Call("pkg.fn", goArgs...)`, or `value.Call(nil, evieArgs...)` on a looked-up value |
+| run a file or a project directory | `eng.RunFile`, `eng.RunProject`, or `evie.RunFile` for a one-off |

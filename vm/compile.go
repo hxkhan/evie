@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/hxkhan/evie/ast"
+	"github.com/hxkhan/evie/ds"
 	"github.com/hxkhan/evie/vm/fields"
 )
 
@@ -210,32 +211,21 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 				bindName = strings.TrimSuffix(bindName, ext)
 			}
 		}
-		this.globals[fields.Get(bindName)] = Global{Value: &v, IsPublic: false, IsStatic: true}
+		this.globals[fields.Get(bindName)] = Global{Value: &v, IsPublic: false, IsStatic: true, IsConstant: true}
 		if bindName != name {
-			this.globals[fields.Get(name)] = Global{Value: &v, IsPublic: false, IsStatic: true}
+			this.globals[fields.Get(name)] = Global{Value: &v, IsPublic: false, IsStatic: true, IsConstant: true}
 		}
 	}
 
 	/*
-		------ Hoisting Protocol ------
+		------ Loading a package ------
 
-		1. Allocated function symbols without initialization
-		2. Allocate & initialize variables in the order that they appear
-		3. Initialize functions (order doesn't matter)
-
-		So this is not possible because the order is maintained:
-			x := y + 2
-			y := 10
-
-		But this is:
-			fn hop(a) {
-				return a + x
-			}
-			x := 3
-
-		Also, we only allow literal declarations on the top level
-		This means no calling like:
-			z := hop(8)
+		1. Functions and structs are hoisted: their names exist before anything runs.
+		2. Every top-level binding is declared. One with a constant initializer
+		   gets its value now, so uses of it fold while compiling.
+		3. Function bodies and struct methods are compiled.
+		4. The remaining initializers and any other top-level statements run in
+		   source order, so they can call functions and build any value.
 	*/
 
 	// 1. allocate functions & structs
@@ -248,7 +238,7 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 
 			// create a stub for now
 			fn := BoxUserFn(UserFn{funcInfoStatic: vm.newFuncInfo(fn.Name, fn.Args, fn.IsVariadic, false)})
-			this.globals[index] = Global{Value: &fn, IsPublic: true, IsStatic: true}
+			this.globals[index] = Global{Value: &fn, IsPublic: true, IsStatic: true, IsConstant: true}
 		}
 
 		if str, isStruct := node.(ast.StructDefinition); isStruct {
@@ -274,34 +264,42 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 				FieldOffsets: offsets,
 				Methods:      make(map[fields.ID]*UserFn),
 			})
-			this.globals[index] = Global{Value: &v, IsPublic: true, IsStatic: true}
+			this.globals[index] = Global{Value: &v, IsPublic: true, IsStatic: true, IsConstant: true}
 		}
 	}
 
-	// 2. allocate & initialize variables
+	// 2. declare variables. A constant with a constant initializer gets its
+	// value now, whatever the order of declarations, so uses of it fold; every
+	// other binding waits for step 4.
+	deferred := map[string]bool{}
 	for _, node := range node.Code {
 		if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
-			// check if contains function calls
-			if !ast.IsCallFree(iDec.Value) {
-				panic(CompileErrorf("declaration of %s contains functions calls", iDec.Name))
-			}
-
 			index := fields.Get(iDec.Name)
 			if _, exists := this.globals[index]; exists {
 				panic(CompileErrorf("double declaration of %s", iDec.Name))
 			}
-
-			var value Value
-			switch v := vm.evaluate(iDec.Value).(type) {
-			case Value:
-				value = v
-			case Global:
-				value = *v.Value
-			default:
-				panic(CompileErrorf("top-level declaration '%s' cannot be statically evaluated", iDec.Name))
+			this.globals[index] = Global{Value: new(Value), IsPublic: true, IsStatic: iDec.IsStatic}
+			deferred[iDec.Name] = true
+		}
+	}
+	for progress := true; progress; {
+		progress = false
+		for _, node := range node.Code {
+			iDec, isIdentDec := node.(ast.Decl)
+			if !isIdentDec || !iDec.IsStatic || !deferred[iDec.Name] {
+				continue
 			}
-			// store the value
-			this.globals[index] = Global{Value: &value, IsPublic: true, IsStatic: iDec.IsStatic}
+			value, ok := vm.evaluate(iDec.Value).(Value)
+			if !ok {
+				continue
+			}
+			index := fields.Get(iDec.Name)
+			global := this.globals[index]
+			*global.Value = value
+			global.IsConstant = true
+			this.globals[index] = global
+			delete(deferred, iDec.Name)
+			progress = true
 		}
 	}
 
@@ -314,7 +312,7 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 		}
 	}
 
-	// 4. initialize struct methods and inheritance
+	// 3b. initialize struct methods and inheritance
 	for _, node := range node.Code {
 		if str, isStruct := node.(ast.StructDefinition); isStruct {
 			global := this.globals[fields.Get(str.Name)]
@@ -350,5 +348,65 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 			}
 		}
 	}
+
+	// 4. run the remaining initializers and statements in source order
+	if init := vm.compileInit(this, node.Code, deferred); init != nil {
+		fbr := vm.NewFiber()
+		fbr.running = true // the runner is held by EvalNode
+		_, exc := init.call(fbr, nil)
+		fbr.running = false
+		vm.ReleaseFiber(fbr)
+		if exc != nil {
+			return Value{}, exc
+		}
+	}
 	return Value{}, nil
+}
+
+// compileInit compiles the top-level statements of a package that have to run:
+// bindings whose initializer is not a constant, and plain statements. Functions
+// and structs were hoisted already. It returns nil when there is nothing to run.
+func (vm *Instance) compileInit(pkg *Package, code []ast.Node, deferred map[string]bool) *UserFn {
+	info := vm.newFuncInfo("init", nil, false, false)
+	vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: info})
+	vm.cp.closures.Last(0).scope.OpenBlock()
+
+	var steps []instruction
+	for _, stmt := range code {
+		switch stmt := stmt.(type) {
+		case ast.Fn, ast.StructDefinition:
+			continue
+		case ast.Decl:
+			if !deferred[stmt.Name] {
+				continue
+			}
+			target := pkg.globals[fields.Get(stmt.Name)].Value
+			value := vm.compile(stmt.Value)
+			steps = append(steps, func(fbr *Fiber) (Value, Exception) {
+				v, exc := value(fbr)
+				if exc != nil {
+					return v, exc
+				}
+				*target = v
+				return Value{}, nil
+			})
+		default:
+			steps = append(steps, vm.compile(stmt))
+		}
+	}
+
+	closure := vm.cp.closures.Pop()
+	if len(steps) == 0 {
+		return nil
+	}
+	info.code = func(fbr *Fiber) (Value, Exception) {
+		for _, step := range steps {
+			if v, exc := step(fbr); exc != nil {
+				return v, exc
+			}
+		}
+		return Value{}, nil
+	}
+	vm.closeFunction(info, closure)
+	return &UserFn{funcInfoStatic: info}
 }

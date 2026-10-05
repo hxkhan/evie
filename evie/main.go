@@ -24,8 +24,8 @@ func main() {
 
 	target := flag.Arg(flag.NArg() - 1)
 
-	loader := evie.NewLoader(evie.LoaderOptions{
-		Inline:      *inline,
+	eng := evie.New(evie.Options{
+		NoInline:    !*inline,
 		LogCaptures: *logCaptures,
 	})
 
@@ -35,9 +35,9 @@ func main() {
 
 	info, statErr := os.Stat(target)
 	if statErr == nil && info.IsDir() {
-		res, err = loader.RunProject(target)
+		res, err = eng.RunProject(target)
 	} else if strings.HasSuffix(target, ".ev") || statErr == nil {
-		res, err = loader.RunFile(target)
+		res, err = eng.RunFile(target)
 	} else {
 		fmt.Println("Provide a file with a .ev extension or a project directory!")
 		return

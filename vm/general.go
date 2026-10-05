@@ -32,8 +32,8 @@ type closure struct {
 type PackageResolver func(name string) (*Package, error)
 
 type compiler struct {
-	inline  bool              // use dispatch inlining (combining instructions into one)
-	statics map[string]*Value // implicitly available to all user packages
+	inline  bool     // use dispatch inlining (combining instructions into one)
+	prelude *Package // symbols visible to every package without an import
 
 	pkg      *Package           // the package being compiled right now
 	closures ds.Slice[*closure] // currently open closures
@@ -48,41 +48,37 @@ type runtime struct {
 	wg       sync.WaitGroup      // wait for all fibers to complete
 }
 
-// Global is just a wrapper for a global variable reference
+// Global is a package-level binding
 type Global struct {
 	*Value
-	IsPublic bool
-	IsStatic bool
+	IsPublic   bool // visible to other packages
+	IsStatic   bool // cannot be reassigned
+	IsConstant bool // its value is fixed and known while compiling, so uses of it fold
 }
 
 type Options struct {
+	Resolver PackageResolver // finds a package by import path when it is not loaded yet
+	Prelude  *Package        // symbols visible everywhere without an import; the builtin types are added to it
+
 	LogCaptures     bool // log when and what is captured
 	DisableInlining bool // use dispatch inlining (combining instructions into one)
-
-	ImportsResolver  func(name string) *Package // legacy/simple resolver
-	PackageResolver  PackageResolver            // robust package resolver with error return
-	UniversalStatics map[string]*Value          // implicitly visible to all user packages
 }
 
 func New(opts Options) (vm *Instance) {
-	var res PackageResolver
-	if opts.PackageResolver != nil {
-		res = opts.PackageResolver
-	} else if opts.ImportsResolver != nil {
-		legacy := opts.ImportsResolver
-		res = func(name string) (*Package, error) {
-			p := legacy(name)
-			if p == nil {
-				return nil, fmt.Errorf("package '%v' not found", name)
-			}
-			return p, nil
+	prelude := opts.Prelude
+	if prelude == nil {
+		prelude = NewPackage("prelude")
+	}
+	for name, value := range builtins {
+		if !prelude.Has(name) {
+			prelude.Set(name, *value)
 		}
 	}
 
 	vm = &Instance{
 		compiler{
-			resolver: res,
-			statics:  opts.UniversalStatics,
+			resolver: opts.Resolver,
+			prelude:  prelude,
 			inline:   !opts.DisableInlining,
 			closures: make(ds.Slice[*closure], 0, 6),
 		},
@@ -240,19 +236,12 @@ func (cp *compiler) reach(name string) (v any, err error) {
 		}
 	}
 
-	// 3. check universal statics
-	if value, exists := cp.statics[name]; exists {
-		// wrap as a global
-		return Global{Value: value, IsPublic: true, IsStatic: true}, nil
+	// 3. check the prelude
+	if ref, exists := cp.prelude.globals[fields.Get(name)]; exists {
+		return ref, nil
 	}
 
-	// 4. check builtins
-	if value, exists := builtins[name]; exists {
-		// wrap as a global
-		return Global{Value: value, IsPublic: true, IsStatic: true}, nil
-	}
-
-	return nil, fmt.Errorf("cp.reach(\"%v\") -> unreachable symbol", name)
+	return nil, CompileErrorf("undefined symbol '%v'", name)
 }
 
 func (cp *compiler) addToCaptured(scroll int, index int) (idx int) {

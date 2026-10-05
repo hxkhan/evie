@@ -39,7 +39,7 @@ func (pkg *Package) Set(name string, value Value) *Package {
 	if ref, exists := pkg.globals[index]; exists {
 		*ref.Value = value
 	} else {
-		pkg.globals[index] = Global{Value: &value, IsPublic: true, IsStatic: true}
+		pkg.globals[index] = Global{Value: &value, IsPublic: true, IsStatic: true, IsConstant: true}
 	}
 	return pkg
 }

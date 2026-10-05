@@ -425,3 +425,106 @@ func TestHostTypes(t *testing.T) {
 		t.Fatalf("got %v", res)
 	}
 }
+
+// top-level bindings are initialized in source order and may call functions
+// and build any value; functions, structs and constants with constant
+// initializers are hoisted
+func TestPackageInitializers(t *testing.T) {
+	code := `package main imports("io")
+	var log := ""
+	config := { debug: false, retries: 3 }
+	limits := computeLimits(config.retries)
+	first := second + 1
+	second := 10
+	p := Point(1, 2)
+	log += "init;"
+
+	fn computeLimits(n) => [n, n * 2]
+	struct Point(x, y) { fn sum() => this.x + this.y }
+
+	fn main() {
+		config.debug = true
+		return [config.debug, limits, first, second, p.sum(), log]
+	}`
+	val, err := runCode(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[true, [3, 6], 11, 10, 3, "init;"]`
+	if val.String() != want {
+		t.Fatalf("got %s, want %s", val, want)
+	}
+
+	// an initializer that throws fails the load with its message
+	_, err = runCode("package main\nx := missing()\nfn missing() { throw error(\"no\") }\nfn main() { return x }")
+	if err == nil || !strings.Contains(err.Error(), "no") {
+		t.Fatalf("expected the initializer's error, got %v", err)
+	}
+
+	// a constant binding still cannot be reassigned, and a constant number has no fields
+	_, err = runCode("package main\nx := 5\nfn main() { x = 6 }")
+	if err == nil || !strings.Contains(err.Error(), "constant") {
+		t.Fatalf("expected a constant-binding error, got %v", err)
+	}
+}
+
+// the prelude is one package: builtins, host symbols, and anything the engine was given
+func TestPrelude(t *testing.T) {
+	prelude := vm.NewPackage("prelude")
+	prelude.Set("answer", vm.BoxNumber(42))
+	eng := evie.New(evie.Options{Prelude: prelude})
+	eng.SetStatic("greeting", vm.BoxString("hi"))
+	if _, err := eng.Eval("package main\nfn main() => [answer, greeting, string(answer) is string]"); err != nil {
+		t.Fatal(err)
+	}
+	val, err := eng.Call("main.main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if val.String() != `[42, "hi", true]` {
+		t.Fatalf("got %s", val)
+	}
+	if v, ok := eng.Lookup("answer"); !ok || v.String() != "42" {
+		t.Fatalf("Lookup through the prelude failed: %v %v", v, ok)
+	}
+	if _, err := evie.Run("package main\nfn main() => undefinedName"); err == nil || !strings.Contains(err.Error(), "undefined symbol 'undefinedName'") {
+		t.Fatalf("expected an undefined symbol error, got %v", err)
+	}
+}
+
+// host packages are imported by name and resolved before the filesystem
+func TestEngineOptions(t *testing.T) {
+	maths := vm.NewPackage("maths")
+	maths.Native("twice", vm.Func1(func(x float64) float64 { return x * 2 }))
+	resolved := 0
+	eng := evie.New(evie.Options{
+		Packages: []*vm.Package{maths},
+		Resolve: func(path string) (*vm.Package, error) {
+			resolved++
+			if path == "dyn" {
+				p := vm.NewPackage("dyn")
+				p.Set("k", vm.BoxNumber(7))
+				return p, nil
+			}
+			return nil, nil
+		},
+		NoStdlib: true,
+	})
+	pkg, err := eng.Load([]byte("package main imports(\"maths\", \"dyn\")\nfn main() => maths.twice(dyn.k)"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.Name() != "main" {
+		t.Fatalf("Load returned %q", pkg.Name())
+	}
+	val, err := eng.Call("main.main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if val.String() != "14" || resolved != 1 {
+		t.Fatalf("got %s after %d resolver calls", val, resolved)
+	}
+	if _, err := eng.Eval("package other imports(\"io\")"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected the standard library to be unavailable, got %v", err)
+	}
+}

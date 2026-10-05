@@ -56,13 +56,13 @@ func main() {
 
 	evm := vm.New(vm.Options{Prelude: prelude, Resolver: resolver})
 
-	_, err := evm.EvalString(`package main imports("io", "time")
+	_, err := evm.EvalSource(diag.NewSource("main.ev", []byte(`package main imports("io", "time")
 
 	fn add(a, b) {
 		io.println("add called in the evie world")
 		time.wait(pi * 1000) // wait 3.14 seconds
 		return a + b
-	}`)
+	}`)))
 	if err != nil {
 		panic(err)
 	}
@@ -72,7 +72,7 @@ func main() {
 
 	// the explicit call: a looked-up value and evie values
 	add, _ := evm.Lookup("main.add")
-	result, exc := add.Call(nil, vm.BoxNumber(3), vm.BoxNumber(2))
+	result, err = add.Call(vm.BoxNumber(3), vm.BoxNumber(2))
 }
 ```
 

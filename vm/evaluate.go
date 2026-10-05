@@ -35,7 +35,7 @@ func (vm *Instance) evaluate(node ast.Node) operand {
 		}
 
 		// a constant global evaluates to its value, anything else to the binding
-		if global, isGlobal := variable.(Global); isGlobal && global.IsConstant {
+		if global, isGlobal := variable.(pkgGlobal); isGlobal && global.IsConstant {
 			return *global.Value
 		}
 		return variable

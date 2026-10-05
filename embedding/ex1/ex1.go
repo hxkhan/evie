@@ -32,9 +32,9 @@ func main() {
 		panic("symbol add not found or not callable")
 	}
 
-	result, exc := add.Call(nil, vm.BoxNumber(3), vm.BoxNumber(2))
-	if exc != nil {
-		panic(exc)
+	result, err := add.Call(vm.BoxNumber(3), vm.BoxNumber(2))
+	if err != nil {
+		panic(err)
 	}
 	fmt.Println(result)
 }

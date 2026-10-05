@@ -17,7 +17,7 @@ type NativeFn = func(c Call) (Value, error)
 // the fiber that made it, and a way to call back into evie on that fiber. It
 // is passed by value and costs nothing to create.
 type Call struct {
-	fbr  *Fiber
+	fbr  *fiber
 	fn   *GoFunc
 	base int
 	n    int
@@ -50,20 +50,15 @@ func (c Call) Args() []Value {
 	return args
 }
 
-// Fiber returns the fiber the call runs on, for code that needs the low-level API
-func (c Call) Fiber() *Fiber {
-	return c.fbr
-}
-
 // Call invokes an evie callable on the same fiber, as a callback
 func (c Call) Call(fn Value, args ...Value) (Value, error) {
-	if ufn, ok := fn.AsUserFn(); ok {
+	if ufn, ok := fn.asUserFn(); ok {
 		if exc := ufn.accepts(len(args)); exc != nil {
 			return Value{}, exc
 		}
 		return plain(ufn.call(c.fbr, args))
 	}
-	return plain(fn.Call(c.fbr, args...))
+	return plain(fn.callGuarded(c.fbr, args...))
 }
 
 func (c Call) typeError(i int, want string) error {
@@ -143,7 +138,7 @@ func (c Call) Callable(i int) (Value, error) {
 }
 
 // plain turns an exception into a plain error without the typed-nil trap
-func plain(v Value, exc Exception) (Value, error) {
+func plain(v Value, exc exception) (Value, error) {
 	if exc == nil {
 		return v, nil
 	}
@@ -151,7 +146,7 @@ func plain(v Value, exc Exception) (Value, error) {
 }
 
 // toException converts an error returned by a native into an exception
-func toException(err error) Exception {
+func toException(err error) exception {
 	if err == nil {
 		return nil
 	}
@@ -163,22 +158,22 @@ func toException(err error) Exception {
 
 // NewFunc describes a native taking exactly arity arguments
 func NewFunc(name string, arity int, fn NativeFn) *GoFunc {
-	return &GoFunc{Name: name, Arguments: arity, Fn: fn}
+	return &GoFunc{Name: name, arguments: arity, fn: fn}
 }
 
 // NewVariadic describes a native taking at least min arguments
 func NewVariadic(name string, min int, fn NativeFn) *GoFunc {
-	return &GoFunc{Name: name, Arguments: min, IsVariadic: true, Fn: fn}
+	return &GoFunc{Name: name, arguments: min, isVariadic: true, fn: fn}
 }
 
-// NewMethod describes a native method; arity counts the arguments after the receiver
-func NewMethod(name string, arity int, fn NativeFn) *GoFunc {
-	return &GoFunc{Name: name, Arguments: 1 + arity, IsMethod: true, Fn: fn}
+// newMethod describes a native method; arity counts the arguments after the receiver
+func newMethod(name string, arity int, fn NativeFn) *GoFunc {
+	return &GoFunc{Name: name, arguments: 1 + arity, isMethod: true, fn: fn}
 }
 
-// NewVariadicMethod describes a native method taking at least min arguments after the receiver
-func NewVariadicMethod(name string, min int, fn NativeFn) *GoFunc {
-	return &GoFunc{Name: name, Arguments: 1 + min, IsVariadic: true, IsMethod: true, Fn: fn}
+// newVariadicMethod describes a native method taking at least min arguments after the receiver
+func newVariadicMethod(name string, min int, fn NativeFn) *GoFunc {
+	return &GoFunc{Name: name, arguments: 1 + min, isVariadic: true, isMethod: true, fn: fn}
 }
 
 // methodTable builds the member table of a type from its methods

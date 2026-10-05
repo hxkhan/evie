@@ -7,6 +7,9 @@
 package evie
 
 import (
+	"errors"
+
+	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/std/fs"
 	"github.com/hxkhan/evie/std/io"
 	"github.com/hxkhan/evie/std/json"
@@ -35,8 +38,13 @@ type Options struct {
 	Root     string                                 // directory that relative imports resolve against; the entry file's directory when empty
 	Prelude  *vm.Package                            // symbols visible to every script without an import
 
-	LogCaptures bool // log when and what is captured
-	NoInline    bool // disable the compiler's fast paths; for debugging the compiler
+	Debug Debug // switches for working on Evie itself
+}
+
+// Debug holds switches for working on Evie itself; hosts leave them off
+type Debug struct {
+	LogCaptures bool // log when and what closures capture
+	NoFastPaths bool // compile without the compiler's fast paths, to tell whether a bug is in one
 }
 
 // testWithoutFastPaths makes every engine compile without the fast paths;
@@ -66,24 +74,34 @@ func New(opts ...Options) *Engine {
 	e.Instance = vm.New(vm.Options{
 		Resolver:        e.resolve,
 		Prelude:         opt.Prelude,
-		LogCaptures:     opt.LogCaptures,
-		DisableInlining: opt.NoInline || testWithoutFastPaths,
+		LogCaptures:     opt.Debug.LogCaptures,
+		DisableInlining: opt.Debug.NoFastPaths || testWithoutFastPaths,
 	})
 	return e
 }
 
-// Run executes a script in a fresh engine and returns its result
-func Run(script string) (vm.Value, error) {
+// Eval runs a script in a fresh engine and returns its result; ToGo turns it
+// into a Go value
+func Eval(script string) (vm.Value, error) {
 	return New().Eval(script)
 }
 
-// Eval executes a script in a fresh engine and returns the result as a Go value
-func Eval(script string) (any, error) {
-	val, err := Run(script)
-	if err != nil {
-		return nil, err
+// Format renders an error the way the evie command prints it: the message, the
+// source line with the span underlined, related places, a hint and the trace.
+// Colors are for terminals. An error without a report renders as its text.
+func Format(err error, colors bool) string {
+	if err == nil {
+		return ""
 	}
-	return val.ToGo(), nil
+	var reporter interface{ Diagnostic() *diag.Report }
+	if !errors.As(err, &reporter) {
+		return "error: " + err.Error() + "\n"
+	}
+	palette := diag.Palette{}
+	if colors {
+		palette = diag.Colors
+	}
+	return reporter.Diagnostic().Render(palette)
 }
 
 // RunFile executes a script file in a fresh engine and runs its main function

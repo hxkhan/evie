@@ -7,21 +7,21 @@ import (
 // spawn runs fn with params on a new fiber of its own and returns the task that
 // settles with the outcome. The fiber waits for the instance runner before it
 // executes any evie code.
-func (vm *Instance) spawn(fn *UserFn, params []Value) *Task {
-	task := NewTaskInstance()
+func (vm *Instance) spawn(fn *userFn, params []Value) *Task {
+	task := newTaskInstance()
 	vm.rt.wg.Go(func() {
-		fbr := vm.NewFiber()
+		fbr := vm.newFiber()
 		fbr.lock()
 		result, exc := fbr.runTask(fn, params)
 		fbr.unlock()
-		vm.ReleaseFiber(fbr)
-		task.Finish(result, exc)
+		vm.releaseFiber(fbr)
+		task.finish(result, exc)
 	})
 	return task
 }
 
 // runTask executes fn with params as the first frame of a fresh fiber
-func (fbr *Fiber) runTask(fn *UserFn, params []Value) (result Value, exc Exception) {
+func (fbr *fiber) runTask(fn *userFn, params []Value) (result Value, exc exception) {
 	defer func() {
 		if r := recover(); r != nil {
 			result, exc = Value{}, recovered(r)
@@ -34,14 +34,14 @@ func (fbr *Fiber) runTask(fn *UserFn, params []Value) (result Value, exc Excepti
 
 // spawnNative runs a native function with params on a fiber of its own
 func (vm *Instance) spawnNative(fn *GoFunc, params []Value) *Task {
-	task := NewTaskInstance()
+	task := newTaskInstance()
 	vm.rt.wg.Go(func() {
-		fbr := vm.NewFiber()
+		fbr := vm.newFiber()
 		fbr.lock()
-		result, exc := fn.Call(fbr, params...)
+		result, exc := fn.callGuarded(fbr, params...)
 		fbr.unlock()
-		vm.ReleaseFiber(fbr)
-		task.Finish(result, exc)
+		vm.releaseFiber(fbr)
+		task.finish(result, exc)
 	})
 	return task
 }
@@ -60,7 +60,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 	}
 
 	// evaluate the arguments into a fresh slice, with an optional receiver in front
-	evalArgs := func(fbr *Fiber, this *Value) ([]Value, Exception) {
+	evalArgs := func(fbr *fiber, this *Value) ([]Value, exception) {
 		offset := 0
 		if this != nil {
 			offset = 1
@@ -80,13 +80,13 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 	}
 
 	value := vm.compile(call.Fn)
-	return func(fbr *Fiber) (result Value, exc Exception) {
+	return func(fbr *fiber) (result Value, exc exception) {
 		value, exc := value(fbr)
 		if exc != nil {
 			return value, exc
 		}
 
-		if fn, isUserFn := value.AsUserFn(); isUserFn {
+		if fn, isUserFn := value.asUserFn(); isUserFn {
 			if exc := fn.accepts(len(arguments)); exc != nil {
 				return Value{}, exc.at(site)
 			}
@@ -94,7 +94,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 			if exc != nil {
 				return Value{}, exc
 			}
-			return BoxTask(vm.spawn(fn, params)), nil
+			return boxTask(vm.spawn(fn, params)), nil
 		}
 
 		if fn, isGoFunc := value.AsGoFunc(); isGoFunc {
@@ -105,11 +105,11 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 			if exc != nil {
 				return Value{}, exc
 			}
-			return BoxTask(vm.spawnNative(fn, params)), nil
+			return boxTask(vm.spawnNative(fn, params)), nil
 		}
 
 		if m, isMethod := value.asMethod(); isMethod {
-			if ufn, isUserFn := m.fn.AsUserFn(); isUserFn {
+			if ufn, isUserFn := m.fn.asUserFn(); isUserFn {
 				var this *Value
 				if ufn.isMethod {
 					this = &m.this
@@ -121,12 +121,12 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 				if exc != nil {
 					return Value{}, exc
 				}
-				return BoxTask(vm.spawn(ufn, params)), nil
+				return boxTask(vm.spawn(ufn, params)), nil
 			}
 
 			if fn, isGoFunc := m.fn.AsGoFunc(); isGoFunc {
 				var this *Value
-				if fn.IsMethod {
+				if fn.isMethod {
 					this = &m.this
 				}
 				if exc := fn.accepts(len(arguments) + boolToInt(this != nil)); exc != nil {
@@ -136,7 +136,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 				if exc != nil {
 					return Value{}, exc
 				}
-				return BoxTask(vm.spawnNative(fn, params)), nil
+				return boxTask(vm.spawnNative(fn, params)), nil
 			}
 		}
 
@@ -154,14 +154,14 @@ func boolToInt(b bool) int {
 func (vm *Instance) emitAwait(node ast.Await) instruction {
 	value := vm.compile(node.Task)
 
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		v, err := value(fbr)
 		if err != nil {
 			return v, err
 		}
 
 		if task, ok := v.AsTask(); ok {
-			return task.Await(fbr)
+			return task.await(fbr)
 		}
 
 		// Awaiting a non-task value returns the value directly (identity await)
@@ -199,7 +199,7 @@ func (vm *Instance) emitAwaitAll(node ast.AwaitAll) instruction {
 		values[i] = vm.compile(task)
 	}
 
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		evaluated := make([]Value, len(values))
 		for i, value := range values {
 			v, exc := value(fbr)
@@ -213,7 +213,7 @@ func (vm *Instance) emitAwaitAll(node ast.AwaitAll) instruction {
 		results := make([]Value, len(tasks))
 		for i, t := range tasks {
 			if t != nil {
-				res, err := t.Await(fbr)
+				res, err := t.await(fbr)
 				if err != nil {
 					return res, err
 				}
@@ -229,17 +229,17 @@ func (vm *Instance) emitAwaitAll(node ast.AwaitAll) instruction {
 
 type outcome struct {
 	res Value
-	err Exception
+	err exception
 }
 
 // settle waits for the first task to settle, or for a successful one when
 // successOnly is set, giving up the instance runner while it waits
-func settle(fbr *Fiber, tasks []*Task, successOnly bool) (outcome, bool) {
+func settle(fbr *fiber, tasks []*Task, successOnly bool) (outcome, bool) {
 	outcomes := make(chan outcome, len(tasks))
 	for _, t := range tasks {
 		go func(task *Task) {
 			<-task.Done()
-			res, err := task.Result()
+			res, err := task.outcome()
 			outcomes <- outcome{res: res, err: err}
 		}(t)
 	}
@@ -266,7 +266,7 @@ func (vm *Instance) emitAwaitAny(node ast.AwaitAny) instruction {
 		values[i] = vm.compile(task)
 	}
 
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		evaluated := make([]Value, len(values))
 		for i, value := range values {
 			v, exc := value(fbr)
@@ -286,8 +286,8 @@ func (vm *Instance) emitAwaitAny(node ast.AwaitAny) instruction {
 			if t == nil {
 				return raw[i], nil
 			}
-			if t.IsDone() {
-				res, err := t.Result()
+			if t.isDone() {
+				res, err := t.outcome()
 				if err == nil {
 					return res, nil
 				}
@@ -297,7 +297,7 @@ func (vm *Instance) emitAwaitAny(node ast.AwaitAny) instruction {
 		if first, ok := settle(fbr, tasks, true); ok {
 			return first.res, nil
 		}
-		return Value{}, CustomError("all tasks failed in await.any")
+		return Value{}, customError("all tasks failed in await.any")
 	}
 }
 
@@ -308,7 +308,7 @@ func (vm *Instance) emitAwaitRace(node ast.AwaitRace) instruction {
 		values[i] = vm.compile(task)
 	}
 
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		evaluated := make([]Value, len(values))
 		for i, value := range values {
 			v, exc := value(fbr)
@@ -328,8 +328,8 @@ func (vm *Instance) emitAwaitRace(node ast.AwaitRace) instruction {
 			if t == nil {
 				return raw[i], nil
 			}
-			if t.IsDone() {
-				return t.Result()
+			if t.isDone() {
+				return t.outcome()
 			}
 		}
 

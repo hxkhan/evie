@@ -13,7 +13,7 @@ import (
 	"github.com/hxkhan/evie/vm/fields"
 )
 
-type instruction func(fbr *Fiber) (Value, Exception)
+type instruction func(fbr *fiber) (Value, exception)
 
 func (vm *Instance) compile(node ast.Node) instruction {
 	switch node := node.(type) {
@@ -22,34 +22,34 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 	case ast.Input[bool]:
 		value := BoxBool(node.Value)
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			return value, nil
 		}
 
 	case ast.Input[float64]:
 		value := BoxNumber(node.Value)
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			return value, nil
 		}
 
 	case ast.Input[string]:
 		value := BoxString(node.Value)
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			return value, nil
 		}
 
 	case ast.Input[struct{}]:
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			return Value{}, nil
 		}
 
 	case ast.Break:
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			return Value{}, signalBreak
 		}
 
 	case ast.Continue:
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			return Value{}, signalContinue
 		}
 
@@ -159,16 +159,10 @@ type sourced struct {
 	node ast.Node
 }
 
-// IsPathImport reports whether an import names a file or folder, such as
-// "./util" or "../lib/text", rather than a package by name, such as "io"
-func IsPathImport(path string) bool {
-	return strings.HasPrefix(path, ".") || strings.ContainsAny(path, "/\\") || filepath.IsAbs(path)
-}
-
 // runPackage compiles a package from all of its files at once and runs its
 // initializers. Declarations are hoisted across the files, so any file can use
 // what another declares, and imports belong to the whole package.
-func (vm *Instance) runPackage(units []unit) (res Value, exc Exception) {
+func (vm *Instance) runPackage(units []unit) (res Value, exc exception) {
 	prevPkg, prevSrc := vm.cp.pkg, vm.cp.src
 	prevClosures := vm.cp.closures.Len()
 
@@ -183,14 +177,14 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc Exception) {
 		if r := recover(); r != nil {
 			if _, ok := r.(*CompileError); ok {
 				panic(r) // EvalNode reports it as what it is
-			} else if e, ok := r.(Exception); ok {
+			} else if e, ok := r.(exception); ok {
 				exc = e
 			} else if _, ok := r.(interface{ Diagnostic() *diag.Report }); ok {
 				panic(r) // an imported package's own report, such as a syntax error
 			} else if e, ok := r.(error); ok {
-				exc = CustomError("%v", e.Error())
+				exc = customError("%v", e.Error())
 			} else {
-				exc = CustomError("%v", r)
+				exc = customError("%v", r)
 			}
 		}
 	}()
@@ -275,8 +269,8 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc Exception) {
 			// create a stub for now
 			info := vm.newFuncInfo(fn.Name, fn.Args, fn.IsVariadic, false)
 			info.def = vm.at(fn)
-			boxed := BoxUserFn(UserFn{funcInfoStatic: info})
-			this.globals[index] = Global{Value: &boxed, IsPublic: true, IsStatic: true, IsConstant: true}
+			boxed := boxUserFn(userFn{funcInfoStatic: info})
+			this.globals[index] = pkgGlobal{Value: &boxed, IsPublic: true, IsStatic: true, IsConstant: true}
 		}
 
 		if str, isStruct := node.(ast.StructDefinition); isStruct {
@@ -296,14 +290,14 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc Exception) {
 			}
 
 			// create a stub for now
-			v := BoxUserStruct(&UserStruct{
+			v := boxUserStruct(&userStruct{
 				Name:         str.Name,
 				def:          vm.at(str),
 				Fields:       args,
 				FieldOffsets: offsets,
-				Methods:      make(map[fields.ID]*UserFn),
+				Methods:      make(map[fields.ID]*userFn),
 			})
-			this.globals[index] = Global{Value: &v, IsPublic: true, IsStatic: true, IsConstant: true}
+			this.globals[index] = pkgGlobal{Value: &v, IsPublic: true, IsStatic: true, IsConstant: true}
 		}
 	}
 
@@ -319,7 +313,7 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc Exception) {
 			if _, exists := this.globals[index]; exists {
 				panic(vm.compileErrorAt(iDec, "'%s' is declared twice in this package", iDec.Name))
 			}
-			this.globals[index] = Global{Value: new(Value), IsPublic: true, IsStatic: iDec.IsStatic}
+			this.globals[index] = pkgGlobal{Value: new(Value), IsPublic: true, IsStatic: iDec.IsStatic}
 			deferred[iDec.Name] = true
 		}
 	}
@@ -358,7 +352,7 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc Exception) {
 		node := it.node
 		if fn, isFn := node.(ast.Fn); isFn {
 			global := this.globals[fields.Get(fn.Name)]
-			ufn := (*UserFn)(global.pointer)
+			ufn := (*userFn)(global.pointer)
 			vm.compileFunction(ufn.funcInfoStatic, fn.Args, fn.Action, nil)
 		}
 	}
@@ -369,14 +363,14 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc Exception) {
 		node := it.node
 		if str, isStruct := node.(ast.StructDefinition); isStruct {
 			global := this.globals[fields.Get(str.Name)]
-			ustruct := (*UserStruct)(global.pointer)
+			ustruct := (*userStruct)(global.pointer)
 
 			if str.Parent != "" {
 				parentGlobal, exists := this.globals[fields.Get(str.Parent)]
 				if !exists {
 					panic(vm.compileErrorAt(str, "cannot find the parent struct '%v'", str.Parent))
 				}
-				parentStruct, ok := parentGlobal.Value.AsUserStruct()
+				parentStruct, ok := parentGlobal.Value.asUserStruct()
 				if !ok {
 					panic(vm.compileErrorAt(str, "'%v' is %s, not a struct", str.Parent, article(*parentGlobal.Value)))
 				}
@@ -409,11 +403,11 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc Exception) {
 		if init == nil {
 			continue
 		}
-		fbr := vm.NewFiber()
+		fbr := vm.newFiber()
 		fbr.running = true // the runner is held by EvalNode
 		_, exc := init.call(fbr, nil)
 		fbr.running = false
-		vm.ReleaseFiber(fbr)
+		vm.releaseFiber(fbr)
 		if exc != nil {
 			return Value{}, exc
 		}
@@ -425,14 +419,16 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc Exception) {
 // bindImport resolves one import of a package and binds it under the name the
 // imported package declares
 func (vm *Instance) bindImport(this *Package, u unit, path string, pos token.Pos) {
+	// with a resolver every import goes through it, since only the resolver
+	// knows which file a path means for this importer; without one, imports
+	// name packages that are already loaded
 	var pkg *Package
-	if !IsPathImport(path) {
+	if vm.cp.resolver == nil {
 		pkg = vm.rt.packages[path]
-	}
-	if pkg == nil {
-		if vm.cp.resolver == nil {
+		if pkg == nil {
 			panic(vm.compileErrorAtPos(pos, "cannot import '%s': no package resolver is configured", path))
 		}
+	} else {
 		vm.rt.release()
 		p, err := vm.cp.resolver(path)
 		vm.rt.acquire()
@@ -445,10 +441,7 @@ func (vm *Instance) bindImport(this *Package, u unit, path string, pos token.Pos
 		pkg = p
 		if pkg.Name() == "" {
 			base := filepath.Base(path)
-			pkg.SetName(strings.TrimSuffix(base, filepath.Ext(base)))
-		}
-		if !IsPathImport(path) {
-			vm.rt.packages[path] = pkg
+			pkg.setName(strings.TrimSuffix(base, filepath.Ext(base)))
 		}
 		if existing, ok := vm.rt.packages[pkg.Name()]; !ok {
 			vm.rt.packages[pkg.Name()] = pkg
@@ -463,7 +456,7 @@ func (vm *Instance) bindImport(this *Package, u unit, path string, pos token.Pos
 
 	v := pkg.Box()
 	bindName := pkg.Name()
-	this.globals[fields.Get(bindName)] = Global{Value: &v, IsPublic: false, IsStatic: true, IsConstant: true}
+	this.globals[fields.Get(bindName)] = pkgGlobal{Value: &v, IsPublic: false, IsStatic: true, IsConstant: true}
 
 	// remember an import bound under another name than its path suggests, so a
 	// script that uses the path's name can be told
@@ -498,7 +491,7 @@ func (vm *Instance) importFailed(u unit, path string, pos token.Pos, err error) 
 // compileInit compiles the top-level statements of a package that have to run:
 // bindings whose initializer is not a constant, and plain statements. Functions
 // and structs were hoisted already. It returns nil when there is nothing to run.
-func (vm *Instance) compileInit(pkg *Package, code []ast.Node, deferred map[string]bool) *UserFn {
+func (vm *Instance) compileInit(pkg *Package, code []ast.Node, deferred map[string]bool) *userFn {
 	info := vm.newFuncInfo("init", nil, false, false)
 	vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: info})
 	vm.cp.closures.Last(0).scope.OpenBlock()
@@ -514,7 +507,7 @@ func (vm *Instance) compileInit(pkg *Package, code []ast.Node, deferred map[stri
 			}
 			target := pkg.globals[fields.Get(stmt.Name)].Value
 			value := vm.compile(stmt.Value)
-			steps = append(steps, func(fbr *Fiber) (Value, Exception) {
+			steps = append(steps, func(fbr *fiber) (Value, exception) {
 				v, exc := value(fbr)
 				if exc != nil {
 					return v, exc
@@ -531,7 +524,7 @@ func (vm *Instance) compileInit(pkg *Package, code []ast.Node, deferred map[stri
 	if len(steps) == 0 {
 		return nil
 	}
-	info.code = func(fbr *Fiber) (Value, Exception) {
+	info.code = func(fbr *fiber) (Value, exception) {
 		for _, step := range steps {
 			if v, exc := step(fbr); exc != nil {
 				return v, exc
@@ -540,5 +533,5 @@ func (vm *Instance) compileInit(pkg *Package, code []ast.Node, deferred map[stri
 		return Value{}, nil
 	}
 	vm.closeFunction(info, closure)
-	return &UserFn{funcInfoStatic: info}
+	return &userFn{funcInfoStatic: info}
 }

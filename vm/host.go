@@ -16,7 +16,7 @@ import (
 // a constructor is given. The Go type is registered, so BoxAny and the typed
 // wrappers box and unbox it on their own.
 type HostType struct {
-	typ    *BuiltinType
+	typ    *builtinType
 	goType reflect.Type
 
 	// String renders a value; the default is <TypeName>
@@ -39,7 +39,7 @@ var (
 // NewHostType registers Go values of type T under a name scripts see
 func NewHostType[T any](name string) *HostType {
 	t := &HostType{
-		typ:    NewBuiltinType(name, nil, map[fields.ID]Value{}),
+		typ:    newBuiltinType(name, nil, map[fields.ID]Value{}),
 		goType: reflect.TypeOf((*T)(nil)).Elem(),
 	}
 	hostTypesMu.Lock()
@@ -64,7 +64,7 @@ func (t *HostType) Name() string {
 // Method registers a method; arity counts the arguments after the receiver,
 // which the native reads with Host(0)
 func (t *HostType) Method(name string, arity int, fn NativeFn) *GoFunc {
-	gf := NewMethod(name, arity, fn)
+	gf := newMethod(name, arity, fn)
 	t.typ.Fields[fields.Get(name)] = BoxGoFunc(gf)
 	return gf
 }
@@ -78,7 +78,7 @@ func (t *HostType) Constructor(arity int, fn NativeFn) *GoFunc {
 // Box returns the type itself as a value, to bind under its name so that
 // scripts can construct it and test values against it
 func (t *HostType) Box() Value {
-	return BoxBuiltinType(t.typ)
+	return boxBuiltinType(t.typ)
 }
 
 // Wrap boxes a Go value of this type
@@ -86,8 +86,8 @@ func (t *HostType) Wrap(v any) Value {
 	return Value{scalar: kindHost, pointer: unsafe.Pointer(&hostValue{typ: t, val: v})}
 }
 
-// BoxHost boxes a Go value whose type was registered with NewHostType
-func BoxHost(v any) (Value, bool) {
+// boxHost boxes a Go value whose type was registered with NewHostType
+func boxHost(v any) (Value, bool) {
 	t, ok := hostTypeOf(v)
 	if !ok {
 		return Value{}, false
@@ -106,14 +106,6 @@ func (x Value) AsHost() (v any, t *HostType, ok bool) {
 
 func (x Value) host() *hostValue {
 	return (*hostValue)(x.pointer)
-}
-
-// Host returns argument i as the Go value it wraps
-func (c Call) Host(i int) (any, error) {
-	if v, _, ok := c.Arg(i).AsHost(); ok {
-		return v, nil
-	}
-	return nil, c.typeError(i, "a host value")
 }
 
 // HostArg returns argument i as a Go value of type T

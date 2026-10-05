@@ -8,16 +8,16 @@ import (
 	"github.com/hxkhan/evie/vm/fields"
 )
 
-// BuiltinType is a type known to the runtime: it constructs values when called
+// builtinType is a type known to the runtime: it constructs values when called
 // and holds the methods of the values it describes
-type BuiltinType struct {
+type builtinType struct {
 	Name        string
 	Constructor *GoFunc
 	Fields      map[fields.ID]Value
 }
 
-func NewBuiltinType(name string, constructor *GoFunc, fields map[fields.ID]Value) *BuiltinType {
-	return &BuiltinType{
+func newBuiltinType(name string, constructor *GoFunc, fields map[fields.ID]Value) *builtinType {
+	return &builtinType{
 		Name:        name,
 		Constructor: constructor,
 		Fields:      fields,
@@ -25,14 +25,14 @@ func NewBuiltinType(name string, constructor *GoFunc, fields map[fields.ID]Value
 }
 
 var builtins = map[string]*Value{
-	"string": BoxBuiltinType(typeString).Allocate(),
-	"error":  BoxBuiltinType(typeError).Allocate(),
-	"array":  BoxBuiltinType(typeArray).Allocate(),
-	"object": BoxBuiltinType(typeObject).Allocate(),
-	"buffer": BoxBuiltinType(typeBuffer).Allocate(),
-	"task":   BoxBuiltinType(typeTask).Allocate(),
-	"number": BoxBuiltinType(typeNumber).Allocate(),
-	"bool":   BoxBuiltinType(typeBool).Allocate(),
+	"string": boxBuiltinType(typeString).allocate(),
+	"error":  boxBuiltinType(typeError).allocate(),
+	"array":  boxBuiltinType(typeArray).allocate(),
+	"object": boxBuiltinType(typeObject).allocate(),
+	"buffer": boxBuiltinType(typeBuffer).allocate(),
+	"task":   boxBuiltinType(typeTask).allocate(),
+	"number": boxBuiltinType(typeNumber).allocate(),
+	"bool":   boxBuiltinType(typeBool).allocate(),
 }
 
 // receivers of builtin methods are always of the right kind: the runtime only
@@ -47,7 +47,7 @@ func (x Value) mustObject() map[string]Value {
 	return o
 }
 
-var typeNumber = NewBuiltinType("number", NewFunc("number", 1, func(c Call) (Value, error) {
+var typeNumber = newBuiltinType("number", NewFunc("number", 1, func(c Call) (Value, error) {
 	arg := c.Arg(0)
 	if _, ok := arg.AsFloat64(); ok {
 		return arg, nil
@@ -68,62 +68,62 @@ var typeNumber = NewBuiltinType("number", NewFunc("number", 1, func(c Call) (Val
 	return Value{}, fmt.Errorf("cannot convert %v to a number", arg.TypeOf())
 }), methodTable())
 
-var typeBool = NewBuiltinType("bool", NewFunc("bool", 1, func(c Call) (Value, error) {
+var typeBool = newBuiltinType("bool", NewFunc("bool", 1, func(c Call) (Value, error) {
 	return BoxBool(c.Arg(0).IsTruthy()), nil
 }), methodTable())
 
-var typeError = NewBuiltinType("error", NewFunc("error", 1, func(c Call) (Value, error) {
-	return BoxError(CustomError("%s", c.Arg(0).String())), nil
+var typeError = newBuiltinType("error", NewFunc("error", 1, func(c Call) (Value, error) {
+	return boxError(customError("%s", c.Arg(0).String())), nil
 }), methodTable(
-	NewMethod("message", 0, func(c Call) (Value, error) {
+	newMethod("message", 0, func(c Call) (Value, error) {
 		return BoxString(c.This().mustError().Message), nil
 	}),
-	NewMethod("string", 0, func(c Call) (Value, error) {
+	newMethod("string", 0, func(c Call) (Value, error) {
 		return BoxString(c.This().mustError().Message), nil
 	}),
 ))
 
-var typeString = NewBuiltinType("string", NewFunc("string", 1, func(c Call) (Value, error) {
+var typeString = newBuiltinType("string", NewFunc("string", 1, func(c Call) (Value, error) {
 	arg := c.Arg(0)
 	if buf, ok := arg.AsBuffer(); ok {
 		return BoxString(string(buf)), nil
 	}
 	return BoxString(arg.String()), nil
 }), methodTable(
-	NewMethod("len", 0, func(c Call) (Value, error) {
+	newMethod("len", 0, func(c Call) (Value, error) {
 		return BoxNumber(float64(len(c.This().mustString()))), nil
 	}),
-	NewMethod("trim", 0, func(c Call) (Value, error) {
+	newMethod("trim", 0, func(c Call) (Value, error) {
 		return BoxString(strings.TrimSpace(c.This().mustString())), nil
 	}),
-	NewMethod("toLower", 0, func(c Call) (Value, error) {
+	newMethod("toLower", 0, func(c Call) (Value, error) {
 		return BoxString(strings.ToLower(c.This().mustString())), nil
 	}),
-	NewMethod("toUpper", 0, func(c Call) (Value, error) {
+	newMethod("toUpper", 0, func(c Call) (Value, error) {
 		return BoxString(strings.ToUpper(c.This().mustString())), nil
 	}),
-	NewMethod("contains", 1, func(c Call) (Value, error) {
+	newMethod("contains", 1, func(c Call) (Value, error) {
 		sub, err := c.String(1)
 		if err != nil {
 			return Value{}, err
 		}
 		return BoxBool(strings.Contains(c.This().mustString(), sub)), nil
 	}),
-	NewMethod("startsWith", 1, func(c Call) (Value, error) {
+	newMethod("startsWith", 1, func(c Call) (Value, error) {
 		prefix, err := c.String(1)
 		if err != nil {
 			return Value{}, err
 		}
 		return BoxBool(strings.HasPrefix(c.This().mustString(), prefix)), nil
 	}),
-	NewMethod("endsWith", 1, func(c Call) (Value, error) {
+	newMethod("endsWith", 1, func(c Call) (Value, error) {
 		suffix, err := c.String(1)
 		if err != nil {
 			return Value{}, err
 		}
 		return BoxBool(strings.HasSuffix(c.This().mustString(), suffix)), nil
 	}),
-	NewMethod("split", 1, func(c Call) (Value, error) {
+	newMethod("split", 1, func(c Call) (Value, error) {
 		sep, err := c.String(1)
 		if err != nil {
 			return Value{}, err
@@ -137,21 +137,21 @@ var typeString = NewBuiltinType("string", NewFunc("string", 1, func(c Call) (Val
 	}),
 ))
 
-var arrayPush = NewMethod("push", 1, func(c Call) (Value, error) {
+var arrayPush = newMethod("push", 1, func(c Call) (Value, error) {
 	arr := c.This().mustArray()
 	arr.Data = append(arr.Data, c.Arg(1))
 	return c.This(), nil
 })
 
-var typeArray = NewBuiltinType("array", NewFunc("array", 0, func(c Call) (Value, error) {
+var typeArray = newBuiltinType("array", NewFunc("array", 0, func(c Call) (Value, error) {
 	return BoxArray(NewArray()), nil
 }), methodTable(
-	NewMethod("len", 0, func(c Call) (Value, error) {
+	newMethod("len", 0, func(c Call) (Value, error) {
 		return BoxNumber(float64(len(c.This().mustArray().Data))), nil
 	}),
 	arrayPush,
 	alias("append", arrayPush),
-	NewMethod("pop", 0, func(c Call) (Value, error) {
+	newMethod("pop", 0, func(c Call) (Value, error) {
 		arr := c.This().mustArray()
 		if len(arr.Data) == 0 {
 			return Value{}, nil
@@ -161,7 +161,7 @@ var typeArray = NewBuiltinType("array", NewFunc("array", 0, func(c Call) (Value,
 		arr.Data = arr.Data[:last]
 		return val, nil
 	}),
-	NewMethod("slice", 2, func(c Call) (Value, error) {
+	newMethod("slice", 2, func(c Call) (Value, error) {
 		start, err := c.Int(1)
 		if err != nil {
 			return Value{}, err
@@ -186,7 +186,7 @@ var typeArray = NewBuiltinType("array", NewFunc("array", 0, func(c Call) (Value,
 		copy(sub, data[start:end])
 		return BoxArray(NewArray(sub...)), nil
 	}),
-	NewMethod("filter", 1, func(c Call) (Value, error) {
+	newMethod("filter", 1, func(c Call) (Value, error) {
 		callback, err := c.Callable(1)
 		if err != nil {
 			return Value{}, err
@@ -203,7 +203,7 @@ var typeArray = NewBuiltinType("array", NewFunc("array", 0, func(c Call) (Value,
 		}
 		return BoxArray(NewArray(result...)), nil
 	}),
-	NewMethod("map", 1, func(c Call) (Value, error) {
+	newMethod("map", 1, func(c Call) (Value, error) {
 		callback, err := c.Callable(1)
 		if err != nil {
 			return Value{}, err
@@ -219,7 +219,7 @@ var typeArray = NewBuiltinType("array", NewFunc("array", 0, func(c Call) (Value,
 		}
 		return BoxArray(NewArray(result...)), nil
 	}),
-	NewMethod("contains", 1, func(c Call) (Value, error) {
+	newMethod("contains", 1, func(c Call) (Value, error) {
 		target := c.Arg(1)
 		for _, item := range c.This().mustArray().Data {
 			if item.Equals(target) {
@@ -228,7 +228,7 @@ var typeArray = NewBuiltinType("array", NewFunc("array", 0, func(c Call) (Value,
 		}
 		return BoxBool(false), nil
 	}),
-	NewMethod("reverse", 0, func(c Call) (Value, error) {
+	newMethod("reverse", 0, func(c Call) (Value, error) {
 		data := c.This().mustArray().Data
 		reversed := make([]Value, len(data))
 		for i, v := range data {
@@ -236,7 +236,7 @@ var typeArray = NewBuiltinType("array", NewFunc("array", 0, func(c Call) (Value,
 		}
 		return BoxArray(NewArray(reversed...)), nil
 	}),
-	NewMethod("join", 1, func(c Call) (Value, error) {
+	newMethod("join", 1, func(c Call) (Value, error) {
 		sep, err := c.String(1)
 		if err != nil {
 			return Value{}, err
@@ -254,7 +254,7 @@ var typeArray = NewBuiltinType("array", NewFunc("array", 0, func(c Call) (Value,
 	}),
 ))
 
-var objectHas = NewMethod("has", 1, func(c Call) (Value, error) {
+var objectHas = newMethod("has", 1, func(c Call) (Value, error) {
 	key, ok := c.Arg(1).AsString()
 	if !ok {
 		return BoxBool(false), nil
@@ -263,7 +263,7 @@ var objectHas = NewMethod("has", 1, func(c Call) (Value, error) {
 	return BoxBool(exists), nil
 })
 
-var objectRemove = NewMethod("remove", 1, func(c Call) (Value, error) {
+var objectRemove = newMethod("remove", 1, func(c Call) (Value, error) {
 	key, ok := c.Arg(1).AsString()
 	if !ok {
 		return Value{}, nil
@@ -277,10 +277,10 @@ var objectRemove = NewMethod("remove", 1, func(c Call) (Value, error) {
 	return Value{}, nil
 })
 
-var typeObject = NewBuiltinType("object", NewFunc("object", 0, func(c Call) (Value, error) {
+var typeObject = newBuiltinType("object", NewFunc("object", 0, func(c Call) (Value, error) {
 	return BoxObject(make(map[string]Value)), nil
 }), methodTable(
-	NewMethod("keys", 0, func(c Call) (Value, error) {
+	newMethod("keys", 0, func(c Call) (Value, error) {
 		keys := sortedKeys(c.This().mustObject())
 		arr := make([]Value, len(keys))
 		for i, k := range keys {
@@ -288,7 +288,7 @@ var typeObject = NewBuiltinType("object", NewFunc("object", 0, func(c Call) (Val
 		}
 		return BoxArray(NewArray(arr...)), nil
 	}),
-	NewMethod("values", 0, func(c Call) (Value, error) {
+	newMethod("values", 0, func(c Call) (Value, error) {
 		obj := c.This().mustObject()
 		keys := sortedKeys(obj)
 		arr := make([]Value, len(keys))
@@ -297,52 +297,52 @@ var typeObject = NewBuiltinType("object", NewFunc("object", 0, func(c Call) (Val
 		}
 		return BoxArray(NewArray(arr...)), nil
 	}),
-	NewMethod("len", 0, func(c Call) (Value, error) {
+	newMethod("len", 0, func(c Call) (Value, error) {
 		return BoxNumber(float64(len(c.This().mustObject()))), nil
 	}),
 	objectHas,
 	alias("contains", objectHas),
 	objectRemove,
 	alias("delete", objectRemove),
-	NewMethod("clear", 0, func(c Call) (Value, error) {
+	newMethod("clear", 0, func(c Call) (Value, error) {
 		clear(c.This().mustObject())
 		return c.This(), nil
 	}),
 ))
 
-var typeBuffer = NewBuiltinType("buffer", NewFunc("buffer", 0, func(c Call) (Value, error) {
+var typeBuffer = newBuiltinType("buffer", NewFunc("buffer", 0, func(c Call) (Value, error) {
 	return BoxBuffer([]byte{}), nil
 }), methodTable(
-	NewMethod("string", 0, func(c Call) (Value, error) {
+	newMethod("string", 0, func(c Call) (Value, error) {
 		return BoxString(string(c.This().mustBuffer())), nil
 	}),
-	NewMethod("len", 0, func(c Call) (Value, error) {
+	newMethod("len", 0, func(c Call) (Value, error) {
 		return BoxNumber(float64(len(c.This().mustBuffer()))), nil
 	}),
 ))
 
-var typeTask = NewBuiltinType("task", NewFunc("task", 0, func(c Call) (Value, error) {
-	return BoxTask(NewTaskInstance()), nil
+var typeTask = newBuiltinType("task", NewFunc("task", 0, func(c Call) (Value, error) {
+	return boxTask(newTaskInstance()), nil
 }), methodTable(
-	NewMethod("done", 0, func(c Call) (Value, error) {
-		return BoxBool(c.This().mustTask().IsDone()), nil
+	newMethod("done", 0, func(c Call) (Value, error) {
+		return BoxBool(c.This().mustTask().isDone()), nil
 	}),
-	NewMethod("isDone", 0, func(c Call) (Value, error) {
-		return BoxBool(c.This().mustTask().IsDone()), nil
+	newMethod("isDone", 0, func(c Call) (Value, error) {
+		return BoxBool(c.This().mustTask().isDone()), nil
 	}),
-	NewMethod("result", 0, func(c Call) (Value, error) {
-		res, _ := c.This().mustTask().Result()
+	newMethod("result", 0, func(c Call) (Value, error) {
+		res, _ := c.This().mustTask().outcome()
 		return res, nil
 	}),
-	NewMethod("error", 0, func(c Call) (Value, error) {
-		_, exc := c.This().mustTask().Result()
+	newMethod("error", 0, func(c Call) (Value, error) {
+		_, exc := c.This().mustTask().outcome()
 		if exc != nil {
-			return BoxError(exc), nil
+			return boxError(exc), nil
 		}
 		return Value{}, nil
 	}),
-	NewMethod("await", 0, func(c Call) (Value, error) {
-		return plain(c.This().mustTask().Await(c.fbr))
+	newMethod("await", 0, func(c Call) (Value, error) {
+		return plain(c.This().mustTask().await(c.fbr))
 	}),
 ))
 

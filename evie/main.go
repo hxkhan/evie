@@ -49,10 +49,10 @@ func main() {
 		return
 	}
 
-	eng := evie.New(evie.Options{
-		NoInline:    !*inline,
+	eng := evie.New(evie.Options{Debug: evie.Debug{
+		NoFastPaths: !*inline,
 		LogCaptures: *logCaptures,
-	})
+	}})
 
 	before := time.Now()
 	var res vm.Value
@@ -149,12 +149,9 @@ func runSource(eng *evie.Engine, src string) (vm.Value, error) {
 	if !ok || !main.IsCallable() {
 		return vm.Value{}, errors.New("-e: the program has no main function")
 	}
-	res, err := main.Call(nil)
+	res, err := main.Call()
 	eng.Close()
-	if err != nil {
-		return res, err
-	}
-	return res, nil
+	return res, err
 }
 
 // versionString names the build: the module version when installed with go
@@ -186,15 +183,8 @@ func versionString() string {
 
 // report prints an error the way a compiler does and exits
 func report(err error) {
-	palette := diag.Palette{}
-	if info, statErr := os.Stderr.Stat(); statErr == nil && info.Mode()&os.ModeCharDevice != 0 && os.Getenv("NO_COLOR") == "" {
-		palette = diag.Colors
-	}
-	var reporter interface{ Diagnostic() *diag.Report }
-	if errors.As(err, &reporter) {
-		fmt.Fprint(os.Stderr, reporter.Diagnostic().Render(palette))
-	} else {
-		fmt.Fprintln(os.Stderr, "error:", err)
-	}
+	info, statErr := os.Stderr.Stat()
+	colors := statErr == nil && info.Mode()&os.ModeCharDevice != 0 && os.Getenv("NO_COLOR") == ""
+	fmt.Fprint(os.Stderr, evie.Format(err, colors))
 	os.Exit(1)
 }

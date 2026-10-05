@@ -85,18 +85,18 @@ func BoxString(str string) Value {
 	return Value{scalar: kindString, pointer: unsafe.Pointer(&str)}
 }
 
-// BoxUserFn boxes an evie function
-func BoxUserFn(fn UserFn) Value {
+// boxUserFn boxes an evie function
+func boxUserFn(fn userFn) Value {
 	return Value{scalar: kindUserFn, pointer: unsafe.Pointer(&fn)}
 }
 
 // boxUserFnPtr boxes an existing function without copying it
-func boxUserFnPtr(fn *UserFn) Value {
+func boxUserFnPtr(fn *userFn) Value {
 	return Value{scalar: kindUserFn, pointer: unsafe.Pointer(fn)}
 }
 
-// BoxBuiltinType boxes a Go function that is a type constructor
-func BoxBuiltinType(t *BuiltinType) Value {
+// boxBuiltinType boxes a Go function that is a type constructor
+func boxBuiltinType(t *builtinType) Value {
 	return Value{scalar: kindBuiltinType, pointer: unsafe.Pointer(t)}
 }
 
@@ -115,27 +115,27 @@ func BoxObject(obj map[string]Value) Value {
 	return Value{scalar: kindObject, pointer: unsafe.Pointer(&obj)}
 }
 
-// BoxUserStruct boxes an evie struct
-func BoxUserStruct(obj *UserStruct) Value {
+// boxUserStruct boxes an evie struct
+func boxUserStruct(obj *userStruct) Value {
 	return Value{scalar: kindStruct, pointer: unsafe.Pointer(obj)}
 }
 
-// BoxUserStructInstance boxes an evie struct instance
-func BoxUserStructInstance(obj *UserStructInstance) Value {
+// boxStructInstance boxes an evie struct instance
+func boxStructInstance(obj *structInstance) Value {
 	return Value{scalar: kindStructInstance, pointer: unsafe.Pointer(obj)}
 }
 
-// BoxTask boxes an evie task
-func BoxTask(task *Task) Value {
+// boxTask boxes an evie task
+func boxTask(task *Task) Value {
 	return Value{scalar: kindTask, pointer: unsafe.Pointer(task)}
 }
 
-// BoxError boxes an evie error
-func BoxError(err *Error) Value {
+// boxError boxes an evie error
+func boxError(err *Error) Value {
 	return Value{scalar: kindError, pointer: unsafe.Pointer(err)}
 }
 
-func boxMethod(m BoundMethod) Value {
+func boxMethod(m boundMethod) Value {
 	return Value{scalar: kindBoundMethod, pointer: unsafe.Pointer(&m)}
 }
 
@@ -168,11 +168,11 @@ func (x Value) AsString() (s string, ok bool) {
 	return "", false
 }
 
-func (x Value) AsUserFn() (fn *UserFn, ok bool) {
+func (x Value) asUserFn() (fn *userFn, ok bool) {
 	if x.scalar != kindUserFn || isKnown(x.pointer) {
 		return nil, false
 	}
-	return (*UserFn)(x.pointer), true
+	return (*userFn)(x.pointer), true
 }
 
 func (x Value) AsGoFunc() (fn *GoFunc, ok bool) {
@@ -196,25 +196,25 @@ func (x Value) AsObject() (obj map[string]Value, ok bool) {
 	return *(*map[string]Value)(x.pointer), true
 }
 
-func (x Value) AsUserStruct() (obj *UserStruct, ok bool) {
+func (x Value) asUserStruct() (obj *userStruct, ok bool) {
 	if x.scalar != kindStruct || isKnown(x.pointer) {
 		return nil, false
 	}
-	return (*UserStruct)(x.pointer), true
+	return (*userStruct)(x.pointer), true
 }
 
-func (x Value) AsUserStructInstance() (obj *UserStructInstance, ok bool) {
+func (x Value) asStructInstance() (obj *structInstance, ok bool) {
 	if x.scalar != kindStructInstance || isKnown(x.pointer) {
 		return nil, false
 	}
-	return (*UserStructInstance)(x.pointer), true
+	return (*structInstance)(x.pointer), true
 }
 
-func (x Value) AsBuiltinType() (obj *BuiltinType, ok bool) {
+func (x Value) asBuiltinType() (obj *builtinType, ok bool) {
 	if x.scalar != kindBuiltinType || isKnown(x.pointer) {
 		return nil, false
 	}
-	return (*BuiltinType)(x.pointer), true
+	return (*builtinType)(x.pointer), true
 }
 
 func (x Value) AsTask() (task *Task, ok bool) {
@@ -238,11 +238,11 @@ func (x Value) AsError() (err *Error, ok bool) {
 	return (*Error)(x.pointer), true
 }
 
-func (x Value) asMethod() (m *BoundMethod, ok bool) {
+func (x Value) asMethod() (m *boundMethod, ok bool) {
 	if x.scalar != kindBoundMethod || isKnown(x.pointer) {
 		return nil, false
 	}
-	return (*BoundMethod)(x.pointer), true
+	return (*boundMethod)(x.pointer), true
 }
 
 func (x Value) AsBuffer() (buffer []byte, ok bool) {
@@ -252,8 +252,8 @@ func (x Value) AsBuffer() (buffer []byte, ok bool) {
 	return *(*[]byte)(x.pointer), true
 }
 
-// Allocate will copy the current value to the heap and return a pointer to it
-func (x Value) Allocate() *Value {
+// allocate will copy the current value to the heap and return a pointer to it
+func (x Value) allocate() *Value {
 	return &x
 }
 
@@ -345,10 +345,10 @@ func (x Value) String() string {
 		//return (*UserFn)(x.pointer).String()
 		return "callable"
 	case kindStructInstance:
-		return (*UserStructInstance)(x.pointer).String()
+		return (*structInstance)(x.pointer).String()
 	case kindGoFunc:
 		fn := (*GoFunc)(x.pointer)
-		if fn.IsMethod {
+		if fn.isMethod {
 			return "<callable>"
 		}
 		return "<callable>"
@@ -383,11 +383,11 @@ func (x Value) String() string {
 		return builder.String()
 
 	case kindStruct:
-		obj := (*UserStruct)(x.pointer)
+		obj := (*userStruct)(x.pointer)
 		return fmt.Sprintf("<type %v>", obj.Name)
 	case kindTask:
 		t := (*Task)(x.pointer)
-		if t.IsDone() {
+		if t.isDone() {
 			if t.err != nil {
 				return "<task failed>"
 			}
@@ -400,7 +400,7 @@ func (x Value) String() string {
 		//m := (*BoundMethod)(x.pointer)
 		return "<callable>"
 	case kindBuiltinType:
-		obj := (*BuiltinType)(x.pointer)
+		obj := (*builtinType)(x.pointer)
 		return fmt.Sprintf("<type %v>", obj.Name)
 	case kindBuffer:
 		return fmt.Sprintf("<buffer %v>", x.pointer)
@@ -511,17 +511,17 @@ func (x Value) getField(k fieldKey) (field Value, ok bool) {
 		return x.boundMethod(typeObject, k.id)
 
 	case kindBuiltinType:
-		obj := (*BuiltinType)(x.pointer)
+		obj := (*builtinType)(x.pointer)
 		value, exists := obj.Fields[k.id]
 		return value, exists
 
 	case kindStructInstance:
-		obj := (*UserStructInstance)(x.pointer)
+		obj := (*structInstance)(x.pointer)
 		if value, exists := obj.GetField(k.id); exists {
 			return value, true
 		}
 		if method := obj.InstanceOf.lookupMethod(k.id); method != nil {
-			return boxMethod(BoundMethod{this: x, fn: boxUserFnPtr(method)}), true
+			return boxMethod(boundMethod{this: x, fn: boxUserFnPtr(method)}), true
 		}
 		return Value{}, false
 
@@ -572,7 +572,7 @@ func (x Value) memberNames() []string {
 	case kindObject:
 		return append(sortedKeys(*(*map[string]Value)(x.pointer)), ids(typeObject.Fields)...)
 	case kindBuiltinType:
-		return ids((*BuiltinType)(x.pointer).Fields)
+		return ids((*builtinType)(x.pointer).Fields)
 	case kindHost:
 		return ids(x.host().typ.typ.Fields)
 	case kindPackage:
@@ -582,7 +582,7 @@ func (x Value) memberNames() []string {
 		}
 		return names
 	case kindStructInstance:
-		usi := (*UserStructInstance)(x.pointer)
+		usi := (*structInstance)(x.pointer)
 		var names []string
 		for cur := usi.InstanceOf; cur != nil; cur = cur.Parent {
 			for _, f := range cur.Fields {
@@ -598,12 +598,12 @@ func (x Value) memberNames() []string {
 }
 
 // boundMethod looks a method up on a builtin type and binds it to x
-func (x Value) boundMethod(t *BuiltinType, f fields.ID) (Value, bool) {
+func (x Value) boundMethod(t *builtinType, f fields.ID) (Value, bool) {
 	value, exists := t.Fields[f]
 	if !exists {
 		return Value{}, false
 	}
-	return boxMethod(BoundMethod{this: x, fn: value}), true
+	return boxMethod(boundMethod{this: x, fn: value}), true
 }
 
 // dotAccess returns the member a call site like x.name(...) refers to, unbound
@@ -639,7 +639,7 @@ func (x Value) dotAccess(k fieldKey) (field Value) {
 		}
 		return *value.Value
 	case kindStructInstance:
-		usi := (*UserStructInstance)(x.pointer)
+		usi := (*structInstance)(x.pointer)
 		if method := usi.InstanceOf.lookupMethod(k.id); method != nil {
 			return boxUserFnPtr(method)
 		}
@@ -662,25 +662,37 @@ func (x Value) IsCallable() bool {
 	return false
 }
 
-func (x Value) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) {
+// Call calls a callable value from Go: a script function, a native, a bound
+// method or a type. It borrows a fiber of the instance the value belongs to.
+func (x Value) Call(args ...Value) (Value, error) {
+	v, exc := x.callGuarded(nil, args...)
+	if exc != nil {
+		return v, exc
+	}
+	return v, nil
+}
+
+// callGuarded calls a callable value on fbr, or on a borrowed fiber when fbr
+// is nil, recovering panics at the boundary
+func (x Value) callGuarded(fbr *fiber, args ...Value) (result Value, exc exception) {
 	if !isKnown(x.pointer) {
 		switch x.scalar {
 		case kindUserFn:
-			fn := (*UserFn)(x.pointer)
-			return fn.Call(fbr, args...)
+			fn := (*userFn)(x.pointer)
+			return fn.callGuarded(fbr, args...)
 		case kindGoFunc:
 			fn := (*GoFunc)(x.pointer)
-			return fn.Call(fbr, args...)
+			return fn.callGuarded(fbr, args...)
 		case kindBoundMethod:
-			bm := (*BoundMethod)(x.pointer)
-			return bm.Call(fbr, args...)
+			bm := (*boundMethod)(x.pointer)
+			return bm.callGuarded(fbr, args...)
 		case kindStruct:
-			us := (*UserStruct)(x.pointer)
+			us := (*userStruct)(x.pointer)
 			return us.instantiate(args)
 		case kindBuiltinType:
-			bt := (*BuiltinType)(x.pointer)
-			return bt.Constructor.Call(fbr, args...)
+			bt := (*builtinType)(x.pointer)
+			return bt.Constructor.callGuarded(fbr, args...)
 		}
 	}
-	return Value{}, RuntimeExceptionF("cannot invoke a non-callable '%v'", x)
+	return Value{}, runtimeErrorf("cannot invoke a non-callable '%v'", x)
 }

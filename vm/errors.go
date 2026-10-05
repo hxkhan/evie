@@ -22,7 +22,7 @@ type Error struct {
 	Cause error
 }
 
-type Exception = *Error
+type exception = *Error
 
 var signalReturn = &Error{Report: diag.Report{Message: "return"}, Code: 0}
 var signalContinue = &Error{Report: diag.Report{Message: "continue"}, Code: 1}
@@ -67,21 +67,21 @@ func (vm *Instance) at(node ast.Node) site {
 	return site{src: vm.cp.src, pos: node.Where(), fn: fn}
 }
 
-func CustomError(msg string, a ...any) Exception {
+func customError(msg string, a ...any) exception {
 	return &Error{Report: diag.Report{Message: fmt.Sprintf(msg, a...)}}
 }
 
-func RuntimeExceptionF(format string, a ...any) Exception {
-	return CustomError(format, a...)
+func runtimeErrorf(format string, a ...any) exception {
+	return customError(format, a...)
 }
 
-func TypeErrorF(format string, a ...any) Exception {
-	return CustomError(format, a...)
+func argTypeErrorf(format string, a ...any) exception {
+	return customError(format, a...)
 }
 
 // errorAt raises an error at a site
-func errorAt(s site, format string, a ...any) Exception {
-	return CustomError(format, a...).at(s)
+func errorAt(s site, format string, a ...any) exception {
+	return customError(format, a...).at(s)
 }
 
 // at locates an error that has no location yet and opens its trace there
@@ -131,7 +131,7 @@ func (e *Error) field(f fieldsID) (Value, bool) {
 }
 
 // memberError explains a missing member and suggests a close one
-func memberError(s site, name string, v Value) Exception {
+func memberError(s site, name string, v Value) exception {
 	e := errorAt(s, "no member '%s' on %s", name, article(v))
 	if closest, ok := diag.Suggest(name, v.memberNames()); ok {
 		e.Hint = fmt.Sprintf("%s has a member with a similar name: '%s'", article(v), closest)
@@ -156,7 +156,7 @@ func (e *Error) hinted(hint string) *Error {
 // array", "a Point", "nil"
 func article(v Value) string {
 	t := v.TypeOf()
-	if usi, ok := v.AsUserStructInstance(); ok {
+	if usi, ok := v.asStructInstance(); ok {
 		t = usi.InstanceOf.Name
 	}
 	if t == "nil" {
@@ -169,7 +169,7 @@ func article(v Value) string {
 }
 
 // operatorError explains a binary operator applied to the wrong operands
-func operatorError(s site, op string, a Value, b Value) Exception {
+func operatorError(s site, op string, a Value, b Value) exception {
 	e := errorAt(s, "cannot apply '%s' to %s and %s", op, article(a), article(b))
 	e.Label = fmt.Sprintf("%s %s %s", a.TypeOf(), op, b.TypeOf())
 	_, aStr := a.AsString()
@@ -183,7 +183,7 @@ func operatorError(s site, op string, a Value, b Value) Exception {
 	return e
 }
 
-func TypeError(args []Value, expected ...string) Exception {
+func argTypeError(args []Value, expected ...string) exception {
 	msg := "expected types ("
 	for i, ex := range expected {
 		msg += fmt.Sprintf("'%s'", ex)
@@ -200,16 +200,16 @@ func TypeError(args []Value, expected ...string) Exception {
 		}
 	}
 
-	return CustomError("%s", msg)
+	return customError("%s", msg)
 }
 
 // recovered turns a panic that reached a host boundary into an exception. A
 // thrown exception or compile error passes through; anything else is a bug in
 // the runtime or in a native and is reported with its stack instead of taking
 // the host process down.
-func recovered(r any) Exception {
+func recovered(r any) exception {
 	switch e := r.(type) {
-	case Exception:
+	case exception:
 		return e
 	case *CompileError:
 		return &Error{Report: e.Report}
@@ -226,20 +226,20 @@ func (e *CompileError) Error() string {
 	return "compile error: " + e.Report.Error()
 }
 
-func CompileErrorf(format string, a ...any) *CompileError {
+func compileErrorf(format string, a ...any) *CompileError {
 	return &CompileError{Report: diag.Report{Message: fmt.Sprintf(format, a...)}}
 }
 
 // compileErrorAt reports a compile error at a node of the source being compiled
 func (vm *Instance) compileErrorAt(node ast.Node, format string, a ...any) *CompileError {
-	e := CompileErrorf(format, a...)
+	e := compileErrorf(format, a...)
 	e.Source, e.Pos = vm.cp.src, node.Where()
 	return e
 }
 
 // compileErrorAtPos reports a compile error at a position in the source being compiled
 func (vm *Instance) compileErrorAtPos(pos token.Pos, format string, a ...any) *CompileError {
-	e := CompileErrorf(format, a...)
+	e := compileErrorf(format, a...)
 	e.Source, e.Pos = vm.cp.src, pos
 	return e
 }

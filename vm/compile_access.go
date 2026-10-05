@@ -16,17 +16,17 @@ func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
 	// try to evaluate
 	switch value := vm.evaluate(node.Value).(type) {
 	case local:
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			fbr.setLocal(index, *fbr.get(value))
 			return Value{}, nil
 		}
 	case Value:
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			fbr.setLocal(index, value)
 			return Value{}, nil
 		}
-	case Global:
-		return func(fbr *Fiber) (Value, Exception) {
+	case pkgGlobal:
+		return func(fbr *fiber) (Value, exception) {
 			fbr.setLocal(index, *value.Value)
 			return Value{}, nil
 		}
@@ -34,7 +34,7 @@ func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
 
 	// generic
 	value := vm.compile(node.Value)
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		v, err := value(fbr)
 		if err != nil {
 			return v, err
@@ -53,11 +53,11 @@ func (vm *Instance) emitIdentGet(node ast.Ident) instruction {
 
 	switch v := variable.(type) {
 	case local:
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			return *fbr.get(v), nil
 		}
-	case Global:
-		return func(fbr *Fiber) (Value, Exception) {
+	case pkgGlobal:
+		return func(fbr *fiber) (Value, exception) {
 			return *v.Value, nil
 		}
 	}
@@ -67,7 +67,7 @@ func (vm *Instance) emitIdentGet(node ast.Ident) instruction {
 
 // assignField sets field name of obj to the result of value, which is only
 // evaluated once obj is known to take the assignment
-func assignField(fbr *Fiber, site site, obj Value, name string, index fields.ID, value instruction) (Value, Exception) {
+func assignField(fbr *fiber, site site, obj Value, name string, index fields.ID, value instruction) (Value, exception) {
 	if pkg, ok := obj.AsPackage(); ok {
 		field, exists := pkg.globals[index]
 		if !exists {
@@ -93,7 +93,7 @@ func assignField(fbr *Fiber, site site, obj Value, name string, index fields.ID,
 		return Value{}, nil
 	}
 
-	if usi, ok := obj.AsUserStructInstance(); ok {
+	if usi, ok := obj.asStructInstance(); ok {
 		v, exc := value(fbr)
 		if exc != nil {
 			return v, exc
@@ -123,7 +123,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 				panic(vm.compileErrorAt(iGet, "cannot assign to '%v' because it is a constant", iGet.Name).withHint("declare it with var to allow reassignment: var " + iGet.Name + " := ..."))
 			}
 
-			return func(fbr *Fiber) (Value, Exception) {
+			return func(fbr *fiber) (Value, exception) {
 				value, err := value(fbr)
 				if err != nil {
 					return value, err
@@ -133,12 +133,12 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 				return Value{}, nil
 			}
 
-		case Global:
+		case pkgGlobal:
 			if v.IsStatic {
 				panic(vm.compileErrorAt(iGet, "cannot assign to '%v' because it is a constant", iGet.Name).withHint("declare it with var to allow reassignment: var " + iGet.Name + " := ..."))
 			}
 
-			return func(fbr *Fiber) (Value, Exception) {
+			return func(fbr *fiber) (Value, exception) {
 				value, err := value(fbr)
 				if err != nil {
 					return value, err
@@ -163,14 +163,14 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 			if lhs.index == 0 && !lhs.isCaptured && vm.cp.closures.Len() > 0 && vm.cp.closures.Last(0).ustruct != nil {
 				ustruct := vm.cp.closures.Last(0).ustruct
 				if slot, ok := ustruct.FieldOffsets[index]; ok {
-					return func(fbr *Fiber) (Value, Exception) {
+					return func(fbr *fiber) (Value, exception) {
 						v, err := value(fbr)
 						if err != nil {
 							return v, err
 						}
 						thisVal := fbr.stack[fbr.base]
 						if thisVal.scalar == kindStructInstance && !isKnown(thisVal.pointer) {
-							usi := (*UserStructInstance)(thisVal.pointer)
+							usi := (*structInstance)(thisVal.pointer)
 							if usi.InstanceOf == ustruct && slot < len(usi.Fields) {
 								usi.Fields[slot] = v
 								return Value{}, nil
@@ -183,7 +183,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 				}
 			}
 
-			return func(fbr *Fiber) (Value, Exception) {
+			return func(fbr *fiber) (Value, exception) {
 				lhs := fbr.get(lhs)
 
 				if obj, ok := lhs.AsObject(); ok {
@@ -196,7 +196,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 					return Value{}, nil
 				}
 
-				if obj, ok := lhs.AsUserStructInstance(); ok {
+				if obj, ok := lhs.asStructInstance(); ok {
 					value, err := value(fbr)
 					if err != nil {
 						return value, err
@@ -222,7 +222,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 				}
 
 				value := vm.compile(node.Value)
-				return func(fbr *Fiber) (Value, Exception) {
+				return func(fbr *fiber) (Value, exception) {
 					value, err := value(fbr)
 					if err != nil {
 						return value, err
@@ -233,11 +233,11 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 				}
 			}
 
-		case Global:
+		case pkgGlobal:
 			// compile new value & return setter
 			value := vm.compile(node.Value)
 			index := fields.Get(fa.Rhs)
-			return func(fbr *Fiber) (Value, Exception) {
+			return func(fbr *fiber) (Value, exception) {
 				if pkg, ok := lhs.AsPackage(); ok {
 					field, exists := pkg.globals[index]
 					if !exists {
@@ -267,7 +267,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 					return Value{}, nil
 				}
 
-				if obj, ok := lhs.AsUserStructInstance(); ok {
+				if obj, ok := lhs.asStructInstance(); ok {
 					value, err := value(fbr)
 					if err != nil {
 						return value, err
@@ -286,7 +286,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 		receiver := vm.compile(fa.Lhs)
 		value := vm.compile(node.Value)
 		index := fields.Get(fa.Rhs)
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			obj, exc := receiver(fbr)
 			if exc != nil {
 				return obj, exc
@@ -301,7 +301,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 		keyCompiled := vm.compile(sub.Key)
 		valCompiled := vm.compile(node.Value)
 
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			target, err := targetCompiled(fbr)
 			if err != nil {
 				return target, err
@@ -352,7 +352,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 			}
 
 			// 3. Struct instance field assignment: structInst[key] = newVal
-			if si, ok := target.AsUserStructInstance(); ok {
+			if si, ok := target.asStructInstance(); ok {
 				keyStr, ok := keyVal.AsString()
 				if !ok {
 					return Value{}, errorAt(site, "struct field key must be a string, got '%s'", keyVal.TypeOf())
@@ -381,10 +381,10 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 			if lhs.index == 0 && !lhs.isCaptured && vm.cp.closures.Len() > 0 && vm.cp.closures.Last(0).ustruct != nil {
 				ustruct := vm.cp.closures.Last(0).ustruct
 				if slot, ok := ustruct.FieldOffsets[index]; ok {
-					return func(fbr *Fiber) (Value, Exception) {
+					return func(fbr *fiber) (Value, exception) {
 						thisVal := fbr.stack[fbr.base]
 						if thisVal.scalar == kindStructInstance && !isKnown(thisVal.pointer) {
-							usi := (*UserStructInstance)(thisVal.pointer)
+							usi := (*structInstance)(thisVal.pointer)
 							if usi.InstanceOf == ustruct && slot < len(usi.Fields) {
 								val := usi.Fields[slot]
 								return val, nil
@@ -401,12 +401,12 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 				}
 			}
 
-			var cachedStruct *UserStruct
+			var cachedStruct *userStruct
 			var cachedSlot int = -1
-			return func(fbr *Fiber) (Value, Exception) {
+			return func(fbr *fiber) (Value, exception) {
 				v := fbr.get(lhs)
 				if v.scalar == kindStructInstance && !isKnown(v.pointer) {
-					usi := (*UserStructInstance)(v.pointer)
+					usi := (*structInstance)(v.pointer)
 					if usi.InstanceOf == cachedStruct && cachedSlot >= 0 && cachedSlot < len(usi.Fields) {
 						val := usi.Fields[cachedSlot]
 						return val, nil
@@ -430,21 +430,21 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 			if pkg, ok := lhs.AsPackage(); ok {
 				if global, exists := pkg.globals[key.id]; exists && global.IsPublic {
 					cell := global.Value
-					return func(fbr *Fiber) (Value, Exception) {
+					return func(fbr *fiber) (Value, exception) {
 						return *cell, nil
 					}
 				}
 			}
 			if field, exists := lhs.getField(key); exists {
-				return func(fbr *Fiber) (Value, Exception) {
+				return func(fbr *fiber) (Value, exception) {
 					return field, nil
 				}
 			}
 			panic(vm.memberCompileError(node, node.Rhs, lhs))
 
-		case Global:
+		case pkgGlobal:
 			// global non-static binding
-			return func(fbr *Fiber) (Value, Exception) {
+			return func(fbr *fiber) (Value, exception) {
 				if field, exists := lhs.getField(key); exists {
 					return field, nil
 				}
@@ -455,16 +455,16 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 
 	// generic compilation
 	lhs := vm.compile(node.Lhs)
-	var cachedStruct *UserStruct
+	var cachedStruct *userStruct
 	var cachedSlot int = -1
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		lhs, exc := lhs(fbr)
 		if exc != nil {
 			return lhs, exc
 		}
 
 		if lhs.scalar == kindStructInstance && !isKnown(lhs.pointer) {
-			usi := (*UserStructInstance)(lhs.pointer)
+			usi := (*structInstance)(lhs.pointer)
 			if usi.InstanceOf == cachedStruct && cachedSlot >= 0 && cachedSlot < len(usi.Fields) {
 				val := usi.Fields[cachedSlot]
 				return val, nil
@@ -490,7 +490,7 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 	lhs := vm.compile(node.Lhs)
 	key := vm.compile(node.Key)
 
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		target, err := lhs(fbr)
 		if err != nil {
 			return target, err
@@ -538,7 +538,7 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 		}
 
 		// 3. Struct instance field access: structInstance["field"]
-		if si, ok := target.AsUserStructInstance(); ok {
+		if si, ok := target.asStructInstance(); ok {
 			keyStr, ok := indexVal.AsString()
 			if !ok {
 				return Value{}, errorAt(site, "struct field key must be a string, got '%s'", indexVal.TypeOf())
@@ -607,7 +607,7 @@ func (vm *Instance) emitArrayLiteral(node ast.ArrayLiteral) instruction {
 		elements[i] = vm.compile(el)
 	}
 
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		values := make([]Value, len(elements))
 		for i, el := range elements {
 			v, err := el(fbr)
@@ -632,7 +632,7 @@ func (vm *Instance) emitObject(node ast.Object) instruction {
 		items[i] = objectField{key: f.Key, value: vm.compile(f.Value)}
 	}
 
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		obj := make(map[string]Value, len(items))
 		for _, item := range items {
 			value, err := item.value(fbr)
@@ -651,7 +651,7 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 		value := vm.compile(fa.Lhs)
 		index := fields.Get(fa.Rhs)
 
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			lhs, err := value(fbr)
 			if err != nil {
 				return lhs, err
@@ -662,7 +662,7 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 				return BoxBool(exists), nil
 			}
 
-			if obj, ok := lhs.AsUserStructInstance(); ok {
+			if obj, ok := lhs.asStructInstance(); ok {
 				return BoxBool(obj.HasField(index)), nil
 			}
 
@@ -674,7 +674,7 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 	if sc, isSubscript := node.Value.(ast.Subscript); isSubscript {
 		target := vm.compile(sc.Lhs)
 		key := vm.compile(sc.Key)
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			lhs, err := target(fbr)
 			if err != nil {
 				return lhs, err
@@ -702,7 +702,7 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 				}
 				return BoxBool(false), nil
 			}
-			if si, ok := lhs.AsUserStructInstance(); ok {
+			if si, ok := lhs.asStructInstance(); ok {
 				if keyStr, ok := k.AsString(); ok {
 					return BoxBool(si.hasFieldByName(keyStr)), nil
 				}
@@ -716,7 +716,7 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 }
 
 // compoundOperator returns the arithmetic behind a compound assignment like `+=`
-func (vm *Instance) compoundOperator(node ast.MutableBinOp) func(fbr *Fiber, current, rhs Value) (Value, Exception) {
+func (vm *Instance) compoundOperator(node ast.MutableBinOp) func(fbr *fiber, current, rhs Value) (Value, exception) {
 	site := vm.at(node)
 	var apply func(Value, Value) (Value, bool)
 	switch node.Operator {
@@ -735,7 +735,7 @@ func (vm *Instance) compoundOperator(node ast.MutableBinOp) func(fbr *Fiber, cur
 	}
 
 	symbol := node.Operator.String()
-	return func(fbr *Fiber, current, rhs Value) (Value, Exception) {
+	return func(fbr *fiber, current, rhs Value) (Value, exception) {
 		if result, ok := apply(current, rhs); ok {
 			return result, nil
 		}
@@ -751,7 +751,7 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 	apply := vm.compoundOperator(node)
 	index := fields.Get(fa.Rhs)
 
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		obj, exc := target(fbr)
 		if exc != nil {
 			return obj, exc
@@ -762,8 +762,8 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 			return value, exc
 		}
 
-		if usi, ok := obj.AsUserStructInstance(); ok {
-			exists, exc := usi.UpdateField(index, func(current Value) (Value, Exception) {
+		if usi, ok := obj.asStructInstance(); ok {
+			exists, exc := usi.UpdateField(index, func(current Value) (Value, exception) {
 				return apply(fbr, current, value)
 			})
 			if !exists {
@@ -813,7 +813,7 @@ func (vm *Instance) emitCompoundSubscriptAssign(node ast.MutableBinOp, sub ast.S
 	rhs := vm.compile(node.Rhs)
 	apply := vm.compoundOperator(node)
 
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		obj, exc := target(fbr)
 		if exc != nil {
 			return obj, exc
@@ -872,11 +872,11 @@ func (vm *Instance) emitCompoundSubscriptAssign(node ast.MutableBinOp, sub ast.S
 			return Value{}, nil
 		}
 
-		if usi, ok := obj.AsUserStructInstance(); ok {
+		if usi, ok := obj.asStructInstance(); ok {
 			if !isString {
 				return Value{}, errorAt(site, "struct field key must be a string, got '%s'", keyVal.TypeOf())
 			}
-			exists, exc := usi.updateFieldByName(keyStr, func(current Value) (Value, Exception) {
+			exists, exc := usi.updateFieldByName(keyStr, func(current Value) (Value, exception) {
 				return apply(fbr, current, value)
 			})
 			if !exists {

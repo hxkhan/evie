@@ -8,7 +8,7 @@ import (
 
 // compileFunction compiles a function body in a scope of its own and fills in
 // the static information the frame protocol needs
-func (vm *Instance) compileFunction(info *funcInfoStatic, params []string, body ast.Node, ustruct *UserStruct) *closure {
+func (vm *Instance) compileFunction(info *funcInfoStatic, params []string, body ast.Node, ustruct *userStruct) *closure {
 	vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: info, ustruct: ustruct})
 	scope := &vm.cp.closures.Last(0).scope
 	scope.OpenBlock()
@@ -55,7 +55,7 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 
 	// create the function & return it
 	if node.UsedAsExpr {
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			captured := make([]*Value, len(captures))
 			for i, ref := range captures {
 				if ref.isLocal {
@@ -64,7 +64,7 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 					captured[i] = fbr.getCapturedByRef(ref.index)
 				}
 			}
-			return BoxUserFn(UserFn{funcInfoStatic: info, references: captured}), nil
+			return boxUserFn(userFn{funcInfoStatic: info, references: captured}), nil
 		}
 	}
 
@@ -78,7 +78,7 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 	}
 
 	// create the function & declare it
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		captured := make([]*Value, len(captures))
 		for i, ref := range captures {
 			if ref.isLocal {
@@ -87,12 +87,12 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 				captured[i] = fbr.getCapturedByRef(ref.index)
 			}
 		}
-		fbr.setLocal(index, BoxUserFn(UserFn{funcInfoStatic: info, references: captured}))
+		fbr.setLocal(index, boxUserFn(userFn{funcInfoStatic: info, references: captured}))
 		return Value{}, nil
 	}
 }
 
-func (vm *Instance) compileStructMethod(ustruct *UserStruct, node ast.Fn) *UserFn {
+func (vm *Instance) compileStructMethod(ustruct *userStruct, node ast.Fn) *userFn {
 	methodArgs := make([]string, 1+len(node.Args))
 	methodArgs[0] = "this"
 	copy(methodArgs[1:], node.Args)
@@ -101,12 +101,12 @@ func (vm *Instance) compileStructMethod(ustruct *UserStruct, node ast.Fn) *UserF
 	info.def = vm.at(node)
 	vm.compileFunction(info, methodArgs, node.Action, ustruct)
 
-	return &UserFn{funcInfoStatic: info}
+	return &userFn{funcInfoStatic: info}
 }
 
 // arity panics with a compile error when a static call site passes the wrong
 // number of arguments; def, when known, points at the declaration
-func (vm *Instance) arity(exc Exception, node ast.Call, def site) {
+func (vm *Instance) arity(exc exception, node ast.Call, def site) {
 	if exc == nil {
 		return
 	}
@@ -128,13 +128,13 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 	// optimise: the target is known at compile time
 	if value, ok := vm.evaluate(node.Fn).(Value); ok {
-		if fn, isUserFn := value.AsUserFn(); isUserFn {
+		if fn, isUserFn := value.asUserFn(); isUserFn {
 			vm.arity(fn.accepts(len(arguments)), node, fn.def)
 
 			// optimise: a call to the function being compiled runs on the same active
 			// function, so the frame only needs a new base
 			if !fn.isVariadic && vm.cp.closures.Len() > 0 && fn.funcInfoStatic == vm.cp.closures.Last(0).info {
-				return func(fbr *Fiber) (result Value, exc Exception) {
+				return func(fbr *fiber) (result Value, exc exception) {
 					base := len(fbr.stack)
 					for _, escapes := range fn.locals {
 						if !escapes {
@@ -177,7 +177,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			if !fn.isVariadic {
 				// the hot path: a static call with a fixed argument count,
 				// written out in full so nothing stands between the arguments and the body
-				return func(fbr *Fiber) (result Value, exc Exception) {
+				return func(fbr *fiber) (result Value, exc exception) {
 					base := len(fbr.stack)
 					for _, escapes := range fn.locals {
 						if !escapes {
@@ -217,36 +217,36 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				}
 			}
 
-			return func(fbr *Fiber) (Value, Exception) {
+			return func(fbr *fiber) (Value, exception) {
 				return fn.invoke(fbr, site, arguments)
 			}
 		}
 
 		if fn, isGoFunc := value.AsGoFunc(); isGoFunc {
 			vm.arity(fn.accepts(len(arguments)), node, unknownSite)
-			return func(fbr *Fiber) (Value, Exception) {
+			return func(fbr *fiber) (Value, exception) {
 				return fn.invoke(fbr, site, arguments)
 			}
 		}
 
 		if m, isMethod := value.asMethod(); isMethod {
-			return func(fbr *Fiber) (Value, Exception) {
+			return func(fbr *fiber) (Value, exception) {
 				return m.call(fbr, site, arguments)
 			}
 		}
 
-		if us, isUserStruct := value.AsUserStruct(); isUserStruct {
+		if us, isUserStruct := value.asUserStruct(); isUserStruct {
 			if len(us.Fields) != len(arguments) {
-				vm.arity(CustomError("struct '%v' takes %v argument(s) but %v were supplied", us.Name, len(us.Fields), len(arguments)), node, us.def)
+				vm.arity(customError("struct '%v' takes %v argument(s) but %v were supplied", us.Name, len(us.Fields), len(arguments)), node, us.def)
 			}
-			return func(fbr *Fiber) (Value, Exception) {
+			return func(fbr *fiber) (Value, exception) {
 				return us.construct(fbr, site, arguments)
 			}
 		}
 
-		if bt, isBuiltinType := value.AsBuiltinType(); isBuiltinType {
+		if bt, isBuiltinType := value.asBuiltinType(); isBuiltinType {
 			vm.arity(bt.Constructor.accepts(len(arguments)), node, unknownSite)
-			return func(fbr *Fiber) (Value, Exception) {
+			return func(fbr *fiber) (Value, exception) {
 				return bt.Constructor.invoke(fbr, site, arguments)
 			}
 		}
@@ -264,12 +264,12 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 	// generic compilation: the target is a runtime value, most often a function
 	value := vm.compile(node.Fn)
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		value, exc := value(fbr)
 		if exc != nil {
 			return value, exc
 		}
-		fn, isUserFn := value.AsUserFn()
+		fn, isUserFn := value.asUserFn()
 		if !isUserFn {
 			return callValue(fbr, site, value, arguments)
 		}
@@ -330,8 +330,8 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 }
 
 // callValue calls whatever a runtime value turns out to be with the given arguments
-func callValue(fbr *Fiber, site site, value Value, arguments []instruction) (Value, Exception) {
-	if fn, isUserFn := value.AsUserFn(); isUserFn {
+func callValue(fbr *fiber, site site, value Value, arguments []instruction) (Value, exception) {
+	if fn, isUserFn := value.asUserFn(); isUserFn {
 		if exc := fn.accepts(len(arguments)); exc != nil {
 			return Value{}, exc.at(site)
 		}
@@ -343,10 +343,10 @@ func callValue(fbr *Fiber, site site, value Value, arguments []instruction) (Val
 	if m, isMethod := value.asMethod(); isMethod {
 		return m.call(fbr, site, arguments)
 	}
-	if us, isUserStruct := value.AsUserStruct(); isUserStruct {
+	if us, isUserStruct := value.asUserStruct(); isUserStruct {
 		return us.construct(fbr, site, arguments)
 	}
-	if bt, isBuiltinType := value.AsBuiltinType(); isBuiltinType {
+	if bt, isBuiltinType := value.asBuiltinType(); isBuiltinType {
 		return bt.Constructor.call(fbr, site, arguments)
 	}
 	return Value{}, errorAt(site, "cannot call %s", article(value)).labelled("this is " + article(value))
@@ -359,8 +359,8 @@ type memberSite struct {
 	key          fieldKey
 	name         string
 	site         site
-	cachedStruct *UserStruct
-	cachedMethod *UserFn
+	cachedStruct *userStruct
+	cachedMethod *userFn
 }
 
 func (vm *Instance) newMemberSite(iFA ast.FieldAccess) *memberSite {
@@ -370,8 +370,8 @@ func (vm *Instance) newMemberSite(iFA ast.FieldAccess) *memberSite {
 // call calls the member on obj. A struct method is placed directly into the
 // callee's frame with no bound method or argument slice; the arguments are
 // evaluated by the callee, after the receiver.
-func (m *memberSite) call(fbr *Fiber, obj Value, arguments []instruction) (Value, Exception) {
-	if usi, ok := obj.AsUserStructInstance(); ok {
+func (m *memberSite) call(fbr *fiber, obj Value, arguments []instruction) (Value, exception) {
+	if usi, ok := obj.asStructInstance(); ok {
 		// a field holding a callable wins over a method of the same name
 		if slot, ok := usi.InstanceOf.slot(m.key.id); ok {
 			return callValue(fbr, m.site, usi.Fields[slot], arguments)
@@ -408,13 +408,13 @@ func (m *memberSite) call(fbr *Fiber, obj Value, arguments []instruction) (Value
 	if member.IsNil() {
 		return Value{}, memberError(m.site, m.name, obj)
 	}
-	return BoundMethod{this: obj, fn: member}.call(fbr, m.site, arguments)
+	return boundMethod{this: obj, fn: member}.call(fbr, m.site, arguments)
 }
 
 // emitMemberCall compiles `local.name(args)`
 func (vm *Instance) emitMemberCall(iFA ast.FieldAccess, lhs local, arguments []instruction) instruction {
 	m := vm.newMemberSite(iFA)
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		return m.call(fbr, *fbr.get(lhs), arguments)
 	}
 }
@@ -423,7 +423,7 @@ func (vm *Instance) emitMemberCall(iFA ast.FieldAccess, lhs local, arguments []i
 // evaluated, such as `this.items[i].update()` or `make().run()`
 func (vm *Instance) emitMemberCallOn(iFA ast.FieldAccess, receiver instruction, arguments []instruction) instruction {
 	m := vm.newMemberSite(iFA)
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		obj, exc := receiver(fbr)
 		if exc != nil {
 			return obj, exc

@@ -151,7 +151,7 @@ func (st *stops) loadingUnder(s *stopper) (restore func()) {
 
 // attach makes s the stopper of a fiber that is about to run
 func (fbr *fiber) attach(s *stopper) {
-	fbr.seen = fbr.vm.rt.signal.Load()
+	fbr.seen = fbr.signal.Load()
 	fbr.stop = s
 	if s.done() {
 		// the signal may have changed before it was read; look at the first chance
@@ -170,14 +170,14 @@ func (fbr *fiber) detach() {
 // signaled is the test every loop iteration and call makes: whether any code
 // of the instance was asked to stop since this fiber last looked
 func (fbr *fiber) signaled() bool {
-	return fbr.vm.rt.signal.Load() != fbr.seen
+	return fbr.signal.Load() != fbr.seen
 }
 
 // stopped tells, after the signal changed, whether this fiber has to stop. It
 // keeps saying so on every later look, so a native that swallows the error
 // does not let the script carry on.
 func (fbr *fiber) stopped() exception {
-	signal := fbr.vm.rt.signal.Load()
+	signal := fbr.signal.Load()
 	if fbr.stop.done() {
 		return fbr.stop.failure()
 	}

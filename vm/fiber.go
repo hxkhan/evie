@@ -1,25 +1,28 @@
 package vm
 
+import "sync/atomic"
+
 // fiber is one thread of execution inside an Instance. At most one fiber of an
 // instance runs evie code at a time; the one that does is the instance's running fiber.
 type fiber struct {
-	vm      *Instance // the instance that owns this fiber
-	running bool      // this fiber currently holds the instance runner
-	active  *userFn   // currently active user function
-	stack   []*Value  // flat shared stack for local variables in the current call stack
-	base    int       // where locals of the active function start at
-	boxes   []Value   // current chunk of pooled boxes: boxes[:len] are free, boxes[len:cap] are in use
-	spent   [][]Value // chunks whose boxes are all in use, oldest first
-	spare   [][]Value // chunks whose boxes are all free, kept for reuse
-	stop    *stopper  // says when this fiber has to stop
-	seen    uint32    // the instance's stop signal when this fiber last looked
+	vm      *Instance      // the instance that owns this fiber
+	running bool           // this fiber currently holds the instance runner
+	active  *userFn        // currently active user function
+	stack   []*Value       // flat shared stack for local variables in the current call stack
+	base    int            // where locals of the active function start at
+	boxes   []Value        // current chunk of pooled boxes: boxes[:len] are free, boxes[len:cap] are in use
+	spent   [][]Value      // chunks whose boxes are all in use, oldest first
+	spare   [][]Value      // chunks whose boxes are all free, kept for reuse
+	stop    *stopper       // says when this fiber has to stop
+	signal  *atomic.Uint32 // the instance's stop signal, held here to save a load on every check
+	seen    uint32         // the signal when this fiber last looked
 }
 
 // boxChunk is the number of boxes allocated at once for a fiber's pool
 const boxChunk = 256
 
 func newFiber(vm *Instance) *fiber {
-	return &fiber{vm: vm, boxes: make([]Value, boxChunk)}
+	return &fiber{vm: vm, signal: &vm.rt.signal, boxes: make([]Value, boxChunk)}
 }
 
 // lock makes this fiber the instance's running fiber. It reports whether the

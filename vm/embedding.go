@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -43,20 +44,44 @@ func (vm *Instance) SetStatic(name string, val Value) {
 // with BoxAny and calls it on a borrowed fiber. It is the simplest way to call
 // into a script from Go.
 func (vm *Instance) Call(path string, args ...any) (Value, error) {
+	fn, boxed, err := vm.callable(path, args)
+	if err != nil {
+		return Value{}, err
+	}
+	return plain(fn.callGuarded(nil, boxed...))
+}
+
+// CallContext is Call bound to ctx: when ctx is done, the call stops with an
+// error whose cause is ctx's cause, such as context.DeadlineExceeded. Tasks
+// the call starts stop with it, also after it returns.
+func (vm *Instance) CallContext(ctx context.Context, path string, args ...any) (Value, error) {
+	fn, boxed, err := vm.callable(path, args)
+	if err != nil {
+		return Value{}, err
+	}
+	s := vm.rt.scope(ctx)
+	defer s.drop()
+	fbr := vm.borrowFiber(s)
+	defer vm.releaseFiber(fbr)
+	return plain(fn.callGuarded(fbr, boxed...))
+}
+
+// callable looks up a callable by path and boxes the arguments for it
+func (vm *Instance) callable(path string, args []any) (Value, []Value, error) {
 	fn, ok := vm.Lookup(path)
 	if !ok {
-		return Value{}, fmt.Errorf("symbol '%s' not found", path)
+		return Value{}, nil, fmt.Errorf("symbol '%s' not found", path)
 	}
 	if !fn.IsCallable() {
-		return Value{}, fmt.Errorf("symbol '%s' is a %s, not a callable", path, fn.TypeOf())
+		return Value{}, nil, fmt.Errorf("symbol '%s' is a %s, not a callable", path, fn.TypeOf())
 	}
 	boxed := make([]Value, len(args))
 	for i, arg := range args {
 		v, err := BoxAny(arg)
 		if err != nil {
-			return Value{}, fmt.Errorf("argument %d: %w", i+1, err)
+			return Value{}, nil, fmt.Errorf("argument %d: %w", i+1, err)
 		}
 		boxed[i] = v
 	}
-	return plain(fn.callGuarded(nil, boxed...))
+	return fn, boxed, nil
 }

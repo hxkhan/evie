@@ -14,11 +14,12 @@ const (
 
 // Task represents an asynchronous unit of execution with memoized state.
 type Task struct {
-	mu     sync.RWMutex
+	mu     sync.Mutex
 	done   chan struct{}
 	status taskStatus
 	result Value
 	err    exception
+	stop   *stopper // the run the task belongs to; nil for host tasks
 }
 
 // newTaskInstance creates a new pending Task.
@@ -67,33 +68,56 @@ func (t *Task) Done() <-chan struct{} {
 
 // isDone returns true if the task has settled (resolved or rejected).
 func (t *Task) isDone() bool {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	return t.status != taskPending
 }
 
 // outcome returns the result and error without blocking.
 func (t *Task) outcome() (Value, exception) {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	return t.result, t.err
 }
 
 // await waits for the task to settle and returns its result or exception.
 // A running fiber gives up the instance runner while it waits so that other
 // fibers of the instance can make progress. Safe to call multiple times.
+//
+// The wait ends early when the fiber has to stop. A task that was itself
+// stopped fails with the stop's error, which only the run that was stopped
+// cannot catch.
 func (t *Task) await(fbr *fiber) (Value, exception) {
-	if fbr != nil && fbr.running {
-		fbr.unlock()
+	if fbr == nil {
 		<-t.done
-		fbr.lock()
-	} else {
-		<-t.done
+		return t.outcome()
 	}
 
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.result, t.err
+	select {
+	case <-t.done:
+	default:
+		if fbr.running {
+			fbr.unlock()
+			defer fbr.lock()
+		}
+		if t.stop == fbr.stop {
+			// the task stops when this fiber has to, and then it settles
+			<-t.done
+			break
+		}
+		select {
+		case <-t.done:
+		case <-fbr.stop.ctx.Done():
+			return Value{}, fbr.stop.failure()
+		}
+	}
+
+	res, err := t.outcome()
+	if err != nil && err.fatal && !fbr.stop.done() {
+		// another run was stopped; for this one it is an ordinary failure
+		err = &Error{Report: err.Report, Code: err.Code, Cause: err.Cause}
+	}
+	return res, err
 }
 
 // Result returns what the task finished with, or an error that it failed with.

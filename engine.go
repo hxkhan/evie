@@ -1,6 +1,7 @@
 package evie
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -47,6 +48,12 @@ func (e *Engine) LoadedFiles() []string {
 // as that package and nil is returned; a bare script returns its result.
 func (e *Engine) Eval(script string) (vm.Value, error) {
 	return e.EvalSource(diag.NewSource("", []byte(script)))
+}
+
+// EvalContext is Eval bound to ctx: when ctx is done, the script stops with an
+// error whose cause is ctx's cause, such as context.DeadlineExceeded
+func (e *Engine) EvalContext(ctx context.Context, script string) (vm.Value, error) {
+	return e.EvalSourceContext(ctx, diag.NewSource("", []byte(script)))
 }
 
 // Load compiles a source that declares a package and returns the package;
@@ -207,7 +214,8 @@ func packageName(src *diag.Source) (string, error) {
 	return "", nil
 }
 
-// evalPackage compiles sources as one package and records them as loaded
+// evalPackage compiles sources as one package and records them as loaded. A
+// package imported while another loads stops with the importer's context.
 func (e *Engine) evalPackage(paths []string, sources []*diag.Source) (*vm.Package, error) {
 	pkg, err := e.EvalPackage(sources...)
 	if err != nil {
@@ -215,6 +223,15 @@ func (e *Engine) evalPackage(paths []string, sources []*diag.Source) (*vm.Packag
 	}
 	e.loadedFiles = append(e.loadedFiles, paths...)
 	return pkg, nil
+}
+
+// evalMain is evalPackage for the program's main package, bound to ctx
+func (e *Engine) evalMain(ctx context.Context, paths []string, sources []*diag.Source) error {
+	if _, err := e.EvalPackageContext(ctx, sources...); err != nil {
+		return err
+	}
+	e.loadedFiles = append(e.loadedFiles, paths...)
+	return nil
 }
 
 func (e *Engine) loadFilePackage(filePath string) (*vm.Package, error) {
@@ -310,6 +327,13 @@ func evFiles(dir string) ([]string, error) {
 // runs main.main when the program defines it. Only that file is loaded; use
 // RunProject for a main package spread over several files.
 func (e *Engine) RunFile(filePath string) (vm.Value, error) {
+	return e.RunFileContext(context.Background(), filePath)
+}
+
+// RunFileContext is RunFile bound to ctx: when ctx is done, the program stops
+// with an error whose cause is ctx's cause, such as context.DeadlineExceeded.
+// That covers loading its packages, main.main and the tasks they start.
+func (e *Engine) RunFileContext(ctx context.Context, filePath string) (vm.Value, error) {
 	if e.ran {
 		return vm.Value{}, errRanAlready
 	}
@@ -335,7 +359,7 @@ func (e *Engine) RunFile(filePath string) (vm.Value, error) {
 	}
 	if name == "" {
 		// a bare script runs as it is and its value is the result
-		result, err := e.EvalSource(src)
+		result, err := e.EvalSourceContext(ctx, src)
 		if err != nil {
 			return vm.Value{}, err
 		}
@@ -343,16 +367,21 @@ func (e *Engine) RunFile(filePath string) (vm.Value, error) {
 		return result, nil
 	}
 
-	if _, err := e.evalPackage([]string{absPath}, []*diag.Source{src}); err != nil {
+	if err := e.evalMain(ctx, []string{absPath}, []*diag.Source{src}); err != nil {
 		return vm.Value{}, err
 	}
-	return e.runMain()
+	return e.runMain(ctx)
 }
 
 // RunProject runs the program in a directory. Every file at its top level that
 // declares package main is part of the main package; the other files and the
 // subfolders are packages the program imports by path.
 func (e *Engine) RunProject(dirPath string) (vm.Value, error) {
+	return e.RunProjectContext(context.Background(), dirPath)
+}
+
+// RunProjectContext is RunProject bound to ctx, the way RunFileContext is
+func (e *Engine) RunProjectContext(ctx context.Context, dirPath string) (vm.Value, error) {
 	if e.ran {
 		return vm.Value{}, errRanAlready
 	}
@@ -389,19 +418,19 @@ func (e *Engine) RunProject(dirPath string) (vm.Value, error) {
 		return vm.Value{}, fmt.Errorf("no file in %s declares package main", display(absDir))
 	}
 
-	if _, err := e.evalPackage(paths, sources); err != nil {
+	if err := e.evalMain(ctx, paths, sources); err != nil {
 		return vm.Value{}, err
 	}
-	return e.runMain()
+	return e.runMain(ctx)
 }
 
 // runMain calls main.main when the program defines it and waits for its tasks
-func (e *Engine) runMain() (vm.Value, error) {
+func (e *Engine) runMain(ctx context.Context) (vm.Value, error) {
 	mainFn, ok := e.Lookup("main.main")
 	if !ok || !mainFn.IsCallable() {
 		return vm.Value{}, nil
 	}
-	res, err := mainFn.Call()
+	res, err := e.CallContext(ctx, "main.main")
 	e.Close()
 	return res, err
 }

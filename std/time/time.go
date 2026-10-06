@@ -3,6 +3,7 @@
 package time
 
 import (
+	"context"
 	"time"
 
 	"github.com/hxkhan/evie/vm"
@@ -13,9 +14,21 @@ func Construct() *vm.Package {
 	pkg := vm.NewPackage("time")
 	start := time.Now()
 
-	wait := pkg.Native("wait", vm.Func1(func(ms float64) vm.Value {
-		time.Sleep(time.Duration(ms * float64(time.Millisecond)))
-		return vm.Value{}
+	// wait sleeps without holding up the other tasks, and wakes early when the
+	// script is stopped
+	wait := pkg.Native("wait", vm.NewFunc("wait", 1, func(c vm.Call) (vm.Value, error) {
+		ms, err := c.Number(0)
+		if err != nil {
+			return vm.Value{}, err
+		}
+		timer := time.NewTimer(time.Duration(ms * float64(time.Millisecond)))
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			return vm.Value{}, nil
+		case <-c.Context().Done():
+			return vm.Value{}, context.Cause(c.Context())
+		}
 	}))
 	wait.Blocking = true
 	pkg.Set("timer", vm.BoxGoFunc(wait))

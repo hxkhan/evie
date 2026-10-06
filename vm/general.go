@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"iter"
@@ -49,6 +50,7 @@ type runtime struct {
 	fibers   sync.Pool           // pooled fibers for this vm
 	runner   sync.Mutex          // held by the fiber that is executing evie code
 	wg       sync.WaitGroup      // wait for all fibers to complete
+	stops                        // when running code has to stop
 }
 
 // pkgGlobal is a package-level binding
@@ -99,28 +101,45 @@ func New(opts Options) (vm *Instance) {
 			return newFiber(vm)
 		},
 	}
+	vm.rt.stops.init()
 
 	return vm
 }
 
-// newFiber hands out a fiber for calling into the instance from Go. Give it
-// back with ReleaseFiber once the calls are done, or pass nil to Call and let
-// the instance borrow one itself.
+// newFiber hands out a fiber for a call from the host without a context;
+// Interrupt stops it. Give it back with releaseFiber.
 func (vm *Instance) newFiber() (fbr *fiber) {
+	return vm.borrowFiber(vm.rt.current.Load())
+}
+
+// borrowFiber hands out a fiber that runs under the stopper s
+func (vm *Instance) borrowFiber(s *stopper) (fbr *fiber) {
+	s.hold()
+	return vm.takeFiber(s)
+}
+
+// takeFiber is borrowFiber for a caller that already holds a use of s for
+// the fiber, as a parent does for the task it spawns
+func (vm *Instance) takeFiber(s *stopper) (fbr *fiber) {
 	fbr = vm.rt.fibers.Get().(*fiber)
 	fbr.reset()
+	fbr.attach(s)
 	return fbr
 }
 
-// releaseFiber returns a fiber obtained from NewFiber to the pool
+// releaseFiber returns a borrowed fiber to the pool
 func (vm *Instance) releaseFiber(fbr *fiber) {
 	fbr.reset()
+	fbr.detach()
 	vm.rt.fibers.Put(fbr)
 }
 
-func (vm *Instance) evalNode(node ast.Node) (result Value, err error) {
+// evalNode runs a parsed source under the runner. Code it runs stops with s,
+// or with the stopper of the load in progress when s is nil.
+func (vm *Instance) evalNode(node ast.Node, s *stopper) (result Value, err error) {
 	vm.rt.acquire()
 	defer vm.rt.release()
+	defer vm.rt.loadingUnder(s)()
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -147,7 +166,7 @@ func (vm *Instance) evalNode(node ast.Node) (result Value, err error) {
 		}
 		result = v
 	} else {
-		fbr := vm.newFiber()
+		fbr := vm.borrowFiber(vm.rt.forLoading())
 		defer vm.releaseFiber(fbr)
 		fbr.running = true // the runner is held above
 		fbr.active = &userFn{funcInfoStatic: &funcInfoStatic{name: "anonymous"}}
@@ -183,6 +202,19 @@ func (vm *Instance) evalNode(node ast.Node) (result Value, err error) {
 
 // EvalSource parses and evaluates a named source; errors show its text
 func (vm *Instance) EvalSource(src *diag.Source) (Value, error) {
+	return vm.evalSource(src, nil)
+}
+
+// EvalSourceContext is EvalSource bound to ctx: when ctx is done, the code
+// stops with an error whose cause is ctx's cause. Packages the source imports
+// while it loads stop with it.
+func (vm *Instance) EvalSourceContext(ctx context.Context, src *diag.Source) (Value, error) {
+	s := vm.rt.scope(ctx)
+	defer s.drop()
+	return vm.evalSource(src, s)
+}
+
+func (vm *Instance) evalSource(src *diag.Source, s *stopper) (Value, error) {
 	node, err := parser.ParseSource(src)
 	if err != nil {
 		return Value{}, err
@@ -191,13 +223,26 @@ func (vm *Instance) EvalSource(src *diag.Source) (Value, error) {
 	prev := vm.cp.src
 	vm.cp.src = src
 	defer func() { vm.cp.src = prev }()
-	return vm.evalNode(node)
+	return vm.evalNode(node, s)
 }
 
 // EvalPackage compiles one package from all of its source files and runs its
 // initializers. The files are compiled together, so any of them can use what
 // another declares; each must declare the same package.
 func (vm *Instance) EvalPackage(sources ...*diag.Source) (*Package, error) {
+	return vm.evalPackage(nil, sources)
+}
+
+// EvalPackageContext is EvalPackage bound to ctx: when ctx is done, the
+// initializers stop with an error whose cause is ctx's cause, and so do those
+// of the packages it imports.
+func (vm *Instance) EvalPackageContext(ctx context.Context, sources ...*diag.Source) (*Package, error) {
+	s := vm.rt.scope(ctx)
+	defer s.drop()
+	return vm.evalPackage(s, sources)
+}
+
+func (vm *Instance) evalPackage(s *stopper, sources []*diag.Source) (*Package, error) {
 	if len(sources) == 0 {
 		return nil, errors.New("EvalPackage needs at least one source")
 	}
@@ -213,16 +258,17 @@ func (vm *Instance) EvalPackage(sources ...*diag.Source) (*Package, error) {
 		}
 		units[i] = unit{src: src, node: pkg}
 	}
-	if err := vm.evalPackageUnits(units); err != nil {
+	if err := vm.evalPackageUnits(units, s); err != nil {
 		return nil, err
 	}
 	return vm.rt.packages[units[0].node.Name], nil
 }
 
 // evalPackageUnits runs runPackage under the runner, turning panics into errors
-func (vm *Instance) evalPackageUnits(units []unit) (err error) {
+func (vm *Instance) evalPackageUnits(units []unit, s *stopper) (err error) {
 	vm.rt.acquire()
 	defer vm.rt.release()
+	defer vm.rt.loadingUnder(s)()
 
 	defer func() {
 		if r := recover(); r != nil {

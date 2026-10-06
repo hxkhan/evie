@@ -68,6 +68,7 @@ Two tasks incrementing one global always end at the exact total, because fibers 
   - Automatic Go function reflection wrapping (`env.Set("fn", goFunc)`).
   - Bidirectional marshaling and unmarshaling into native Go structs (`val.Unmarshal(&struct)`).
   - One-line script execution (`evie.Eval(...)`).
+  - Stopping runaway scripts with `Interrupt()` or a context deadline, without the script being able to catch it.
 - **Pure Go (Zero CGO)**:
   - 100% Go codebase, fast builds, effortless cross-compilation, and zero external dependencies.
 
@@ -127,9 +128,21 @@ pkg.Func("wait", 1, func(c vm.Call) (vm.Value, error) {
     if err != nil {
         return vm.Value{}, err
     }
-    time.Sleep(time.Duration(ms) * time.Millisecond)
-    return vm.Value{}, nil
+    select {
+    case <-time.After(time.Duration(ms) * time.Millisecond):
+        return vm.Value{}, nil
+    case <-c.Context().Done(): // the script was stopped
+        return vm.Value{}, context.Cause(c.Context())
+    }
 }).Blocking = true // gives the instance to other fibers while it sleeps
+```
+
+Runaway scripts can be stopped from any goroutine with `eng.Interrupt()`, or bounded by a context:
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+defer cancel()
+_, err := eng.CallContext(ctx, "main.status", 42) // errors.Is(err, context.DeadlineExceeded) after 2s
 ```
 
 ---
@@ -153,6 +166,7 @@ pkg.Func("wait", 1, func(c vm.Call) (vm.Value, error) {
 - [x] Go Host Embedding (bidirectional marshaling, function reflection, struct unmarshaling)
 - [x] Standard library (`io`, `fs`, `math`, `strings`, `time`, `json`)
 - [x] Compiler-style diagnostics (source excerpts, spans, hints, did-you-mean, stack traces)
+- [x] Interrupts and deadlines for runaway scripts (`Interrupt`, `RunFileContext`, `CallContext`)
 - [ ] Package management ⏳
 
 ---

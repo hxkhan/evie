@@ -758,7 +758,7 @@ The pieces, from most to least convenient:
 | need | use |
 | :-- | :-- |
 | expose a Go function | `vm.Func0`..`Func3` and the `E` variants for `(R, error)`; `vm.Reflect` for any other signature |
-| full control of arguments and errors | `pkg.Func(name, arity, func(c vm.Call) (vm.Value, error))`; mark it `Blocking` if it sleeps or waits on I/O |
+| full control of arguments and errors | `pkg.Func(name, arity, func(c vm.Call) (vm.Value, error))`; mark it `Blocking` if it sleeps or waits on I/O, and watch `c.Context()` so it wakes when the script is stopped |
 | a group of functions scripts import by name | `vm.NewPackage("name")` passed in `evie.Options.Packages` |
 | symbols visible without an import | `eng.SetStatic` or `evie.Options.Prelude` |
 | lend a Go value to scripts as it is | `vm.NewHostType[T]("Name")` with `Method`, `Constructor`, `Wrap` |
@@ -768,6 +768,17 @@ The pieces, from most to least convenient:
 | read a result | `AsFloat64`, `AsString`, `AsArray`, `AsObject` and the other `As` methods, `Field(name)` on objects and struct instances, `ToGo`, `Unmarshal(&target)` |
 | behave like the language in a native | `a.Add(b)`, `a.LessThan(b)` and the other operators, `Equals`, `IsTruthy`; a type mismatch returns the script's error |
 | show an error | `evie.Format(err, colors)` renders it the way the `evie` command does |
+| stop a runaway script | `eng.Interrupt()` from any goroutine, or a context: `eng.RunFileContext`, `RunProjectContext`, `EvalContext`, `CallContext` |
+
+A stopped script fails at its next loop iteration or call, or as soon as it wakes from an `await`, `time.sleep` or a blocking native that watches `c.Context()`. The error says where it stopped, its cause is `vm.ErrInterrupted` or the context's cause, and `catch` lets it pass. A context stops only the run it was given and the tasks that run started; `Interrupt` stops everything the instance is running, and the instance stays usable afterwards.
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+defer cancel()
+if _, err := eng.RunFileContext(ctx, "main.ev"); errors.Is(err, context.DeadlineExceeded) {
+    fmt.Print(evie.Format(err, false)) // error: context deadline exceeded, at the loop it was in
+}
+```
 
 ---
 

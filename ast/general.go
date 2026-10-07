@@ -8,8 +8,9 @@ import (
 	"github.com/hxkhan/evie/token"
 )
 
+// Node is any piece of syntax; Where reports its span in the source
 type Node interface {
-	Line() int
+	Where() token.Pos
 }
 
 type Package struct {

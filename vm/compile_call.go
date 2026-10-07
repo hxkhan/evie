@@ -2,6 +2,7 @@ package vm
 
 import (
 	"github.com/hxkhan/evie/ast"
+	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/ds"
 )
 
@@ -47,6 +48,7 @@ func (vm *Instance) closeFunction(info *funcInfoStatic, closure *closure) {
 
 func (vm *Instance) emitFn(node ast.Fn) instruction {
 	info := vm.newFuncInfo(node.Name, node.Args, node.IsVariadic, false)
+	info.def = vm.at(node)
 	closure := vm.compileFunction(info, node.Args, node.Action, nil)
 
 	captures := closure.captures
@@ -67,12 +69,12 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 	}
 
 	if node.Name == "" {
-		panic(CompileErrorf("cannot declare an fn statement with no name"))
+		panic(vm.compileErrorAt(node, "cannot declare an fn statement with no name"))
 	}
 
 	index, ok := vm.cp.closures.Last(0).scope.Declare(node.Name, true)
 	if !ok {
-		panic(CompileErrorf("double declaration of %s", node.Name))
+		panic(vm.compileErrorAt(node, "double declaration of %s", node.Name))
 	}
 
 	// create the function & declare it
@@ -96,19 +98,28 @@ func (vm *Instance) compileStructMethod(ustruct *UserStruct, node ast.Fn) *UserF
 	copy(methodArgs[1:], node.Args)
 
 	info := vm.newFuncInfo(node.Name, methodArgs, node.IsVariadic, true)
+	info.def = vm.at(node)
 	vm.compileFunction(info, methodArgs, node.Action, ustruct)
 
 	return &UserFn{funcInfoStatic: info}
 }
 
-// arity panics with a compile error when a static call site passes the wrong number of arguments
-func arity(exc Exception, node ast.Call) {
-	if exc != nil {
-		panic(CompileErrorf("%s on line %v", exc.Message, node.Line()))
+// arity panics with a compile error when a static call site passes the wrong
+// number of arguments; def, when known, points at the declaration
+func (vm *Instance) arity(exc Exception, node ast.Call, def site) {
+	if exc == nil {
+		return
 	}
+	ce := vm.compileErrorAt(node, "%s", exc.Message)
+	ce.Label = plural(len(node.Args), "argument") + " passed here"
+	if def.known() {
+		ce.Notes = append(ce.Notes, diag.Note{Source: def.src, Pos: def.pos, Text: "declared here"})
+	}
+	panic(ce)
 }
 
 func (vm *Instance) emitCall(node ast.Call) instruction {
+	site := vm.at(node)
 	// compile arguments
 	arguments := make([]instruction, len(node.Args))
 	for i, arg := range node.Args {
@@ -118,7 +129,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 	// optimise: the target is known at compile time
 	if value, ok := vm.evaluate(node.Fn).(Value); ok {
 		if fn, isUserFn := value.AsUserFn(); isUserFn {
-			arity(fn.accepts(len(arguments)), node)
+			vm.arity(fn.accepts(len(arguments)), node, fn.def)
 
 			// optimise: a call to the function being compiled runs on the same active
 			// function, so the frame only needs a new base
@@ -158,7 +169,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					case signalReturn:
 						return result, nil
 					default:
-						return result, exc
+						return result, exc.unwind(site)
 					}
 				}
 			}
@@ -201,46 +212,46 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					case signalReturn:
 						return result, nil
 					default:
-						return result, exc
+						return result, exc.unwind(site)
 					}
 				}
 			}
 
 			return func(fbr *Fiber) (Value, Exception) {
-				return fn.invoke(fbr, arguments)
+				return fn.invoke(fbr, site, arguments)
 			}
 		}
 
 		if fn, isGoFunc := value.AsGoFunc(); isGoFunc {
-			arity(fn.accepts(len(arguments)), node)
+			vm.arity(fn.accepts(len(arguments)), node, unknownSite)
 			return func(fbr *Fiber) (Value, Exception) {
-				return fn.invoke(fbr, arguments)
+				return fn.invoke(fbr, site, arguments)
 			}
 		}
 
 		if m, isMethod := value.asMethod(); isMethod {
 			return func(fbr *Fiber) (Value, Exception) {
-				return m.call(fbr, arguments)
+				return m.call(fbr, site, arguments)
 			}
 		}
 
 		if us, isUserStruct := value.AsUserStruct(); isUserStruct {
 			if len(us.Fields) != len(arguments) {
-				panic(CompileErrorf("struct '%v' requires %v argument(s), %v provided on line %v", us.Name, len(us.Fields), len(arguments), node.Line()))
+				vm.arity(CustomError("struct '%v' takes %v argument(s) but %v were supplied", us.Name, len(us.Fields), len(arguments)), node, us.def)
 			}
 			return func(fbr *Fiber) (Value, Exception) {
-				return us.construct(fbr, arguments)
+				return us.construct(fbr, site, arguments)
 			}
 		}
 
 		if bt, isBuiltinType := value.AsBuiltinType(); isBuiltinType {
-			arity(bt.Constructor.accepts(len(arguments)), node)
+			vm.arity(bt.Constructor.accepts(len(arguments)), node, unknownSite)
 			return func(fbr *Fiber) (Value, Exception) {
-				return bt.Constructor.invoke(fbr, arguments)
+				return bt.Constructor.invoke(fbr, site, arguments)
 			}
 		}
 
-		panic(CompileErrorf("cannot call '%v' on line %v", node.Fn, node.Line()))
+		panic(vm.compileErrorAt(node, "cannot call '%v'", node.Fn))
 	}
 
 	// optimise: calling a member of a local, as in `obj.method(...)`
@@ -259,10 +270,10 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 		}
 		fn, isUserFn := value.AsUserFn()
 		if !isUserFn {
-			return callValue(fbr, value, arguments)
+			return callValue(fbr, site, value, arguments)
 		}
 		if exc := fn.accepts(len(arguments)); exc != nil {
-			return Value{}, exc
+			return Value{}, exc.at(site)
 		}
 
 		// the frame protocol again, spelled out: a call through a local or a
@@ -312,32 +323,32 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 		case signalReturn:
 			return result, nil
 		default:
-			return result, exc
+			return result, exc.unwind(site)
 		}
 	}
 }
 
 // callValue calls whatever a runtime value turns out to be with the given arguments
-func callValue(fbr *Fiber, value Value, arguments []instruction) (Value, Exception) {
+func callValue(fbr *Fiber, site site, value Value, arguments []instruction) (Value, Exception) {
 	if fn, isUserFn := value.AsUserFn(); isUserFn {
 		if exc := fn.accepts(len(arguments)); exc != nil {
-			return Value{}, exc
+			return Value{}, exc.at(site)
 		}
-		return fn.invoke(fbr, arguments)
+		return fn.invoke(fbr, site, arguments)
 	}
 	if fn, isGoFunc := value.AsGoFunc(); isGoFunc {
-		return fn.call(fbr, arguments)
+		return fn.call(fbr, site, arguments)
 	}
 	if m, isMethod := value.asMethod(); isMethod {
-		return m.call(fbr, arguments)
+		return m.call(fbr, site, arguments)
 	}
 	if us, isUserStruct := value.AsUserStruct(); isUserStruct {
-		return us.construct(fbr, arguments)
+		return us.construct(fbr, site, arguments)
 	}
 	if bt, isBuiltinType := value.AsBuiltinType(); isBuiltinType {
-		return bt.Constructor.call(fbr, arguments)
+		return bt.Constructor.call(fbr, site, arguments)
 	}
-	return Value{}, CustomError("cannot call a non-function '%v'", value)
+	return Value{}, errorAt(site, "cannot call %s", article(value)).labelled("this is " + article(value))
 }
 
 // emitMemberCall compiles `local.name(args)`. The receiver is evaluated once,
@@ -345,13 +356,14 @@ func callValue(fbr *Fiber, value Value, arguments []instruction) (Value, Excepti
 // method or argument slice, and the method lookup is cached per call site.
 func (vm *Instance) emitMemberCall(iFA ast.FieldAccess, lhs local, arguments []instruction) instruction {
 	key := fieldKeyOf(iFA.Rhs)
+	site := vm.at(iFA)
 
 	// the call site remembers the last struct type it saw and the method it resolved to
 	var cachedStruct *UserStruct
 	var cachedMethod *UserFn
 
-	undefined := func() (Value, Exception) {
-		return Value{}, RuntimeExceptionF("undefined symbol '%v' in '%v'", iFA.Rhs, iFA)
+	undefined := func(obj Value) (Value, Exception) {
+		return Value{}, memberError(site, iFA.Rhs, obj)
 	}
 
 	return func(fbr *Fiber) (Value, Exception) {
@@ -360,11 +372,11 @@ func (vm *Instance) emitMemberCall(iFA ast.FieldAccess, lhs local, arguments []i
 		if usi, ok := obj.AsUserStructInstance(); ok {
 			// a field holding a callable wins over a method of the same name
 			if slot, ok := usi.InstanceOf.slot(key.id); ok {
-				return callValue(fbr, usi.Fields[slot], arguments)
+				return callValue(fbr, site, usi.Fields[slot], arguments)
 			}
 			if usi.Dynamic != nil {
 				if field, ok := usi.Dynamic[key.name]; ok {
-					return callValue(fbr, field, arguments)
+					return callValue(fbr, site, field, arguments)
 				}
 			}
 
@@ -373,27 +385,27 @@ func (vm *Instance) emitMemberCall(iFA ast.FieldAccess, lhs local, arguments []i
 				cachedMethod = usi.InstanceOf.lookupMethod(key.id)
 			}
 			if cachedMethod == nil {
-				return undefined()
+				return undefined(*obj)
 			}
 			if exc := cachedMethod.accepts(1 + len(arguments)); exc != nil {
-				return Value{}, exc
+				return Value{}, exc.at(site)
 			}
-			return cachedMethod.invokeMethod(fbr, *obj, arguments)
+			return cachedMethod.invokeMethod(fbr, site, *obj, arguments)
 		}
 
 		if pkg, ok := obj.AsPackage(); ok {
 			value, exists := pkg.globals[key.id]
 			if !exists {
-				return undefined()
+				return undefined(*obj)
 			}
-			return callValue(fbr, *value.Value, arguments)
+			return callValue(fbr, site, *value.Value, arguments)
 		}
 
 		// builtin methods and object fields
 		member := obj.dotAccess(key)
 		if member.IsNil() {
-			return undefined()
+			return undefined(*obj)
 		}
-		return BoundMethod{this: *obj, fn: member}.call(fbr, arguments)
+		return BoundMethod{this: *obj, fn: member}.call(fbr, site, arguments)
 	}
 }

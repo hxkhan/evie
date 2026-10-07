@@ -8,6 +8,7 @@ import (
 
 type UserStruct struct {
 	Name         string
+	def          site
 	Parent       *UserStruct
 	Fields       []fields.ID
 	FieldOffsets map[fields.ID]int
@@ -17,7 +18,7 @@ type UserStruct struct {
 // instantiate creates an instance from the constructor arguments
 func (us *UserStruct) instantiate(args []Value) (Value, Exception) {
 	if len(args) != len(us.Fields) {
-		return Value{}, CustomError("struct '%v' requires %v argument(s), %v provided", us.Name, len(us.Fields), len(args))
+		return Value{}, CustomError("struct '%v' takes %v argument(s) but %v were supplied", us.Name, len(us.Fields), len(args))
 	}
 	fields := make([]Value, len(args))
 	copy(fields, args)
@@ -25,9 +26,9 @@ func (us *UserStruct) instantiate(args []Value) (Value, Exception) {
 }
 
 // construct evaluates the constructor arguments and creates an instance
-func (us *UserStruct) construct(fbr *Fiber, arguments []instruction) (Value, Exception) {
+func (us *UserStruct) construct(fbr *Fiber, site site, arguments []instruction) (Value, Exception) {
 	if len(arguments) != len(us.Fields) {
-		return Value{}, CustomError("struct '%v' requires %v argument(s), %v provided", us.Name, len(us.Fields), len(arguments))
+		return Value{}, errorAt(site, "struct '%v' takes %v argument(s) but %v were supplied", us.Name, len(us.Fields), len(arguments))
 	}
 	usi := &UserStructInstance{InstanceOf: us, Fields: make([]Value, len(arguments))}
 	for i, argument := range arguments {

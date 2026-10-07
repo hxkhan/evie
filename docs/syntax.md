@@ -564,17 +564,37 @@ fn divide(a, b) {
 ```
 
 ### Catching Errors
-`catch(expr)` executes an expression and intercepts both runtime errors and user-thrown errors:
+`catch(expr)` executes an expression and intercepts both runtime errors and user-thrown errors. An error value knows what went wrong and where: `message`, `file`, `line`, `column`, and `trace`, the functions that were running from the innermost outwards, each with its position:
 
 ```go
 result := catch(divide(10, 0))
 
 if result is error {
-    io.println("Failed:", result.message)
+    io.println("Failed:", result.message, "at", result.file, result.line)
+    for frame in result.trace {
+        io.println("  in", frame)
+    }
 } else {
     io.println("Success:", result)
 }
 ```
+
+Uncaught errors reach the host with the same information. The `evie` command prints them with the offending line, the span underlined and labelled, related places, a hint when one applies, and the trace:
+
+```
+error: cannot apply '+' to a number and a string
+ --> example.ev:6:9
+  |
+6 |         sum += v
+  |         ^^^^^^^^ number + string
+  |
+  = help: convert the other side with string(...) to concatenate, or with number(...) to add
+  = trace: average at example.ev:6:9
+           report at example.ev:11:22
+           main at example.ev:14:5
+```
+
+A Go host gets the same rendering from any error that implements `Diagnostic() *diag.Report`: `report.Render(diag.Colors)` for a terminal, `diag.Palette{}` for plain text, and `err.Error()` for the one-line form with the location in parentheses.
 
 ---
 

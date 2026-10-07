@@ -15,19 +15,26 @@ func TestParseErrors(t *testing.T) {
 		"@":                                    "invalid token",
 		"package main\nfn main() { x := ) }":   "unexpected ')'",
 		"package main\nfn main() { return 1 +": "unexpected end of source",
-		"package main\nfn main() {":            "unexpected end of source",
-		"fn main() { x := [1, 2":               "got 'end of source'",
-		"fn main() { x := { a: 1":              "got 'end of source'",
-		"fn main() { f(1, 2":                   "got 'end of source'",
-		"x := \"unterminated":                  "invalid token",
+		"package main\nfn main() {":            "source ends here",
+		"fn main() { x := [1, 2":               "source ends here",
+		"fn main() { x := { a: 1":              "source ends here",
+		"fn main() { f(1, 2":                   "source ends here",
+		"x := \"unterminated":                  "never closed",
 		"fn main() { if x }":                   "expected '{'",
 		"fn main() { for x }":                  "expected 'in'",
 		"fn main() { switch x { boom } }":      "expected 'case'",
-		"struct":                               "got 'end of source'",
+		"struct":                               "source ends here",
 		"fn main() { `template {1 }":           "expected",
+		"fn main() { x.if }":                   "",
 	}
 	for src, want := range cases {
 		node, err := parser.Parse([]byte(src))
+		if want == "" {
+			if err != nil {
+				t.Errorf("%q should parse, got %v", src, err)
+			}
+			continue
+		}
 		if err == nil {
 			t.Errorf("%q parsed without error into %v", src, node)
 			continue

@@ -157,8 +157,8 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 
 	defer func() {
 		if r := recover(); r != nil {
-			if ce, ok := r.(*CompileError); ok {
-				exc = &Error{Message: ce.Error()}
+			if _, ok := r.(*CompileError); ok {
+				panic(r) // EvalNode reports it as what it is
 			} else if e, ok := r.(Exception); ok {
 				exc = e
 			} else if e, ok := r.(error); ok {
@@ -182,16 +182,16 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 		pkg := vm.rt.packages[name]
 		if pkg == nil {
 			if vm.cp.resolver == nil {
-				return Value{}, RuntimeExceptionF("no package resolver configured to import '%v'", name)
+				return Value{}, errorAt(vm.at(node), "cannot import '%v': no package resolver is configured", name)
 			}
 			vm.rt.release()
 			p, err := vm.cp.resolver(name)
 			vm.rt.acquire()
 			if err != nil {
-				return Value{}, RuntimeExceptionF("failed to import '%v': %v", name, err)
+				return Value{}, errorAt(vm.at(node), "cannot import '%v': %v", name, err)
 			}
 			if p == nil {
-				return Value{}, RuntimeExceptionF("package '%v' not found", name)
+				return Value{}, errorAt(vm.at(node), "cannot import '%v': no such package", name)
 			}
 			pkg = p
 			if pkg.Name() == "" {
@@ -233,18 +233,20 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 		if fn, isFn := node.(ast.Fn); isFn {
 			index := fields.Get(fn.Name)
 			if _, exists := this.globals[index]; exists {
-				panic(CompileErrorf("double declaration of %s", fn.Name))
+				panic(vm.compileErrorAt(fn, "'%s' is declared twice in this package", fn.Name))
 			}
 
 			// create a stub for now
-			fn := BoxUserFn(UserFn{funcInfoStatic: vm.newFuncInfo(fn.Name, fn.Args, fn.IsVariadic, false)})
-			this.globals[index] = Global{Value: &fn, IsPublic: true, IsStatic: true, IsConstant: true}
+			info := vm.newFuncInfo(fn.Name, fn.Args, fn.IsVariadic, false)
+			info.def = vm.at(fn)
+			boxed := BoxUserFn(UserFn{funcInfoStatic: info})
+			this.globals[index] = Global{Value: &boxed, IsPublic: true, IsStatic: true, IsConstant: true}
 		}
 
 		if str, isStruct := node.(ast.StructDefinition); isStruct {
 			index := fields.Get(str.Name)
 			if _, exists := this.globals[index]; exists {
-				panic(CompileErrorf("double declaration of %s", str.Name))
+				panic(vm.compileErrorAt(str, "'%s' is declared twice in this package", str.Name))
 			}
 
 			args := make([]fields.ID, len(str.Args))
@@ -260,6 +262,7 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 			// create a stub for now
 			v := BoxUserStruct(&UserStruct{
 				Name:         str.Name,
+				def:          vm.at(str),
 				Fields:       args,
 				FieldOffsets: offsets,
 				Methods:      make(map[fields.ID]*UserFn),
@@ -276,7 +279,7 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 		if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
 			index := fields.Get(iDec.Name)
 			if _, exists := this.globals[index]; exists {
-				panic(CompileErrorf("double declaration of %s", iDec.Name))
+				panic(vm.compileErrorAt(iDec, "'%s' is declared twice in this package", iDec.Name))
 			}
 			this.globals[index] = Global{Value: new(Value), IsPublic: true, IsStatic: iDec.IsStatic}
 			deferred[iDec.Name] = true
@@ -321,15 +324,15 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 			if str.Parent != "" {
 				parentGlobal, exists := this.globals[fields.Get(str.Parent)]
 				if !exists {
-					panic(CustomError("undefined parent struct '%v'", str.Parent))
+					panic(vm.compileErrorAt(str, "cannot find the parent struct '%v'", str.Parent))
 				}
 				parentStruct, ok := parentGlobal.Value.AsUserStruct()
 				if !ok {
-					panic(CustomError("'%v' is not a struct", str.Parent))
+					panic(vm.compileErrorAt(str, "'%v' is %s, not a struct", str.Parent, article(*parentGlobal.Value)))
 				}
 				for p := parentStruct; p != nil; p = p.Parent {
 					if p == ustruct {
-						panic(CustomError("cyclical inheritance detected between '%v' and '%v'", str.Name, str.Parent))
+						panic(vm.compileErrorAt(str, "'%v' and '%v' inherit from each other", str.Name, str.Parent))
 					}
 				}
 				ustruct.Parent = parentStruct
@@ -339,7 +342,7 @@ func (vm *Instance) runPackage(node ast.Package) (res Value, exc Exception) {
 				for _, stmt := range block.Code {
 					if mFn, isFn := stmt.(ast.Fn); isFn {
 						if mFn.Name == "" {
-							panic(CustomError("struct method must have a name"))
+							panic(vm.compileErrorAt(mFn, "a struct method needs a name"))
 						}
 						methodFn := vm.compileStructMethod(ustruct, mFn)
 						ustruct.Methods[fields.Get(mFn.Name)] = methodFn

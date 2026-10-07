@@ -43,6 +43,17 @@ func (sc *Scope) ReuseBlock() {
 	}
 }
 
+// Names lists every binding visible in the scope
+func (sc *Scope) Names() []string {
+	var names []string
+	for _, block := range sc.blocks {
+		for name := range block {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // Declare adds a new binding to the current block-scope
 func (sc *Scope) Declare(name string, isStatic bool) (index int, success bool) {
 	top := sc.blocks[len(sc.blocks)-1]

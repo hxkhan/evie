@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/hxkhan/evie/ast"
+	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/ds"
 	"github.com/hxkhan/evie/parser"
 	"github.com/hxkhan/evie/vm/fields"
@@ -32,8 +33,9 @@ type closure struct {
 type PackageResolver func(name string) (*Package, error)
 
 type compiler struct {
-	inline  bool     // use dispatch inlining (combining instructions into one)
-	prelude *Package // symbols visible to every package without an import
+	inline  bool         // use dispatch inlining (combining instructions into one)
+	prelude *Package     // symbols visible to every package without an import
+	src     *diag.Source // the source being compiled, for error positions
 
 	pkg      *Package           // the package being compiled right now
 	closures ds.Slice[*closure] // currently open closures
@@ -174,13 +176,21 @@ func (vm *Instance) EvalNode(node ast.Node) (result Value, err error) {
 	}
 }
 
-func (vm *Instance) EvalScript(input []byte) (Value, error) {
-	output, err := parser.Parse(input)
+// EvalSource parses and evaluates a named source; errors show its text
+func (vm *Instance) EvalSource(src *diag.Source) (Value, error) {
+	node, err := parser.ParseSource(src)
 	if err != nil {
 		return Value{}, err
 	}
 
-	return vm.EvalNode(output)
+	prev := vm.cp.src
+	vm.cp.src = src
+	defer func() { vm.cp.src = prev }()
+	return vm.EvalNode(node)
+}
+
+func (vm *Instance) EvalScript(input []byte) (Value, error) {
+	return vm.EvalSource(diag.NewSource("", input))
 }
 
 // Packages iterates through loaded packages
@@ -241,7 +251,28 @@ func (cp *compiler) reach(name string) (v any, err error) {
 		return ref, nil
 	}
 
-	return nil, CompileErrorf("undefined symbol '%v'", name)
+	ce := CompileErrorf("cannot find '%v' in this scope", name)
+	if closest, ok := diag.Suggest(name, cp.visibleNames()); ok {
+		ce.Hint = fmt.Sprintf("a binding with a similar name exists: '%s'", closest)
+	}
+	return nil, ce
+}
+
+// visibleNames lists everything a name could refer to at this point of the compilation
+func (cp *compiler) visibleNames() []string {
+	var names []string
+	for scroll := range cp.closures.Len() {
+		names = append(names, cp.closures.Last(scroll).scope.Names()...)
+	}
+	if cp.pkg != nil {
+		for id := range cp.pkg.globals {
+			names = append(names, fields.Lookup(id))
+		}
+	}
+	for id := range cp.prelude.globals {
+		names = append(names, fields.Lookup(id))
+	}
+	return names
 }
 
 func (cp *compiler) addToCaptured(scroll int, index int) (idx int) {

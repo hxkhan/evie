@@ -33,7 +33,7 @@ func (vm *Instance) evaluate(node ast.Node) any {
 	case ast.Ident:
 		variable, err := vm.cp.reach(node.Name)
 		if err != nil {
-			panic(err)
+			panic(vm.locate(err, node))
 		}
 
 		if global, isGlobal := variable.(Global); isGlobal {

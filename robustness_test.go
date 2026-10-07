@@ -15,16 +15,16 @@ import (
 func TestRuntimeErrorsNeverPanic(t *testing.T) {
 	cases := map[string]string{
 		"x := 5\nx.foo = 1\nreturn x":     "cannot assign field 'foo' on number",
-		"f := fn() => 1\nreturn f.call()": "undefined symbol 'call'",
-		"f := fn() => 1\nreturn f.name":   "undefined symbol 'name'",
-		"return (5).foo()":                "undefined symbol 'foo'",
-		"return nil.foo":                  "undefined symbol 'foo'",
-		"x := 5\nreturn x()":              "cannot call a non-function",
-		"return 5 + \"a\"":                "cannot apply '+' operator",
+		"f := fn() => 1\nreturn f.call()": "no member 'call' on a function",
+		"f := fn() => 1\nreturn f.name":   "no member 'name' on a function",
+		"return (5).foo()":                "no member 'foo' on a number",
+		"return nil.foo":                  "no member 'foo' on nil",
+		"x := 5\nreturn x()":              "cannot call a number",
+		"return 5 + \"a\"":                "cannot apply '+' to a number and a string",
 		"return [1, 2][5]":                "out of bounds",
-		"return {}.missing":               "undefined symbol 'missing'",
-		"return \"abc\".len(1)":           "argument(s)",
-		"var o := {}\nreturn o.x.y":       "undefined symbol",
+		"return {}.missing":               "no member 'missing' on an object",
+		"return \"abc\".len(1)":           "takes no arguments but 1 was supplied",
+		"var o := {}\nreturn o.x.y":       "no member 'x' on an object",
 		"return [1].map(5)":               "must be callable",
 		"s := \"x\"\nreturn s[\"k\"]":     "string index must be a number",
 	}
@@ -268,7 +268,7 @@ func TestMemberCalls(t *testing.T) {
 // wrong argument counts at static call sites are compile errors that name the line
 func TestStaticArityIsCompileTime(t *testing.T) {
 	_, err := runCode("package main\nfn add(a, b) => a + b\nfn main() {\n\treturn add(1)\n}")
-	if err == nil || !strings.Contains(err.Error(), "compile error") || !strings.Contains(err.Error(), "line 4") {
+	if err == nil || !strings.Contains(err.Error(), "compile error") || !strings.Contains(err.Error(), ":4:") {
 		t.Fatalf("expected a compile error naming line 4, got %v", err)
 	}
 }
@@ -347,7 +347,7 @@ func TestInstanceCall(t *testing.T) {
 	if _, err := env.Call("main.missing"); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("expected a not-found error, got %v", err)
 	}
-	if _, err := env.Call("main.add", 1); err == nil || !strings.Contains(err.Error(), "argument") {
+	if _, err := env.Call("main.add", 1); err == nil || !strings.Contains(err.Error(), "takes 2 arguments but 1 was supplied") {
 		t.Fatalf("expected an arity error, got %v", err)
 	}
 }
@@ -487,7 +487,7 @@ func TestPrelude(t *testing.T) {
 	if v, ok := eng.Lookup("answer"); !ok || v.String() != "42" {
 		t.Fatalf("Lookup through the prelude failed: %v %v", v, ok)
 	}
-	if _, err := evie.Run("package main\nfn main() => undefinedName"); err == nil || !strings.Contains(err.Error(), "undefined symbol 'undefinedName'") {
+	if _, err := evie.Run("package main\nfn main() => undefinedName"); err == nil || !strings.Contains(err.Error(), "cannot find 'undefinedName'") {
 		t.Fatalf("expected an undefined symbol error, got %v", err)
 	}
 }
@@ -510,7 +510,7 @@ func TestEngineOptions(t *testing.T) {
 		},
 		NoStdlib: true,
 	})
-	pkg, err := eng.Load([]byte("package main imports(\"maths\", \"dyn\")\nfn main() => maths.twice(dyn.k)"))
+	pkg, err := eng.Load("main.ev", []byte("package main imports(\"maths\", \"dyn\")\nfn main() => maths.twice(dyn.k)"))
 	if err != nil {
 		t.Fatal(err)
 	}

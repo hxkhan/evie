@@ -722,8 +722,8 @@ func TestErrorHandling(t *testing.T) {
 	fn dup() {}
 	fn dup() {}
 	`))
-	if err == nil || !strings.Contains(err.Error(), "double declaration") {
-		t.Fatalf("expected double declaration error, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "declared twice") {
+		t.Fatalf("expected a declared-twice error, got: %v", err)
 	}
 
 	_, err = evm.EvalScript([]byte(`
@@ -733,7 +733,7 @@ func TestErrorHandling(t *testing.T) {
 		c = 20
 	}
 	`))
-	if err == nil || !strings.Contains(err.Error(), "constant binding") {
+	if err == nil || !strings.Contains(err.Error(), "because it is a constant") {
 		t.Fatalf("expected constant binding error, got: %v", err)
 	}
 }

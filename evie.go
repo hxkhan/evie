@@ -11,6 +11,7 @@ import (
 	"github.com/hxkhan/evie/std/io"
 	"github.com/hxkhan/evie/std/json"
 	"github.com/hxkhan/evie/std/lists"
+	"github.com/hxkhan/evie/std/math"
 	"github.com/hxkhan/evie/std/strings"
 	"github.com/hxkhan/evie/std/time"
 	"github.com/hxkhan/evie/vm"
@@ -24,6 +25,7 @@ var stdlib = map[string]func() *vm.Package{
 	"strings": strings.Construct,
 	"lists":   lists.Construct,
 	"json":    json.Construct,
+	"math":    math.Construct,
 }
 
 // Options configures an Engine. The zero value gives the standard library,

@@ -1,0 +1,41 @@
+// Host calls: package natives bound with typed wrappers, a variadic native, a native through a local, and builtin methods on strings and arrays.
+// expect: 26669066695
+package main imports("math", "strings")
+
+fn main() {
+    var total := 0
+
+    // package natives called by name
+    var i := 0
+    while i < 200000 {
+        total += math.floor(i / 3) + math.abs(-1) + math.max(i, 7)
+        i += 1
+    }
+
+    // a native held in a local
+    floor := math.floor
+    i = 0
+    while i < 200000 {
+        total += floor(2.5)
+        i += 1
+    }
+
+    // builtin methods
+    word := "evie"
+    arr := [1, 2, 3]
+    i = 0
+    while i < 200000 {
+        total += word.len() + arr.len()
+        arr.push(i)
+        arr.pop()
+        i += 1
+    }
+
+    // natives taking strings
+    i = 0
+    while i < 100000 {
+        total += strings.len(word) + strings.index(word, "i")
+        i += 1
+    }
+    return total
+}

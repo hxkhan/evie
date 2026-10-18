@@ -19,7 +19,7 @@ fn main() {
 }
 ```
 
-- Standard library packages (`io`, `fs`, `time`, `strings`, `lists`, `json`) can be imported directly, as can packages the host registers and `.ev` files by relative path (`imports("./util")`).
+- Standard library packages (`io`, `fs`, `math`, `strings`, `time`, `lists`, `json`, see [section 12](#12-standard-library)) can be imported directly, as can packages the host registers and `.ev` files by relative path (`imports("./util")`).
 - Every top-level function, struct and binding of a package is visible to importers under the package name (`io.println`, `time.wait`). There is no private marker; keep internal helpers in a package that is not imported.
 - Functions, structs and constants whose initializer is itself constant (`SECONDS := 60`, `MILLIS := SECONDS * 1000`) are hoisted, so they can be used before their declaration. Every other top-level binding is initialized in source order when the package loads; its initializer can call functions and build any value, and a binding read before its line has run is `nil`:
 
@@ -76,8 +76,8 @@ Evie is dynamically typed with a lightweight set of built-in types:
 | :--- | :--- | :--- |
 | `number` | 64-bit IEEE-754 floating point | `42`, `3.14`, `-0.5` |
 | `bool` | Boolean | `true`, `false` |
-| `string` | UTF-8 string | `"hello"`, `'world'` |
-| `buffer` | Raw byte slice | `readFile("data.bin")` |
+| `string` | UTF-8 string | `"hello"`, `` `hi {name}` `` |
+| `buffer` | Raw byte slice | `fs.readFile("data.bin")` |
 | `array` | Dynamic ordered collection | `[1, 2, "three"]` |
 | `object` | Key-value associative map | `{ name: "Alice", age: 30 }` |
 | `nil` | Represents absence of value | `nil` |
@@ -94,6 +94,14 @@ name := "Evie"
 version := 0.1
 greeting := `Welcome to {name} v{version}!`
 io.println(greeting) // "Welcome to Evie v0.1!"
+```
+
+### Escapes
+Both kinds of string decode `\n` (newline), `\t` (tab), `\r`, `\0`, `\\` (a backslash) and `\"`. Templates also accept `` \` ``, `\{` and `\}` for a literal backtick or brace. Any other escape is a syntax error that points at it, so a Windows path is written `"C:\\Users"`:
+
+```go
+io.println("one\ttwo\nthree")
+io.println(`braces: \{literal\}, value: {1 + 1}, 100%`)
 ```
 
 ### Arrays
@@ -716,7 +724,7 @@ func main() {
 
     // 4. One-line quick evaluation
     ans, _ := evie.Eval("return [1, 2, 3].map(fn(x) => x * 10)")
-    fmt.Println(ans) // [10, 20, 30]
+    fmt.Println(ans) // [10 20 30]
 }
 ```
 
@@ -731,3 +739,72 @@ The pieces, from most to least convenient:
 | lend a Go value to scripts as it is | `vm.NewHostType[T]("Name")` with `Method`, `Constructor`, `Wrap` |
 | call a script function | `eng.Call("pkg.fn", goArgs...)`, or `value.Call(nil, evieArgs...)` on a looked-up value |
 | run a file or a project directory | `eng.RunFile`, `eng.RunProject`, or `evie.RunFile` for a one-off |
+
+---
+
+## 12. Standard Library
+
+Import a package by name: `package main imports("math", "strings")`. Functions that wait on the operating system (`fs`, `time.wait`, `io.prompt`, `io.readln`) release the instance while they wait, so other tasks keep running. Arguments of the wrong type raise an error that names the function and the argument.
+
+### `io`
+| function | does |
+| :-- | :-- |
+| `print(...values)`, `println(...values)` | write the values separated by spaces |
+| `prompt(message)` | print a message and read a line |
+| `readln()` | read a line |
+
+### `math`
+| function | does |
+| :-- | :-- |
+| `pi`, `e`, `inf`, `nan`, `maxSafeInt` | constants |
+| `abs`, `sign`, `floor`, `ceil`, `round`, `trunc` | rounding and sign |
+| `sqrt`, `cbrt`, `pow(x, y)`, `exp`, `log`, `log2`, `log10`, `hypot(x, y)` | powers and logarithms |
+| `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2(y, x)`, `sinh`, `cosh`, `tanh` | trigonometry, in radians |
+| `min(...)`, `max(...)` | smallest or largest of the arguments, or of one array |
+| `clamp(x, lo, hi)` | `x` limited to the range |
+| `isNaN(x)`, `isFinite(x)` | checks |
+| `random()`, `randomInt(lo, hi)` | a number in [0, 1), an integer in [lo, hi] |
+
+### `strings`
+Strings also have the methods `len`, `trim`, `toLower`, `toUpper`, `contains`, `startsWith`, `endsWith` and `split`. Positions and lengths count characters, not bytes.
+
+| function | does |
+| :-- | :-- |
+| `split(s, sep)`, `fields(s)`, `lines(s)`, `chars(s)` | break a string into an array |
+| `join(array, sep)` | join an array of strings |
+| `contains`, `hasPrefix`, `hasSuffix`, `count(s, sub)` | tests |
+| `index(s, sub)`, `lastIndex(s, sub)` | position of `sub`, or -1 |
+| `replace(s, old, new)`, `replaceFirst(s, old, new)` | replace every or the first occurrence |
+| `upper`, `lower`, `trim`, `trimStart`, `trimEnd`, `trimPrefix(s, p)`, `trimSuffix(s, p)` | case and trimming |
+| `padStart(s, width, pad)`, `padEnd(s, width, pad)`, `repeat(s, n)`, `reverse(s)` | building strings |
+| `len(s)` | number of characters |
+| `parseNumber(s)` | the number a string spells, or an error |
+
+### `fs`
+| function | does |
+| :-- | :-- |
+| `readFile(path)`, `readText(path)` | a file as a buffer or as a string |
+| `writeFile(path, content)`, `appendFile(path, content)` | write or append a string or buffer |
+| `exists(path)`, `isDir(path)` | tests |
+| `list(dir)` | sorted names in a directory |
+| `mkdir(dir)` | create a directory and its parents |
+| `remove(path)`, `rename(from, to)` | remove a file or directory tree, move it |
+| `join(a, b)`, `base(path)`, `dir(path)`, `ext(path)` | path helpers; these do not touch the disk |
+
+### `time`
+Times are milliseconds since the Unix epoch, so they compare and subtract like any number.
+
+| function | does |
+| :-- | :-- |
+| `now()`, `since(t)` | the current time, milliseconds elapsed since `t` |
+| `clock()` | a monotonic clock in milliseconds, for measuring |
+| `wait(ms)` (also `sleep`, `timer`) | pause the current task |
+| `format(t)`, `format(t, layout)` | RFC 3339 text, or a [Go layout](https://pkg.go.dev/time#pkg-constants) such as `"2006-01-02"` |
+| `parse(text)` | an RFC 3339 time |
+| `second`, `minute`, `hour`, `day` | durations in milliseconds |
+
+### `lists` and `json`
+| function | does |
+| :-- | :-- |
+| `lists.join(array, sep)` | join an array of strings |
+| `json.encode(value)`, `json.decode(text)` | convert between values and JSON text |

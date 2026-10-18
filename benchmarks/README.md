@@ -12,7 +12,7 @@ go run ./benchmarks -save-baseline      # make this run the new baseline
 go run ./benchmarks -md report.md       # also write a markdown report
 ```
 
-Each benchmark gets one untimed warm-up run (`-warmup`) followed by `-n` timed runs (default 5). Every run uses a fresh `evie.Loader`, so timings include parsing and compiling, which are negligible next to execution. The table shows the median, the minimum, the relative standard deviation, the bytes allocated during one run, and the change against the baseline. The last line is the geometric mean of all medians and the geomean change against the baseline. The command exits with status 1 if any benchmark fails.
+Each benchmark gets one untimed warm-up run (`-warmup`) followed by `-n` timed runs (default 5). Every run uses a fresh `evie.Engine`, so timings include parsing and compiling, which are negligible next to execution. The table shows the median, the minimum, the relative standard deviation, the bytes allocated during one run, and the change against the baseline. The last line is the geometric mean of all medians and the geomean change against the baseline. The command exits with status 1 if any benchmark fails.
 
 > On this Windows machine, Smart App Control blocks binaries built under `%TEMP%`. Set `GOTMPDIR` to an absolute path outside it, for example `GOTMPDIR=C:/Users/hxkhan/Documents/Projects/.evie-gotmp go run ./benchmarks`.
 
@@ -51,6 +51,8 @@ Each benchmark gets one untimed warm-up run (`-warmup`) followed by `-n` timed r
 | `strings` | concatenation, templates, `split`/`join`/`toUpper`, iteration |
 | `structs` | instantiation, methods, `this` field access, bound methods |
 | `inheritance` | polymorphic dispatch through a three-level hierarchy |
+| `method_calls` | monomorphic and two-type call sites, methods calling methods, updates through `this` |
+| `host_calls` | package natives by name and through a local, a variadic native, builtin string and array methods |
 | `errors` | `throw` through several frames and `catch` |
 | `globals` | package constants and mutable `var` globals |
 | `tasks` | `go` spawn/await overhead, `await.all` fan-out, CPU work across tasks |

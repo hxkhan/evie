@@ -265,6 +265,108 @@ func TestMemberCalls(t *testing.T) {
 	}
 }
 
+// a receiver that has to be evaluated, such as a field, a subscript or a call
+// result, takes the same path as a local: same results, receiver before
+// arguments, same errors
+func TestMemberCallsOnComputedReceivers(t *testing.T) {
+	prelude := `package main imports("io")
+	struct Box(v) {
+		fn get() => this.v
+		fn add(a, b) => this.v + a + b
+	}
+	struct Other(v) {
+		fn get() => this.v * 100
+	}
+	struct Wrap(get) {
+		fn get() => "method"
+	}
+	struct Plain(v) {}
+	struct Holder(b) {
+		fn viaField() => this.b.get()
+	}
+	var log := []
+	fn note(tag, value) {
+		log.push(tag)
+		return value
+	}
+	fn make(v) => Box(v)
+	var shared := Box(10)
+	`
+	for body, want := range map[string]string{
+		`return Holder(Box(1)).viaField()`:                                                "1",
+		`arr := [Box(2), Box(3)]; return arr[1].get() + arr[0].add(1, 2)`:                 "8",
+		`return shared.get() + shared.add(1, 1)`:                                          "22",
+		`return make(7).get()`:                                                            "7",
+		`r := note("receiver", Box(1)).add(note("a", 1), note("b", 2)); return [r, log]`:  `[4, ["receiver", "a", "b"]]`,
+		`h := {inner: {double: fn(x) => x * 2}}; return h.inner.double(21)`:               "42",
+		`return ("ab" + "cd").toUpper()`:                                                  "ABCD",
+		`o := {list: [1, 2]}; o.list.push(3); return o.list.len()`:                        "3",
+		`return Holder(Wrap(fn() => "field")).b.get()`:                                    "field",
+		`var t := 0; for s in [Box(1), Other(2), Box(3)] { t += [s][0].get() }; return t`: "204",
+		`o := {pkg: io}; return o.pkg.println == io.println`:                              "true",
+	} {
+		val, err := runCode(prelude + "fn main() {\n" + strings.ReplaceAll(body, "; ", "\n") + "\n}")
+		if err != nil {
+			t.Errorf("%s: %v", body, err)
+		} else if val.String() != want {
+			t.Errorf("%s = %s, want %s", body, val, want)
+		}
+	}
+
+	for body, want := range map[string]string{
+		`return Holder(Box(1)).b.gte()`:   "no member 'gte' on a Box",
+		`o := {x: nil}; return o.x.foo()`: "no member 'foo' on nil",
+		`return Holder(Plain(1)).b.v()`:   "cannot call a number",
+		`return [Box(1)][0].get(1, 2)`:    "takes no arguments but 2 were supplied",
+		`return [[1]][0].pish(2)`:         "no member 'pish' on an array",
+	} {
+		_, err := runCode(prelude + "fn main() {\n" + strings.ReplaceAll(body, "; ", "\n") + "\n}")
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: want an error containing %q, got %v", body, want, err)
+		}
+	}
+}
+
+// calling a method on a computed receiver, or a variadic native, allocates
+// nothing per call
+func TestMemberCallsDoNotAllocate(t *testing.T) {
+	eng := evie.New()
+	_, err := eng.Load("alloc.ev", []byte(`package main imports("math")
+	struct Box(v) {
+		fn get() => this.v
+	}
+	struct Holder(b) {
+		fn viaField() => this.b.get()
+	}
+	h := Holder(Box(1))
+	items := [Box(2)]
+	fn loop() {
+		var total := 0
+		var i := 0
+		while i < 1000 {
+			total += h.viaField() + items[0].get() + math.max(i, 7)
+			i += 1
+		}
+		return total
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	loop, ok := eng.Lookup("main.loop")
+	if !ok {
+		t.Fatal("loop not found")
+	}
+	allocs := testing.AllocsPerRun(10, func() {
+		if _, err := loop.Call(nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	// 3000 calls per run; a per-call allocation would show up as thousands
+	if allocs > 20 {
+		t.Fatalf("%.0f allocations for 3000 calls", allocs)
+	}
+}
+
 // wrong argument counts at static call sites are compile errors that name the line
 func TestStaticArityIsCompileTime(t *testing.T) {
 	_, err := runCode("package main\nfn add(a, b) => a + b\nfn main() {\n\treturn add(1)\n}")

@@ -77,20 +77,22 @@ func Construct() *vm.Package {
 }
 
 // extreme folds its numeric arguments, or the numbers of a single array
-// argument, with pick
+// argument, with pick. It reads the arguments in place; Call.Args would copy
+// them on every call.
 func extreme(pick func(a, b float64) float64) vm.NativeFn {
 	return func(c vm.Call) (vm.Value, error) {
-		args := c.Args()
-		if len(args) == 1 {
-			if arr, ok := args[0].AsArray(); ok {
+		n, at := c.Len(), c.Arg
+		if n == 1 {
+			if arr, ok := c.Arg(0).AsArray(); ok {
 				if len(arr.Data) == 0 {
 					return vm.Value{}, errors.New("cannot take the extreme of an empty array")
 				}
-				args = arr.Data
+				n, at = len(arr.Data), func(i int) vm.Value { return arr.Data[i] }
 			}
 		}
 		best := math.NaN()
-		for i, arg := range args {
+		for i := 0; i < n; i++ {
+			arg := at(i)
 			x, ok := arg.AsFloat64()
 			if !ok {
 				return vm.Value{}, fmt.Errorf("expected numbers, got %s at position %d", arg.TypeOf(), i+1)

@@ -20,7 +20,7 @@ fn main() {
 ```
 
 - Standard library packages (`io`, `fs`, `math`, `strings`, `time`, `lists`, `json`, see [section 12](#12-standard-library)) can be imported directly, as can packages the host registers and `.ev` files by relative path (`imports("./util")`).
-- Every top-level function, struct and binding of a package is visible to importers under the package name (`io.println`, `time.wait`). There is no private marker; keep internal helpers in a package that is not imported.
+- Every top-level function, struct and binding of a package is visible to importers under the package name (`io.println`, `time.wait`). There is no private marker; keep internal helpers in a package that is not imported. An importer always sees a package's `var` bindings as they are now and can assign them (`util.count = 0`); assigning one of its constants is a compile error.
 - Functions, structs and constants whose initializer is itself constant (`SECONDS := 60`, `MILLIS := SECONDS * 1000`) are hoisted, so they can be used before their declaration. Every other top-level binding is initialized in source order when the package loads; its initializer can call functions and build any value, and a binding read before its line has run is `nil`:
 
 ```go

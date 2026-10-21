@@ -65,6 +65,46 @@ func (vm *Instance) emitIdentGet(node ast.Ident) instruction {
 	panic(vm.compileErrorAt(node, "cannot read '%s'", node.Name))
 }
 
+// assignField sets field name of obj to the result of value, which is only
+// evaluated once obj is known to take the assignment
+func assignField(fbr *Fiber, site site, obj Value, name string, index fields.ID, value instruction) (Value, Exception) {
+	if pkg, ok := obj.AsPackage(); ok {
+		field, exists := pkg.globals[index]
+		if !exists {
+			return Value{}, errorAt(site, "package '%s' has no symbol '%s'", pkg.name, name)
+		}
+		if field.IsStatic {
+			return Value{}, errorAt(site, "cannot assign to '%s.%s' because it is a constant", pkg.name, name)
+		}
+		v, exc := value(fbr)
+		if exc != nil {
+			return v, exc
+		}
+		*field.Value = v
+		return Value{}, nil
+	}
+
+	if m, ok := obj.AsObject(); ok {
+		v, exc := value(fbr)
+		if exc != nil {
+			return v, exc
+		}
+		m[name] = v
+		return Value{}, nil
+	}
+
+	if usi, ok := obj.AsUserStructInstance(); ok {
+		v, exc := value(fbr)
+		if exc != nil {
+			return v, exc
+		}
+		usi.SetField(index, v)
+		return Value{}, nil
+	}
+
+	return Value{}, errorAt(site, "cannot assign field '%s' on %s", name, obj.TypeOf())
+}
+
 func (vm *Instance) emitAssign(node ast.Assign) instruction {
 	site := vm.at(node)
 	// handle variables
@@ -169,34 +209,31 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 				return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, lhs.TypeOf())
 			}
 
-		case Global:
-			if lhs.IsConstant {
-				if pkg, ok := lhs.AsPackage(); ok {
-					field, exists := pkg.globals[fields.Get(fa.Rhs)]
-					if !exists {
-						panic(vm.compileErrorAt(fa, "package '%s' has no symbol '%s'", pkg.name, fa.Rhs))
-					}
-
-					if field.IsStatic {
-						panic(vm.compileErrorAt(fa, "cannot assign to '%s.%s' because it is a constant", pkg.name, fa.Rhs))
-					}
-
-					// compile new value & return setter
-					value := vm.compile(node.Value)
-					return func(fbr *Fiber) (Value, Exception) {
-						value, err := value(fbr)
-						if err != nil {
-							return value, err
-						}
-
-						*(field.Value) = value
-						return Value{}, nil
-					}
+		case Value:
+			// an imported package folds to a constant; its symbols are checked now
+			if pkg, ok := lhs.AsPackage(); ok {
+				field, exists := pkg.globals[fields.Get(fa.Rhs)]
+				if !exists {
+					panic(vm.compileErrorAt(fa, "package '%s' has no symbol '%s'", pkg.name, fa.Rhs))
 				}
 
-				panic(vm.compileErrorAt(node, "cannot assign field '%s' on constant '%v'", fa.Rhs, fa.Lhs))
+				if field.IsStatic {
+					panic(vm.compileErrorAt(fa, "cannot assign to '%s.%s' because it is a constant", pkg.name, fa.Rhs).withHint("declare it with var in its package to allow reassignment"))
+				}
+
+				value := vm.compile(node.Value)
+				return func(fbr *Fiber) (Value, Exception) {
+					value, err := value(fbr)
+					if err != nil {
+						return value, err
+					}
+
+					*(field.Value) = value
+					return Value{}, nil
+				}
 			}
 
+		case Global:
 			// compile new value & return setter
 			value := vm.compile(node.Value)
 			index := fields.Get(fa.Rhs)
@@ -242,6 +279,19 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 
 				return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, lhs.TypeOf())
 			}
+		}
+
+		// any other receiver, as in `this.child.v = x`, `arr[i].x = v` or
+		// `make().x = v`: the receiver is evaluated first, then the value
+		receiver := vm.compile(fa.Lhs)
+		value := vm.compile(node.Value)
+		index := fields.Get(fa.Rhs)
+		return func(fbr *Fiber) (Value, Exception) {
+			obj, exc := receiver(fbr)
+			if exc != nil {
+				return obj, exc
+			}
+			return assignField(fbr, site, obj, fa.Rhs, index, value)
 		}
 	}
 
@@ -375,7 +425,16 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 			}
 
 		case Value:
-			// I don't think this gets used tbh because using vm.evaluate(ast.FieldAccess) bypasses this
+			// a package's var, which evaluate leaves unfolded: read the binding
+			// each time, since it can change after this compiles
+			if pkg, ok := lhs.AsPackage(); ok {
+				if global, exists := pkg.globals[key.id]; exists && global.IsPublic {
+					cell := global.Value
+					return func(fbr *Fiber) (Value, Exception) {
+						return *cell, nil
+					}
+				}
+			}
 			if field, exists := lhs.getField(key); exists {
 				return func(fbr *Fiber) (Value, Exception) {
 					return field, nil

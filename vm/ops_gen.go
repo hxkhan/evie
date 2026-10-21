@@ -521,7 +521,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 		return vm.emitCompoundSubscriptAssign(node, target)
 	}
 
-	switch lhs := vm.evaluate(node.Lhs).(type) {
+	switch lhs := vm.assignee(node.Lhs).(type) {
 	case local:
 		if lhs.isStatic {
 			panic(vm.compileErrorAt(node.Lhs, "cannot assign to a constant").withHint("declare it with var to allow reassignment"))

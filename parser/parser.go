@@ -467,7 +467,7 @@ func (ps *parser) parseSwitch(main token.Token) ast.Node {
 			if next.IsEOS() {
 				ps.expected("'}'", open, "this '{' opens the switch")
 			}
-			block.Code = append(block.Code, ps.parse(0, true))
+			block.Code = append(block.Code, ps.parseNode(0, true))
 			ps.consume(";")
 		}
 		return block
@@ -512,7 +512,7 @@ func (ps *parser) parseBlock(open token.Token) ast.Node {
 		if ps.PeekToken().IsEOS() {
 			ps.expected("'}'", open, "this '{' is never closed")
 		}
-		block.Code = append(block.Code, ps.parse(0, true))
+		block.Code = append(block.Code, ps.parseNode(0, true))
 	}
 	return block
 }
@@ -530,7 +530,10 @@ func (ps *parser) parseFn(main token.Token, asExpr bool) ast.Node {
 	if ps.consume("{") {
 		fn.Action = ps.parseBlock(ps.last)
 	} else if ps.consume("=>") {
-		fn.Action = ast.Return{Pos: ps.last.Pos, Value: ps.parse(0, true)}
+		// an arrow body may also be an assignment, as in `fn reset() => this.n = 0`
+		body := ps.parseNode(0, true)
+		ps.mustBeValue(body, true)
+		fn.Action = ast.Return{Pos: ps.last.Pos, Value: body}
 	} else {
 		ps.expected("'{' or '=>' after the parameters", main, "in this function")
 	}
@@ -678,7 +681,48 @@ func (ps *parser) parseArrayLiteral(main token.Token) ast.Node {
 	return arr
 }
 
-func (ps *parser) parse(precedenceLevel int, asExpr bool) (node ast.Node) {
+// parse parses a statement, or a value when asExpr is set; a statement where
+// a value is needed is a syntax error instead of a silent nil
+func (ps *parser) parse(precedenceLevel int, asExpr bool) ast.Node {
+	node := ps.parseNode(precedenceLevel, asExpr)
+	if asExpr {
+		ps.mustBeValue(node, false)
+	}
+	return node
+}
+
+// mustBeValue fails when node is a statement, which has no value to use;
+// assignments pass when assignOK is set
+func (ps *parser) mustBeValue(node ast.Node, assignOK bool) {
+	var what, hint string
+	switch node := node.(type) {
+	case ast.Decl:
+		what, hint = "a declaration", fmt.Sprintf("declare '%s' on a line of its own, then use it", node.Name)
+	case ast.Assign, ast.MutableBinOp:
+		if assignOK {
+			return
+		}
+		what, hint = "an assignment", "assign on a line of its own, then use the variable"
+	case ast.Return:
+		what = "'return'"
+	case ast.Break:
+		what = "'break'"
+	case ast.Continue:
+		what = "'continue'"
+	case ast.While, ast.For:
+		what = "a loop"
+	case ast.StructDefinition:
+		what = "a struct definition"
+	default:
+		return
+	}
+	err := ps.report(node.Where(), "expected a value, found "+what)
+	err.Label = "this has no value"
+	err.Hint = hint
+	panic(err)
+}
+
+func (ps *parser) parseNode(precedenceLevel int, asExpr bool) (node ast.Node) {
 	// handle parentheses explicitly
 	if ps.consume("(") {
 		open := ps.last

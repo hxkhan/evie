@@ -26,6 +26,16 @@ func TestParseErrors(t *testing.T) {
 		"struct":                               "source ends here",
 		"fn main() { `template {1 }":           "expected",
 		"fn main() { x.if }":                   "",
+		// a statement where a value is needed
+		"fn main() { return var x := 1 }":                  "expected a value, found a declaration",
+		"fn main() { return x := 1 }":                      "expected a value, found a declaration",
+		"fn main() { var y := 0\n return y = 5 }":          "expected a value, found an assignment",
+		"fn main() { a := [var z := 1] }":                  "expected a value, found a declaration",
+		"fn main() { f(x += 1) }":                          "expected a value, found an assignment",
+		"fn main() { while true { x := (break) } }":        "expected a value, found 'break'",
+		"fn main() { x := return 1 }":                      "expected a value, found 'return'",
+		"struct C(n) { fn reset() => this.n = 0 }":         "",
+		"fn main() { var n := 0\n inc := fn() => n += 1 }": "",
 	}
 	for src, want := range cases {
 		node, err := parser.Parse([]byte(src))

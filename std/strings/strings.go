@@ -1,5 +1,5 @@
-// Package strings is Evie's strings package: searching, splitting, joining,
-// trimming, padding and case. Common checks such as len, trim, contains,
+// Package strings is Evie's strings package: searching, splitting, trimming,
+// padding and case. Arrays join with their own join method. Common checks such as len, trim, contains,
 // startsWith and endsWith are also methods on every string.
 package strings
 
@@ -26,7 +26,6 @@ func Construct() *vm.Package {
 		}
 		return boxAll(strings.Split(s, "\n"))
 	}))
-	pkg.Native("join", vm.Func2E(join))
 
 	pkg.Native("contains", vm.Func2(strings.Contains))
 	pkg.Native("hasPrefix", vm.Func2(strings.HasPrefix))
@@ -86,19 +85,6 @@ func boxAll(parts []string) *vm.Array {
 		values[i] = vm.BoxString(part)
 	}
 	return vm.NewArray(values...)
-}
-
-// join concatenates an array of strings with a separator
-func join(arr *vm.Array, sep string) (string, error) {
-	parts := make([]string, len(arr.Data))
-	for i, item := range arr.Data {
-		str, ok := item.AsString()
-		if !ok {
-			return "", fmt.Errorf("join: element %d is %s, not a string", i, item.TypeOf())
-		}
-		parts[i] = str
-	}
-	return strings.Join(parts, sep), nil
 }
 
 // runeIndex converts a byte offset into s to a character offset; -1 stays -1

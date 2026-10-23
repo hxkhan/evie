@@ -67,7 +67,6 @@ func TestStdMath(t *testing.T) {
 func TestStdStrings(t *testing.T) {
 	for expr, want := range map[string]string{
 		`strings.split("a,b,c", ",").len()`:       "3",
-		`strings.join(["a", "b"], "-")`:           "a-b",
 		`strings.fields("  a  b c ").len()`:       "3",
 		`strings.lines("x\ny\n").len()`:           "2",
 		`strings.contains("hello", "ell")`:        "true",
@@ -98,7 +97,6 @@ func TestStdStrings(t *testing.T) {
 	}
 	stdFails(t, `strings.parseNumber("abc")`, "not a number")
 	stdFails(t, `strings.repeat("a", -1)`, "negative")
-	stdFails(t, `strings.join([1], ",")`, "not a string")
 }
 
 func TestStdFs(t *testing.T) {

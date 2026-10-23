@@ -1,38 +1,14 @@
-package main imports("io", "lists", "strings")
+package main imports("strings")
 
-/* fn main() {
-    var n := 10000000
-    // for n = 10000000
-    // direct static call to io.dec:   ~96ms
-    // via local variable as test.dec: ~140ms
-
-    test := io
-    while n > 0 {
-        n = io.dec(n)
-        //n = test.dec(n)
-        //n = dec(n)
-    }
-
-    echo "done"
-}
-
-
-fn dec(n) => n-1 */
-
+// Compares a package function with the equivalent method.
+// Swap the commented lines and time each with `evie -t examples/benchmark.ev`.
 fn main() {
     var n := 1000000
-    // for n = 1000000
-    // direct static call to string.split & list.join: ~157ms
-    // dynamic dispatch to message.split & parts.join: ~166ms
-
     message := "hello world"
     while n > 0 {
-        //parts := strings.split(message, " ")
-        //whole := lists.join(parts, "_")
-
+        // parts := strings.split(message, " ")
         parts := message.split(" ")
         whole := parts.join("_")
-
         n -= 1
     }
 

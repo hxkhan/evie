@@ -148,7 +148,7 @@ pkg.Func("wait", 1, func(c vm.Call) (vm.Value, error) {
 - [x] Scoping (global, package, function, block, captured closures)
 - [x] Error handling (`throw`, `catch(expr)`, `error` type)
 - [x] Go Host Embedding (bidirectional marshaling, function reflection, struct unmarshaling)
-- [x] Standard library (`io`, `fs`, `math`, `strings`, `time`, `lists`, `json`)
+- [x] Standard library (`io`, `fs`, `math`, `strings`, `time`, `json`)
 - [x] Compiler-style diagnostics (source excerpts, spans, hints, did-you-mean, stack traces)
 - [ ] Package management ⏳
 

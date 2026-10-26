@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
 	"iter"
 	"log"
@@ -136,7 +137,11 @@ func (vm *Instance) EvalNode(node ast.Node) (result Value, err error) {
 	}()
 
 	if pkg, isPackage := node.(ast.Package); isPackage {
-		v, exc := vm.runPackage(pkg)
+		src := vm.cp.src
+		if src == nil {
+			src = diag.NewSource("", nil)
+		}
+		v, exc := vm.runPackage([]unit{{src: src, node: pkg}})
 		if exc != nil {
 			err = exc
 		}
@@ -187,6 +192,56 @@ func (vm *Instance) EvalSource(src *diag.Source) (Value, error) {
 	vm.cp.src = src
 	defer func() { vm.cp.src = prev }()
 	return vm.EvalNode(node)
+}
+
+// EvalPackage compiles one package from all of its source files and runs its
+// initializers. The files are compiled together, so any of them can use what
+// another declares; each must declare the same package.
+func (vm *Instance) EvalPackage(sources ...*diag.Source) (*Package, error) {
+	if len(sources) == 0 {
+		return nil, errors.New("EvalPackage needs at least one source")
+	}
+	units := make([]unit, len(sources))
+	for i, src := range sources {
+		node, err := parser.ParseSource(src)
+		if err != nil {
+			return nil, err
+		}
+		pkg, ok := node.(ast.Package)
+		if !ok {
+			return nil, fmt.Errorf("%s does not declare a package", src.Name)
+		}
+		units[i] = unit{src: src, node: pkg}
+	}
+	if err := vm.evalPackageUnits(units); err != nil {
+		return nil, err
+	}
+	return vm.rt.packages[units[0].node.Name], nil
+}
+
+// evalPackageUnits runs runPackage under the runner, turning panics into errors
+func (vm *Instance) evalPackageUnits(units []unit) (err error) {
+	vm.rt.acquire()
+	defer vm.rt.release()
+
+	defer func() {
+		if r := recover(); r != nil {
+			if ce, ok := r.(*CompileError); ok {
+				err = ce
+			} else if exc, ok := r.(Exception); ok {
+				err = exc
+			} else if e, ok := r.(error); ok {
+				err = e
+			} else {
+				err = fmt.Errorf("%v", r)
+			}
+		}
+	}()
+
+	if _, exc := vm.runPackage(units); exc != nil {
+		return exc
+	}
+	return nil
 }
 
 func (vm *Instance) EvalScript(input []byte) (Value, error) {
@@ -272,6 +327,11 @@ func (cp *compiler) reach(name string) (binding, error) {
 	ce := CompileErrorf("cannot find '%v' in this scope", name)
 	if closest, ok := diag.Suggest(name, cp.visibleNames()); ok {
 		ce.Hint = fmt.Sprintf("a binding with a similar name exists: '%s'", closest)
+	}
+	if cp.pkg != nil {
+		if imp, ok := cp.pkg.importedAs[name]; ok {
+			ce.Hint = fmt.Sprintf("the import \"%s\" is bound as '%s', the name its package declares", imp[0], imp[1])
+		}
 	}
 	return nil, ce
 }

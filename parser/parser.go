@@ -179,15 +179,16 @@ func (ps *parser) parsePackage() ast.Package {
 		}
 		open := ps.last
 		if !ps.consume(")") {
-			pack.Imports = ps.parseStringList(open)
+			pack.Imports, pack.ImportPos = ps.parseStringList(open)
 		}
 	}
 	return pack
 }
 
-// helper to parse comma-separated string lists
-func (ps *parser) parseStringList(open token.Token) []string {
+// parseStringList parses a comma-separated list of strings and where each is
+func (ps *parser) parseStringList(open token.Token) ([]string, []token.Pos) {
 	var imports []string
+	var positions []token.Pos
 	for {
 		next := ps.PeekToken()
 		if next.Type != token.String {
@@ -195,6 +196,7 @@ func (ps *parser) parseStringList(open token.Token) []string {
 		}
 		ps.NextToken()
 		imports = append(imports, next.Literal)
+		positions = append(positions, next.Pos)
 
 		if ps.consume(")") {
 			break
@@ -203,7 +205,7 @@ func (ps *parser) parseStringList(open token.Token) []string {
 			ps.expected("',' or ')'", open, "this '(' opens the import list")
 		}
 	}
-	return imports
+	return imports, positions
 }
 
 func (ps *parser) parseFloat(tok token.Token) float64 {

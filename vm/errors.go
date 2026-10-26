@@ -136,6 +136,9 @@ func memberError(s site, name string, v Value) Exception {
 	if closest, ok := diag.Suggest(name, v.memberNames()); ok {
 		e.Hint = fmt.Sprintf("%s has a member with a similar name: '%s'", article(v), closest)
 	}
+	if pkg, ok := v.AsPackage(); ok && pkg.memberHint != "" {
+		e.Hint = pkg.memberHint
+	}
 	return e
 }
 
@@ -234,6 +237,13 @@ func (vm *Instance) compileErrorAt(node ast.Node, format string, a ...any) *Comp
 	return e
 }
 
+// compileErrorAtPos reports a compile error at a position in the source being compiled
+func (vm *Instance) compileErrorAtPos(pos token.Pos, format string, a ...any) *CompileError {
+	e := CompileErrorf(format, a...)
+	e.Source, e.Pos = vm.cp.src, pos
+	return e
+}
+
 func (e *CompileError) withHint(hint string) *CompileError {
 	e.Hint = hint
 	return e
@@ -244,6 +254,9 @@ func (vm *Instance) memberCompileError(node ast.Node, name string, v Value) *Com
 	ce := vm.compileErrorAt(node, "no member '%s' on %s", name, article(v))
 	if closest, ok := diag.Suggest(name, v.memberNames()); ok {
 		ce.Hint = fmt.Sprintf("%s has a member with a similar name: '%s'", article(v), closest)
+	}
+	if pkg, ok := v.AsPackage(); ok && pkg.memberHint != "" {
+		ce.Hint = pkg.memberHint
 	}
 	return ce
 }

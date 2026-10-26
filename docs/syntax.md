@@ -36,6 +36,30 @@ fn main() {
 }
 ```
 
+### Organizing a program
+
+A package is one file or one folder; a program is the packages its entry point imports.
+
+```
+shop/
+  main.ev        package main imports("./cart", "./util/money")
+  checkout.ev    package main            (more of main)
+  cart/
+    cart.ev      package cart
+    items.ev     package cart            (more of cart)
+  util/
+    money.ev     package money
+```
+
+- **A folder is one package.** Every `.ev` file in it declares the same name, and the files are compiled together, so any file can use what another declares.
+- **A project's main package** is every top-level file that declares `package main`. `evie shop/` (or `eng.RunProject`) runs it; the other top-level files are packages imported by path. `evie file.ev` (or `eng.RunFile`) runs that one file.
+- **Imports name a path or a package.** `"./cart"` and `"../lib/text"` are files or folders relative to the importing file, tried as `cart.ev` and then `cart/`. A bare name such as `"io"` is a package the host or the standard library provides. A local `math.ev` is imported as `"./math"`.
+- **An import is bound by the name its package declares**, not by its path: `imports("./util/money")` gives `money`.
+- **Imports belong to the whole package**, so a package imports a name once, in any of its files.
+- **Each package name is used once per program.** Two packages that declare the same name, a folder whose files disagree, or importing a `main` file is an error that names both places.
+- **Errors inside an imported package** are reported in that package's file, with a note at the import.
+- **An engine runs one program** and loads each package once; create a new engine for the next program.
+
 ---
 
 ## 2. Bindings & Mutability

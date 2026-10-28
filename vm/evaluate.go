@@ -70,23 +70,23 @@ func (vm *Instance) evaluate(node ast.Node) operand {
 			if rhs, ok := vm.evaluate(node.Rhs).(Value); ok {
 				switch node.Operator {
 				case ast.AddOp:
-					if res, ok := lhs.Add(rhs); ok {
+					if res, ok := lhs.add(rhs); ok {
 						return res
 					}
 				case ast.SubOp:
-					if res, ok := lhs.Sub(rhs); ok {
+					if res, ok := lhs.sub(rhs); ok {
 						return res
 					}
 				case ast.MulOp:
-					if res, ok := lhs.Mul(rhs); ok {
+					if res, ok := lhs.mul(rhs); ok {
 						return res
 					}
 				case ast.DivOp:
-					if res, ok := lhs.Div(rhs); ok {
+					if res, ok := lhs.div(rhs); ok {
 						return res
 					}
 				case ast.ModOp:
-					if res, ok := lhs.Mod(rhs); ok {
+					if res, ok := lhs.mod(rhs); ok {
 						return res
 					}
 				case ast.EqOp:
@@ -94,19 +94,19 @@ func (vm *Instance) evaluate(node ast.Node) operand {
 				case ast.NotEqOp:
 					return BoxBool(!lhs.Equals(rhs))
 				case ast.LtOp:
-					if res, ok := lhs.LessThan(rhs); ok {
+					if res, ok := lhs.lessThan(rhs); ok {
 						return res
 					}
 				case ast.GtOp:
-					if res, ok := lhs.GreaterThan(rhs); ok {
+					if res, ok := lhs.greaterThan(rhs); ok {
 						return res
 					}
 				case ast.LtEqOp:
-					if res, ok := lhs.LessThanOrEqualTo(rhs); ok {
+					if res, ok := lhs.lessThanOrEqualTo(rhs); ok {
 						return res
 					}
 				case ast.GtEqOp:
-					if res, ok := lhs.GreaterThanOrEqualTo(rhs); ok {
+					if res, ok := lhs.greaterThanOrEqualTo(rhs); ok {
 						return res
 					}
 				case ast.AndOp:

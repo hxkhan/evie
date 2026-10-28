@@ -27,7 +27,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.AddOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					b := *fbr.get(r)
-					if result, ok := l.Add(b); ok {
+					if result, ok := l.add(b); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "+", l, b)
@@ -35,7 +35,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.SubOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					b := *fbr.get(r)
-					if result, ok := l.Sub(b); ok {
+					if result, ok := l.sub(b); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "-", l, b)
@@ -43,7 +43,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.MulOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					b := *fbr.get(r)
-					if result, ok := l.Mul(b); ok {
+					if result, ok := l.mul(b); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "*", l, b)
@@ -51,7 +51,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.DivOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					b := *fbr.get(r)
-					if result, ok := l.Div(b); ok {
+					if result, ok := l.div(b); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "/", l, b)
@@ -59,7 +59,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.ModOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					b := *fbr.get(r)
-					if result, ok := l.Mod(b); ok {
+					if result, ok := l.mod(b); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "%", l, b)
@@ -77,7 +77,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.LtOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					b := *fbr.get(r)
-					if result, ok := l.LessThan(b); ok {
+					if result, ok := l.lessThan(b); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "<", l, b)
@@ -85,7 +85,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.GtOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					b := *fbr.get(r)
-					if result, ok := l.GreaterThan(b); ok {
+					if result, ok := l.greaterThan(b); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, ">", l, b)
@@ -93,7 +93,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.LtEqOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					b := *fbr.get(r)
-					if result, ok := l.LessThanOrEqualTo(b); ok {
+					if result, ok := l.lessThanOrEqualTo(b); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "<=", l, b)
@@ -101,7 +101,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.GtEqOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					b := *fbr.get(r)
-					if result, ok := l.GreaterThanOrEqualTo(b); ok {
+					if result, ok := l.greaterThanOrEqualTo(b); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, ">=", l, b)
@@ -126,7 +126,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.AddOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					a, b := *fbr.get(l), *fbr.get(r)
-					if result, ok := a.Add(b); ok {
+					if result, ok := a.add(b); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "+", a, b)
@@ -134,7 +134,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.SubOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					a, b := *fbr.get(l), *fbr.get(r)
-					if result, ok := a.Sub(b); ok {
+					if result, ok := a.sub(b); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "-", a, b)
@@ -142,7 +142,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.MulOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					a, b := *fbr.get(l), *fbr.get(r)
-					if result, ok := a.Mul(b); ok {
+					if result, ok := a.mul(b); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "*", a, b)
@@ -150,7 +150,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.DivOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					a, b := *fbr.get(l), *fbr.get(r)
-					if result, ok := a.Div(b); ok {
+					if result, ok := a.div(b); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "/", a, b)
@@ -158,7 +158,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.ModOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					a, b := *fbr.get(l), *fbr.get(r)
-					if result, ok := a.Mod(b); ok {
+					if result, ok := a.mod(b); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "%", a, b)
@@ -176,7 +176,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.LtOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					a, b := *fbr.get(l), *fbr.get(r)
-					if result, ok := a.LessThan(b); ok {
+					if result, ok := a.lessThan(b); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "<", a, b)
@@ -184,7 +184,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.GtOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					a, b := *fbr.get(l), *fbr.get(r)
-					if result, ok := a.GreaterThan(b); ok {
+					if result, ok := a.greaterThan(b); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, ">", a, b)
@@ -192,7 +192,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.LtEqOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					a, b := *fbr.get(l), *fbr.get(r)
-					if result, ok := a.LessThanOrEqualTo(b); ok {
+					if result, ok := a.lessThanOrEqualTo(b); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "<=", a, b)
@@ -200,7 +200,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.GtEqOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					a, b := *fbr.get(l), *fbr.get(r)
-					if result, ok := a.GreaterThanOrEqualTo(b); ok {
+					if result, ok := a.greaterThanOrEqualTo(b); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, ">=", a, b)
@@ -222,7 +222,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.AddOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					a := *fbr.get(l)
-					if result, ok := a.Add(r); ok {
+					if result, ok := a.add(r); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "+", a, r)
@@ -230,7 +230,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.SubOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					a := *fbr.get(l)
-					if result, ok := a.Sub(r); ok {
+					if result, ok := a.sub(r); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "-", a, r)
@@ -238,7 +238,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.MulOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					a := *fbr.get(l)
-					if result, ok := a.Mul(r); ok {
+					if result, ok := a.mul(r); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "*", a, r)
@@ -246,7 +246,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.DivOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					a := *fbr.get(l)
-					if result, ok := a.Div(r); ok {
+					if result, ok := a.div(r); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "/", a, r)
@@ -254,7 +254,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.ModOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					a := *fbr.get(l)
-					if result, ok := a.Mod(r); ok {
+					if result, ok := a.mod(r); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "%", a, r)
@@ -272,7 +272,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.LtOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					a := *fbr.get(l)
-					if result, ok := a.LessThan(r); ok {
+					if result, ok := a.lessThan(r); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "<", a, r)
@@ -280,7 +280,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.GtOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					a := *fbr.get(l)
-					if result, ok := a.GreaterThan(r); ok {
+					if result, ok := a.greaterThan(r); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, ">", a, r)
@@ -288,7 +288,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.LtEqOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					a := *fbr.get(l)
-					if result, ok := a.LessThanOrEqualTo(r); ok {
+					if result, ok := a.lessThanOrEqualTo(r); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, "<=", a, r)
@@ -296,7 +296,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.GtEqOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					a := *fbr.get(l)
-					if result, ok := a.GreaterThanOrEqualTo(r); ok {
+					if result, ok := a.greaterThanOrEqualTo(r); ok {
 						return result, nil
 					}
 					return Value{}, operatorError(site, ">=", a, r)
@@ -327,7 +327,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if exc != nil {
 				return b, exc
 			}
-			if result, ok := a.Add(b); ok {
+			if result, ok := a.add(b); ok {
 				return result, nil
 			}
 			return Value{}, operatorError(site, "+", a, b)
@@ -342,7 +342,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if exc != nil {
 				return b, exc
 			}
-			if result, ok := a.Sub(b); ok {
+			if result, ok := a.sub(b); ok {
 				return result, nil
 			}
 			return Value{}, operatorError(site, "-", a, b)
@@ -357,7 +357,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if exc != nil {
 				return b, exc
 			}
-			if result, ok := a.Mul(b); ok {
+			if result, ok := a.mul(b); ok {
 				return result, nil
 			}
 			return Value{}, operatorError(site, "*", a, b)
@@ -372,7 +372,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if exc != nil {
 				return b, exc
 			}
-			if result, ok := a.Div(b); ok {
+			if result, ok := a.div(b); ok {
 				return result, nil
 			}
 			return Value{}, operatorError(site, "/", a, b)
@@ -387,7 +387,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if exc != nil {
 				return b, exc
 			}
-			if result, ok := a.Mod(b); ok {
+			if result, ok := a.mod(b); ok {
 				return result, nil
 			}
 			return Value{}, operatorError(site, "%", a, b)
@@ -426,7 +426,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if exc != nil {
 				return b, exc
 			}
-			if result, ok := a.LessThan(b); ok {
+			if result, ok := a.lessThan(b); ok {
 				return result, nil
 			}
 			return Value{}, operatorError(site, "<", a, b)
@@ -441,7 +441,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if exc != nil {
 				return b, exc
 			}
-			if result, ok := a.GreaterThan(b); ok {
+			if result, ok := a.greaterThan(b); ok {
 				return result, nil
 			}
 			return Value{}, operatorError(site, ">", a, b)
@@ -456,7 +456,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if exc != nil {
 				return b, exc
 			}
-			if result, ok := a.LessThanOrEqualTo(b); ok {
+			if result, ok := a.lessThanOrEqualTo(b); ok {
 				return result, nil
 			}
 			return Value{}, operatorError(site, "<=", a, b)
@@ -471,7 +471,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if exc != nil {
 				return b, exc
 			}
-			if result, ok := a.GreaterThanOrEqualTo(b); ok {
+			if result, ok := a.greaterThanOrEqualTo(b); ok {
 				return result, nil
 			}
 			return Value{}, operatorError(site, ">=", a, b)
@@ -532,7 +532,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 			case ast.AddOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					cell, b := fbr.get(lhs), *fbr.get(rhs)
-					if result, ok := cell.Add(b); ok {
+					if result, ok := cell.add(b); ok {
 						*cell = result
 						return Value{}, nil
 					}
@@ -541,7 +541,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 			case ast.SubOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					cell, b := fbr.get(lhs), *fbr.get(rhs)
-					if result, ok := cell.Sub(b); ok {
+					if result, ok := cell.sub(b); ok {
 						*cell = result
 						return Value{}, nil
 					}
@@ -550,7 +550,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 			case ast.MulOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					cell, b := fbr.get(lhs), *fbr.get(rhs)
-					if result, ok := cell.Mul(b); ok {
+					if result, ok := cell.mul(b); ok {
 						*cell = result
 						return Value{}, nil
 					}
@@ -559,7 +559,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 			case ast.DivOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					cell, b := fbr.get(lhs), *fbr.get(rhs)
-					if result, ok := cell.Div(b); ok {
+					if result, ok := cell.div(b); ok {
 						*cell = result
 						return Value{}, nil
 					}
@@ -568,7 +568,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 			case ast.ModOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					cell, b := fbr.get(lhs), *fbr.get(rhs)
-					if result, ok := cell.Mod(b); ok {
+					if result, ok := cell.mod(b); ok {
 						*cell = result
 						return Value{}, nil
 					}
@@ -580,7 +580,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 			case ast.AddOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					cell := fbr.get(lhs)
-					if result, ok := cell.Add(rhs); ok {
+					if result, ok := cell.add(rhs); ok {
 						*cell = result
 						return Value{}, nil
 					}
@@ -589,7 +589,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 			case ast.SubOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					cell := fbr.get(lhs)
-					if result, ok := cell.Sub(rhs); ok {
+					if result, ok := cell.sub(rhs); ok {
 						*cell = result
 						return Value{}, nil
 					}
@@ -598,7 +598,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 			case ast.MulOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					cell := fbr.get(lhs)
-					if result, ok := cell.Mul(rhs); ok {
+					if result, ok := cell.mul(rhs); ok {
 						*cell = result
 						return Value{}, nil
 					}
@@ -607,7 +607,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 			case ast.DivOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					cell := fbr.get(lhs)
-					if result, ok := cell.Div(rhs); ok {
+					if result, ok := cell.div(rhs); ok {
 						*cell = result
 						return Value{}, nil
 					}
@@ -616,7 +616,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 			case ast.ModOp:
 				return func(fbr *Fiber) (Value, Exception) {
 					cell := fbr.get(lhs)
-					if result, ok := cell.Mod(rhs); ok {
+					if result, ok := cell.mod(rhs); ok {
 						*cell = result
 						return Value{}, nil
 					}
@@ -633,7 +633,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 					return b, exc
 				}
 				cell := fbr.get(lhs)
-				if result, ok := cell.Add(b); ok {
+				if result, ok := cell.add(b); ok {
 					*cell = result
 					return Value{}, nil
 				}
@@ -646,7 +646,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 					return b, exc
 				}
 				cell := fbr.get(lhs)
-				if result, ok := cell.Sub(b); ok {
+				if result, ok := cell.sub(b); ok {
 					*cell = result
 					return Value{}, nil
 				}
@@ -659,7 +659,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 					return b, exc
 				}
 				cell := fbr.get(lhs)
-				if result, ok := cell.Mul(b); ok {
+				if result, ok := cell.mul(b); ok {
 					*cell = result
 					return Value{}, nil
 				}
@@ -672,7 +672,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 					return b, exc
 				}
 				cell := fbr.get(lhs)
-				if result, ok := cell.Div(b); ok {
+				if result, ok := cell.div(b); ok {
 					*cell = result
 					return Value{}, nil
 				}
@@ -685,7 +685,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 					return b, exc
 				}
 				cell := fbr.get(lhs)
-				if result, ok := cell.Mod(b); ok {
+				if result, ok := cell.mod(b); ok {
 					*cell = result
 					return Value{}, nil
 				}
@@ -706,7 +706,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 				if exc != nil {
 					return b, exc
 				}
-				if result, ok := cell.Add(b); ok {
+				if result, ok := cell.add(b); ok {
 					*cell = result
 					return Value{}, nil
 				}
@@ -718,7 +718,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 				if exc != nil {
 					return b, exc
 				}
-				if result, ok := cell.Sub(b); ok {
+				if result, ok := cell.sub(b); ok {
 					*cell = result
 					return Value{}, nil
 				}
@@ -730,7 +730,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 				if exc != nil {
 					return b, exc
 				}
-				if result, ok := cell.Mul(b); ok {
+				if result, ok := cell.mul(b); ok {
 					*cell = result
 					return Value{}, nil
 				}
@@ -742,7 +742,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 				if exc != nil {
 					return b, exc
 				}
-				if result, ok := cell.Div(b); ok {
+				if result, ok := cell.div(b); ok {
 					*cell = result
 					return Value{}, nil
 				}
@@ -754,7 +754,7 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 				if exc != nil {
 					return b, exc
 				}
-				if result, ok := cell.Mod(b); ok {
+				if result, ok := cell.mod(b); ok {
 					*cell = result
 					return Value{}, nil
 				}
@@ -794,7 +794,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *Fiber
 					if a.pointer == f64Type {
 						return math.Float64frombits(a.scalar) < bn, nil
 					}
-					res, ok := a.LessThan(b)
+					res, ok := a.lessThan(b)
 					if !ok {
 						return false, operatorError(site, "<", a, b)
 					}
@@ -806,7 +806,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *Fiber
 					if a.pointer == f64Type {
 						return math.Float64frombits(a.scalar) > bn, nil
 					}
-					res, ok := a.GreaterThan(b)
+					res, ok := a.greaterThan(b)
 					if !ok {
 						return false, operatorError(site, ">", a, b)
 					}
@@ -818,7 +818,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *Fiber
 					if a.pointer == f64Type {
 						return math.Float64frombits(a.scalar) <= bn, nil
 					}
-					res, ok := a.LessThanOrEqualTo(b)
+					res, ok := a.lessThanOrEqualTo(b)
 					if !ok {
 						return false, operatorError(site, "<=", a, b)
 					}
@@ -830,7 +830,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *Fiber
 					if a.pointer == f64Type {
 						return math.Float64frombits(a.scalar) >= bn, nil
 					}
-					res, ok := a.GreaterThanOrEqualTo(b)
+					res, ok := a.greaterThanOrEqualTo(b)
 					if !ok {
 						return false, operatorError(site, ">=", a, b)
 					}
@@ -866,7 +866,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *Fiber
 				if a.pointer == f64Type && b.pointer == f64Type {
 					return math.Float64frombits(a.scalar) < math.Float64frombits(b.scalar), nil
 				}
-				res, ok := a.LessThan(b)
+				res, ok := a.lessThan(b)
 				if !ok {
 					return false, operatorError(site, "<", a, b)
 				}
@@ -878,7 +878,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *Fiber
 				if a.pointer == f64Type && b.pointer == f64Type {
 					return math.Float64frombits(a.scalar) > math.Float64frombits(b.scalar), nil
 				}
-				res, ok := a.GreaterThan(b)
+				res, ok := a.greaterThan(b)
 				if !ok {
 					return false, operatorError(site, ">", a, b)
 				}
@@ -890,7 +890,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *Fiber
 				if a.pointer == f64Type && b.pointer == f64Type {
 					return math.Float64frombits(a.scalar) <= math.Float64frombits(b.scalar), nil
 				}
-				res, ok := a.LessThanOrEqualTo(b)
+				res, ok := a.lessThanOrEqualTo(b)
 				if !ok {
 					return false, operatorError(site, "<=", a, b)
 				}
@@ -902,7 +902,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *Fiber
 				if a.pointer == f64Type && b.pointer == f64Type {
 					return math.Float64frombits(a.scalar) >= math.Float64frombits(b.scalar), nil
 				}
-				res, ok := a.GreaterThanOrEqualTo(b)
+				res, ok := a.greaterThanOrEqualTo(b)
 				if !ok {
 					return false, operatorError(site, ">=", a, b)
 				}

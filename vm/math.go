@@ -2,7 +2,7 @@ package vm
 
 import "math"
 
-func (x Value) Add(y Value) (z Value, ok bool) {
+func (x Value) add(y Value) (z Value, ok bool) {
 	if x.pointer == f64Type && y.pointer == f64Type {
 		return BoxNumber(math.Float64frombits(x.scalar) + math.Float64frombits(y.scalar)), true
 	} else if x, ok := x.AsString(); ok {
@@ -13,28 +13,28 @@ func (x Value) Add(y Value) (z Value, ok bool) {
 	return Value{}, false
 }
 
-func (x Value) Sub(y Value) (z Value, ok bool) {
+func (x Value) sub(y Value) (z Value, ok bool) {
 	if x.pointer == f64Type && y.pointer == f64Type {
 		return BoxNumber(math.Float64frombits(x.scalar) - math.Float64frombits(y.scalar)), true
 	}
 	return Value{}, false
 }
 
-func (x Value) Mul(y Value) (z Value, ok bool) {
+func (x Value) mul(y Value) (z Value, ok bool) {
 	if x.pointer == f64Type && y.pointer == f64Type {
 		return BoxNumber(math.Float64frombits(x.scalar) * math.Float64frombits(y.scalar)), true
 	}
 	return Value{}, false
 }
 
-func (x Value) Div(y Value) (z Value, ok bool) {
+func (x Value) div(y Value) (z Value, ok bool) {
 	if x.pointer == f64Type && y.pointer == f64Type {
 		return BoxNumber(math.Float64frombits(x.scalar) / math.Float64frombits(y.scalar)), true
 	}
 	return Value{}, false
 }
 
-func (x Value) Mod(y Value) (z Value, ok bool) {
+func (x Value) mod(y Value) (z Value, ok bool) {
 	if x.pointer == f64Type && y.pointer == f64Type {
 		x := math.Float64frombits(x.scalar)
 		y := math.Float64frombits(y.scalar)
@@ -43,28 +43,28 @@ func (x Value) Mod(y Value) (z Value, ok bool) {
 	return Value{}, false
 }
 
-func (x Value) LessThan(y Value) (z Value, ok bool) {
+func (x Value) lessThan(y Value) (z Value, ok bool) {
 	if x.pointer == f64Type && y.pointer == f64Type {
 		return BoxBool(math.Float64frombits(x.scalar) < math.Float64frombits(y.scalar)), true
 	}
 	return Value{}, false
 }
 
-func (x Value) GreaterThan(y Value) (z Value, ok bool) {
+func (x Value) greaterThan(y Value) (z Value, ok bool) {
 	if x.pointer == f64Type && y.pointer == f64Type {
 		return BoxBool(math.Float64frombits(x.scalar) > math.Float64frombits(y.scalar)), true
 	}
 	return Value{}, false
 }
 
-func (x Value) LessThanOrEqualTo(y Value) (z Value, ok bool) {
+func (x Value) lessThanOrEqualTo(y Value) (z Value, ok bool) {
 	if x.pointer == f64Type && y.pointer == f64Type {
 		return BoxBool(math.Float64frombits(x.scalar) <= math.Float64frombits(y.scalar)), true
 	}
 	return Value{}, false
 }
 
-func (x Value) GreaterThanOrEqualTo(y Value) (z Value, ok bool) {
+func (x Value) greaterThanOrEqualTo(y Value) (z Value, ok bool) {
 	if x.pointer == f64Type && y.pointer == f64Type {
 		return BoxBool(math.Float64frombits(x.scalar) >= math.Float64frombits(y.scalar)), true
 	}

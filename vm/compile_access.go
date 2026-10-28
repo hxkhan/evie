@@ -721,15 +721,15 @@ func (vm *Instance) compoundOperator(node ast.MutableBinOp) func(fbr *Fiber, cur
 	var apply func(Value, Value) (Value, bool)
 	switch node.Operator {
 	case ast.AddOp:
-		apply = Value.Add
+		apply = Value.add
 	case ast.SubOp:
-		apply = Value.Sub
+		apply = Value.sub
 	case ast.MulOp:
-		apply = Value.Mul
+		apply = Value.mul
 	case ast.DivOp:
-		apply = Value.Div
+		apply = Value.div
 	case ast.ModOp:
-		apply = Value.Mod
+		apply = Value.mod
 	default:
 		panic(vm.compileErrorAt(node, "unsupported compound operator '%v'", node.Operator))
 	}

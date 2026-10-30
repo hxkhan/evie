@@ -10,7 +10,7 @@ func (vm *Instance) emitReturn(node ast.Return) instruction {
 		// optimise: returning constants
 		if in, isInput := node.Value.(ast.Input[float64]); isInput {
 			value := BoxNumber(in.Value)
-			return func(fbr *Fiber) (Value, Exception) {
+			return func(fbr *fiber) (Value, exception) {
 				return value, signalReturn
 			}
 		}
@@ -24,11 +24,11 @@ func (vm *Instance) emitReturn(node ast.Return) instruction {
 
 			if v, isLocal := variable.(local); isLocal {
 				if v.isCaptured {
-					return func(fbr *Fiber) (Value, Exception) {
+					return func(fbr *fiber) (Value, exception) {
 						return fbr.getCaptured(v.index), signalReturn
 					}
 				}
-				return func(fbr *Fiber) (Value, Exception) {
+				return func(fbr *fiber) (Value, exception) {
 					return fbr.getLocal(v.index), signalReturn
 				}
 			}
@@ -36,7 +36,7 @@ func (vm *Instance) emitReturn(node ast.Return) instruction {
 	}
 
 	what := vm.compile(node.Value)
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		v, err := what(fbr)
 		if err != nil {
 			return v, err
@@ -49,7 +49,7 @@ func (vm *Instance) emitReturn(node ast.Return) instruction {
 func (vm *Instance) emitThrow(node ast.Throw) instruction {
 	site := vm.at(node)
 	what := vm.compile(node.Value)
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		v, err := what(fbr)
 		if err != nil {
 			return v, err
@@ -65,11 +65,11 @@ func (vm *Instance) emitThrow(node ast.Throw) instruction {
 
 // compileCondition compiles an expression used as a condition straight to a
 // Go bool; comparisons on locals and constants skip the boxed result
-func (vm *Instance) compileCondition(node ast.Node) func(fbr *Fiber) (bool, Exception) {
+func (vm *Instance) compileCondition(node ast.Node) func(fbr *fiber) (bool, exception) {
 	site := vm.at(node)
 	if val, ok := vm.evaluate(node).(Value); ok {
 		b := val.IsTruthy()
-		return func(fbr *Fiber) (bool, Exception) {
+		return func(fbr *fiber) (bool, exception) {
 			return b, nil
 		}
 	}
@@ -81,7 +81,7 @@ func (vm *Instance) compileCondition(node ast.Node) func(fbr *Fiber) (bool, Exce
 	}
 
 	condition := vm.compile(node)
-	return func(fbr *Fiber) (bool, Exception) {
+	return func(fbr *fiber) (bool, exception) {
 		v, err := condition(fbr)
 		if err != nil {
 			return false, err
@@ -97,7 +97,7 @@ func (vm *Instance) emitConditional(node ast.Conditional) instruction {
 	if node.Otherwise != nil {
 		otherwise := vm.compile(node.Otherwise)
 
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			ok, err := condition(fbr)
 			if err != nil {
 				return Value{}, err
@@ -110,7 +110,7 @@ func (vm *Instance) emitConditional(node ast.Conditional) instruction {
 		}
 	}
 
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		ok, err := condition(fbr)
 		if err != nil {
 			return Value{}, err
@@ -127,7 +127,7 @@ func (vm *Instance) emitWhile(node ast.While) instruction {
 	condition := vm.compileCondition(node.Condition)
 	action := vm.compile(node.Action)
 
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		for {
 			// evaluate condition
 			ok, err := condition(fbr)
@@ -182,7 +182,7 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 
 	bodyInst := vm.compile(node.Action)
 
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		collVal, err := collInst(fbr)
 		if err != nil {
 			return collVal, err
@@ -302,7 +302,7 @@ func (vm *Instance) emitSwitch(node ast.Switch) instruction {
 
 	// Tagless switch: switch { case cond1, cond2: ... }
 	if node.Value == nil {
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			for _, c := range cases {
 				matched := false
 				for _, valInst := range c.values {
@@ -336,7 +336,7 @@ func (vm *Instance) emitSwitch(node ast.Switch) instruction {
 
 	// Value switch: switch expr { case val1, val2: ... }
 	targetInst := vm.compile(node.Value)
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		targetVal, err := targetInst(fbr)
 		if err != nil {
 			return targetVal, err
@@ -391,7 +391,7 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 			// optimise: returning constants
 			if in, isInput := ret.Value.(ast.Input[float64]); isInput {
 				value := BoxNumber(in.Value)
-				return func(fbr *Fiber) (Value, Exception) {
+				return func(fbr *fiber) (Value, exception) {
 					return value, signalReturn
 				}
 			}
@@ -405,18 +405,18 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 
 				if v, isLocal := variable.(local); isLocal {
 					if v.isCaptured {
-						return func(fbr *Fiber) (Value, Exception) {
+						return func(fbr *fiber) (Value, exception) {
 							return fbr.getCaptured(v.index), signalReturn
 						}
 					}
-					return func(fbr *Fiber) (Value, Exception) {
+					return func(fbr *fiber) (Value, exception) {
 						return fbr.getLocal(v.index), signalReturn
 					}
 				}
 			}
 
 			what := vm.compile(ret.Value)
-			return func(fbr *Fiber) (Value, Exception) {
+			return func(fbr *fiber) (Value, exception) {
 				v, err := what(fbr)
 				if err != nil {
 					return v, err
@@ -437,12 +437,12 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 
 	switch len(block) {
 	case 0:
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			return Value{}, nil
 		}
 	case 1:
 		s0 := block[0]
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			if v, err := s0(fbr); err != nil {
 				return v, err
 			}
@@ -451,7 +451,7 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 	case 2:
 		s0 := block[0]
 		s1 := block[1]
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			if v, err := s0(fbr); err != nil {
 				return v, err
 			}
@@ -464,7 +464,7 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 		s0 := block[0]
 		s1 := block[1]
 		s2 := block[2]
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			if v, err := s0(fbr); err != nil {
 				return v, err
 			}
@@ -477,7 +477,7 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 			return Value{}, nil
 		}
 	default:
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			for _, statement := range block {
 				if v, err := statement(fbr); err != nil {
 					return v, err

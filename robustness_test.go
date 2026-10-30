@@ -48,7 +48,7 @@ func TestPanickingNativeBecomesException(t *testing.T) {
 	env.SetStatic("boom", vm.BoxGoFunc(vm.NewFunc("boom", 0, func(c vm.Call) (vm.Value, error) {
 		panic("host bug")
 	})))
-	_, err := env.EvalString(`package main
+	_, err := env.Eval(`package main
 	fn direct() { return boom() }
 	fn inTask() { return await go boom() }
 	fn afterwards(a, b) { return a + b }
@@ -59,21 +59,19 @@ func TestPanickingNativeBecomesException(t *testing.T) {
 
 	for _, name := range []string{"direct", "inTask"} {
 		fn, _ := env.Lookup("main." + name)
-		_, exc := fn.Call(nil)
+		_, exc := fn.Call()
 		if exc == nil || !strings.Contains(exc.Error(), "internal error: host bug") {
 			t.Fatalf("%s: expected the native's panic as an exception, got %v", name, exc)
 		}
 	}
 
 	// the instance is still usable on the same fiber afterwards
-	fbr := env.NewFiber()
-	defer env.ReleaseFiber(fbr)
 	direct, _ := env.Lookup("main.direct")
-	if _, exc := direct.Call(fbr); exc == nil {
+	if _, exc := direct.Call(); exc == nil {
 		t.Fatal("expected an exception")
 	}
 	afterwards, _ := env.Lookup("main.afterwards")
-	res, exc := afterwards.Call(fbr, vm.BoxNumber(2), vm.BoxNumber(3))
+	res, exc := afterwards.Call(vm.BoxNumber(2), vm.BoxNumber(3))
 	if exc != nil {
 		t.Fatal(exc)
 	}
@@ -85,7 +83,7 @@ func TestPanickingNativeBecomesException(t *testing.T) {
 // a fiber that ran tasks is handed out clean afterwards
 func TestFibersAreResetBetweenUses(t *testing.T) {
 	env := evie.New()
-	_, err := env.EvalString(`package main
+	_, err := env.Eval(`package main
 	fn s() { return 1 }
 	fn spawn() { var i := 0
 		while i < 50 { await go s()
@@ -98,14 +96,12 @@ func TestFibersAreResetBetweenUses(t *testing.T) {
 	spawn, _ := env.Lookup("main.spawn")
 	waiter, _ := env.Lookup("main.waiter")
 	for i := 0; i < 200; i++ {
-		if _, exc := spawn.Call(nil); exc != nil {
+		if _, exc := spawn.Call(); exc != nil {
 			t.Fatal(exc)
 		}
-		fbr := env.NewFiber()
-		if _, exc := waiter.Call(fbr); exc != nil {
+		if _, exc := waiter.Call(); exc != nil {
 			t.Fatal(exc)
 		}
-		env.ReleaseFiber(fbr)
 	}
 }
 
@@ -166,7 +162,7 @@ func TestOneFiberRunsAtATime(t *testing.T) {
 		inside.Add(-1)
 		return vm.Value{}, nil
 	})))
-	_, err := env.EvalString(`package main imports("time")
+	_, err := env.Eval(`package main imports("time")
 	var pushes := 0
 	fn worker(id, n) {
 		var i := 0
@@ -188,7 +184,7 @@ func TestOneFiberRunsAtATime(t *testing.T) {
 		t.Fatal(err)
 	}
 	mainFn, _ := env.Lookup("main.main")
-	res, exc := mainFn.Call(nil)
+	res, exc := mainFn.Call()
 	if exc != nil {
 		t.Fatal(exc)
 	}
@@ -207,7 +203,7 @@ func TestInstancesRunInParallel(t *testing.T) {
 	for i := 0; i < instances; i++ {
 		go func() {
 			env := evie.New()
-			_, err := env.EvalString(`package main
+			_, err := env.Eval(`package main
 			fn fib(n) { if n < 2 { return n }
 				return fib(n-1) + fib(n-2) }
 			fn main() { return fib(20) }`)
@@ -217,7 +213,7 @@ func TestInstancesRunInParallel(t *testing.T) {
 				return
 			}
 			mainFn, _ := env.Lookup("main.main")
-			res, exc := mainFn.Call(nil)
+			res, exc := mainFn.Call()
 			if exc != nil {
 				t.Error(exc)
 			}
@@ -371,7 +367,7 @@ func TestFieldAssignmentOnComputedReceivers(t *testing.T) {
 	}
 
 	// with the compiler's fast paths off, every receiver takes this path
-	eng := evie.New(evie.Options{NoInline: true})
+	eng := evie.New(evie.Options{Debug: evie.Debug{NoFastPaths: true}})
 	if _, err := eng.Load("noinline.ev", []byte("package main\nfn main() {\n\to := {a: 1}\n\to.a = 2\n\treturn o.a\n}")); err != nil {
 		t.Fatal(err)
 	}
@@ -436,7 +432,7 @@ func TestCompoundAssignmentTargets(t *testing.T) {
 		return [x, total, first]
 	}`
 	for _, noInline := range []bool{false, true} {
-		eng := evie.New(evie.Options{NoInline: noInline})
+		eng := evie.New(evie.Options{Debug: evie.Debug{NoFastPaths: noInline}})
 		if _, err := eng.Load("compound.ev", []byte(src)); err != nil {
 			t.Fatalf("NoInline %v: %v", noInline, err)
 		}
@@ -480,7 +476,7 @@ func TestMemberCallsDoNotAllocate(t *testing.T) {
 		t.Fatal("loop not found")
 	}
 	allocs := testing.AllocsPerRun(10, func() {
-		if _, err := loop.Call(nil); err != nil {
+		if _, err := loop.Call(); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -531,7 +527,7 @@ func TestTypedWrappers(t *testing.T) {
 	pkg.Native("now", vm.Func0(func() string { return "tick" }))
 	env.SetStatic("m", pkg.Box())
 
-	_, err := env.EvalString(`package main
+	_, err := env.Eval(`package main
 	fn main() {
 		r := [m.sqrt(16), m.hypot(3, 4), m.repeat("ab", 3), m.clamp(15, 0, 10), m.isEven(4), m.sum([1, 2, 3.5]), m.size({a: 1, b: 2}), m.pair("k", 7).k, m.now()]
 		errs := [catch(m.div(1, 0)).message, catch(m.sqrt("x")).message, catch(m.isEven(1.5)).message]
@@ -553,7 +549,7 @@ func TestTypedWrappers(t *testing.T) {
 // Instance.Call boxes Go arguments and borrows a fiber
 func TestInstanceCall(t *testing.T) {
 	env := evie.New()
-	if _, err := env.EvalString("package main\nfn add(a, b) => a + b\nfn greet(who) => \"hi \" + who"); err != nil {
+	if _, err := env.Eval("package main\nfn add(a, b) => a + b\nfn greet(who) => \"hi \" + who"); err != nil {
 		t.Fatal(err)
 	}
 	sum, err := env.Call("main.add", 2, 3.5)
@@ -611,7 +607,7 @@ func TestHostTypes(t *testing.T) {
 	env.SetStatic("shared", Counter.Wrap(shared))
 	env.SetStatic("bump", vm.BoxGoFunc(vm.Func1(func(c *counter) *counter { c.n += 10; return c })))
 
-	_, err := env.EvalString(`package main
+	_, err := env.Eval(`package main
 	fn main() {
 		c := Counter(5)
 		c.inc()
@@ -641,7 +637,7 @@ func TestHostTypes(t *testing.T) {
 		t.Fatal(err)
 	}
 	// a package is loaded once, so the addition goes in a package of its own
-	if _, err := env.EvalString("package extra\nfn peek(c) => c.get()"); err != nil {
+	if _, err := env.Eval("package extra\nfn peek(c) => c.get()"); err != nil {
 		t.Fatal(err)
 	}
 	res, err = env.Call("extra.peek", &counter{n: 9})
@@ -714,7 +710,7 @@ func TestPrelude(t *testing.T) {
 	if v, ok := eng.Lookup("answer"); !ok || v.String() != "42" {
 		t.Fatalf("Lookup through the prelude failed: %v %v", v, ok)
 	}
-	if _, err := evie.Run("package main\nfn main() => undefinedName"); err == nil || !strings.Contains(err.Error(), "cannot find 'undefinedName'") {
+	if _, err := evie.Eval("package main\nfn main() => undefinedName"); err == nil || !strings.Contains(err.Error(), "cannot find 'undefinedName'") {
 		t.Fatalf("expected an undefined symbol error, got %v", err)
 	}
 }

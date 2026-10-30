@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"fmt"
 	"unsafe"
 
 	"github.com/hxkhan/evie/vm/fields"
@@ -9,8 +10,8 @@ import (
 // Package is a namespace of symbols: the globals of a compiled evie file, or
 // the functions and constants a host registers for scripts to import.
 type Package struct {
-	name    string               // name of the package
-	globals map[fields.ID]Global // all global symbols
+	name    string                  // name of the package
+	globals map[fields.ID]pkgGlobal // all global symbols
 
 	origin     string               // the file it was compiled from, for errors
 	importedAs map[string][2]string // path name -> (import path, bound name) where they differ
@@ -26,14 +27,14 @@ func (pkg *Package) SetMemberHint(hint string) {
 // NewPackage creates an empty host package. Scripts import it by the name it
 // is resolved under; an empty name is filled in from the import path.
 func NewPackage(name string) *Package {
-	return &Package{name: name, globals: map[fields.ID]Global{}}
+	return &Package{name: name, globals: map[fields.ID]pkgGlobal{}}
 }
 
 func (pkg *Package) Name() string {
 	return pkg.name
 }
 
-func (pkg *Package) SetName(name string) {
+func (pkg *Package) setName(name string) {
 	pkg.name = name
 }
 
@@ -49,7 +50,7 @@ func (pkg *Package) Set(name string, value Value) *Package {
 	if ref, exists := pkg.globals[index]; exists {
 		*ref.Value = value
 	} else {
-		pkg.globals[index] = Global{Value: &value, IsPublic: true, IsStatic: true, IsConstant: true}
+		pkg.globals[index] = pkgGlobal{Value: &value, IsPublic: true, IsStatic: true, IsConstant: true}
 	}
 	return pkg
 }
@@ -161,4 +162,38 @@ func compared(z Value, ok bool, x, y Value, op string) (bool, error) {
 	}
 	b, _ := z.AsBool()
 	return b, nil
+}
+
+// Field reads a field of an object or of a struct instance by name
+func (x Value) Field(name string) (Value, bool) {
+	if obj, ok := x.AsObject(); ok {
+		v, exists := obj[name]
+		return v, exists
+	}
+	if usi, ok := x.asStructInstance(); ok {
+		return usi.getFieldByName(name)
+	}
+	return Value{}, false
+}
+
+// SetField sets a field of an object or of a struct instance by name; a name
+// a struct does not declare becomes a dynamic field, as in scripts
+func (x Value) SetField(name string, v Value) error {
+	if obj, ok := x.AsObject(); ok {
+		obj[name] = v
+		return nil
+	}
+	if usi, ok := x.asStructInstance(); ok {
+		usi.setFieldByName(name, v)
+		return nil
+	}
+	return fmt.Errorf("cannot set field '%s' on %s", name, article(x))
+}
+
+// StructName is the name of the struct a struct instance was made from
+func (x Value) StructName() (string, bool) {
+	if usi, ok := x.asStructInstance(); ok {
+		return usi.InstanceOf.Name, true
+	}
+	return "", false
 }

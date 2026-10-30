@@ -27,14 +27,14 @@ func (vm *Instance) assignee(node ast.Node) binding {
 func (vm *Instance) emitNeg(node ast.Neg) instruction {
 	site := vm.at(node)
 	if val, ok := vm.evaluate(node).(Value); ok {
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			return val, nil
 		}
 	}
 
 	value := vm.compile(node.Value)
 
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		value, exc := value(fbr)
 		if exc != nil {
 			return value, exc
@@ -49,14 +49,14 @@ func (vm *Instance) emitNeg(node ast.Neg) instruction {
 
 func (vm *Instance) emitNot(node ast.Not) instruction {
 	if val, ok := vm.evaluate(node).(Value); ok {
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			return val, nil
 		}
 	}
 
 	value := vm.compile(node.Value)
 
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		value, exc := value(fbr)
 		if exc != nil {
 			return value, exc
@@ -69,12 +69,12 @@ func (vm *Instance) emitNot(node ast.Not) instruction {
 func (vm *Instance) emitCatch(node ast.Catch) instruction {
 	action := vm.compile(node.Action)
 
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		v, err := action(fbr)
 		if err != nil {
 			if err != signalReturn && err != signalContinue && err != signalBreak {
 				// convert exception to error-as-value and return
-				return BoxError(err), nil
+				return boxError(err), nil
 			}
 
 			// propagate as normal
@@ -87,7 +87,7 @@ func (vm *Instance) emitCatch(node ast.Catch) instruction {
 
 func (vm *Instance) emitStringTemplate(node ast.StringTemplate) instruction {
 	if val, ok := vm.evaluate(node).(Value); ok {
-		return func(fbr *Fiber) (Value, Exception) {
+		return func(fbr *fiber) (Value, exception) {
 			return val, nil
 		}
 	}
@@ -97,7 +97,7 @@ func (vm *Instance) emitStringTemplate(node ast.StringTemplate) instruction {
 		args[i] = vm.compile(arg)
 	}
 
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		params := make([]any, len(args))
 
 		for i, param := range args {
@@ -116,7 +116,7 @@ func (vm *Instance) emitStringTemplate(node ast.StringTemplate) instruction {
 func (vm *Instance) emitEcho(node ast.Echo) instruction {
 	what := vm.compile(node.Value)
 
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		v, err := what(fbr)
 		if err != nil {
 			return v, err
@@ -131,7 +131,7 @@ func (vm *Instance) emitIsInstanceOf(node ast.IsInstanceOf) instruction {
 	lhs := vm.compile(node.Lhs)
 	rhs := vm.compile(node.Rhs)
 
-	return func(fbr *Fiber) (Value, Exception) {
+	return func(fbr *fiber) (Value, exception) {
 		lhs, exc := lhs(fbr)
 		if exc != nil {
 			return lhs, exc
@@ -143,8 +143,8 @@ func (vm *Instance) emitIsInstanceOf(node ast.IsInstanceOf) instruction {
 		}
 
 		// structs
-		if us, isUserStruct := rhs.AsUserStruct(); isUserStruct {
-			if usi, isUserStructInstance := lhs.AsUserStructInstance(); isUserStructInstance {
+		if us, isUserStruct := rhs.asUserStruct(); isUserStruct {
+			if usi, isUserStructInstance := lhs.asStructInstance(); isUserStructInstance {
 				for cur := usi.InstanceOf; cur != nil; cur = cur.Parent {
 					if cur == us {
 						return BoxBool(true), nil
@@ -156,34 +156,34 @@ func (vm *Instance) emitIsInstanceOf(node ast.IsInstanceOf) instruction {
 		}
 
 		// built-ins
-		if rhs == BoxBuiltinType(typeString) {
+		if rhs == boxBuiltinType(typeString) {
 			_, isString := lhs.AsString()
 			return BoxBool(isString), nil
-		} else if rhs == BoxBuiltinType(typeError) {
+		} else if rhs == boxBuiltinType(typeError) {
 			_, isError := lhs.AsError()
 			return BoxBool(isError), nil
-		} else if rhs == BoxBuiltinType(typeArray) {
+		} else if rhs == boxBuiltinType(typeArray) {
 			_, isArray := lhs.AsArray()
 			return BoxBool(isArray), nil
-		} else if rhs == BoxBuiltinType(typeObject) {
+		} else if rhs == boxBuiltinType(typeObject) {
 			_, isObj := lhs.AsObject()
 			return BoxBool(isObj), nil
-		} else if rhs == BoxBuiltinType(typeBuffer) {
+		} else if rhs == boxBuiltinType(typeBuffer) {
 			_, isBuf := lhs.AsBuffer()
 			return BoxBool(isBuf), nil
-		} else if rhs == BoxBuiltinType(typeTask) {
+		} else if rhs == boxBuiltinType(typeTask) {
 			_, isTask := lhs.AsTask()
 			return BoxBool(isTask), nil
-		} else if rhs == BoxBuiltinType(typeNumber) {
+		} else if rhs == boxBuiltinType(typeNumber) {
 			_, isNumber := lhs.AsFloat64()
 			return BoxBool(isNumber), nil
-		} else if rhs == BoxBuiltinType(typeBool) {
+		} else if rhs == boxBuiltinType(typeBool) {
 			_, isBool := lhs.AsBool()
 			return BoxBool(isBool), nil
 		}
 
 		// host types
-		if bt, isType := rhs.AsBuiltinType(); isType {
+		if bt, isType := rhs.asBuiltinType(); isType {
 			if _, t, isHost := lhs.AsHost(); isHost {
 				return BoxBool(t.typ == bt), nil
 			}

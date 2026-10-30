@@ -27,7 +27,7 @@ type closure struct {
 	freeVars ds.Set[int]
 	scope    ds.Scope
 	info     *funcInfoStatic
-	ustruct  *UserStruct
+	ustruct  *userStruct
 }
 
 // PackageResolver resolves a package by import name or path.
@@ -51,8 +51,8 @@ type runtime struct {
 	wg       sync.WaitGroup      // wait for all fibers to complete
 }
 
-// Global is a package-level binding
-type Global struct {
+// pkgGlobal is a package-level binding
+type pkgGlobal struct {
 	*Value
 	IsPublic   bool // visible to other packages
 	IsStatic   bool // cannot be reassigned
@@ -103,22 +103,22 @@ func New(opts Options) (vm *Instance) {
 	return vm
 }
 
-// NewFiber hands out a fiber for calling into the instance from Go. Give it
+// newFiber hands out a fiber for calling into the instance from Go. Give it
 // back with ReleaseFiber once the calls are done, or pass nil to Call and let
 // the instance borrow one itself.
-func (vm *Instance) NewFiber() (fbr *Fiber) {
-	fbr = vm.rt.fibers.Get().(*Fiber)
+func (vm *Instance) newFiber() (fbr *fiber) {
+	fbr = vm.rt.fibers.Get().(*fiber)
 	fbr.reset()
 	return fbr
 }
 
-// ReleaseFiber returns a fiber obtained from NewFiber to the pool
-func (vm *Instance) ReleaseFiber(fbr *Fiber) {
+// releaseFiber returns a fiber obtained from NewFiber to the pool
+func (vm *Instance) releaseFiber(fbr *fiber) {
 	fbr.reset()
 	vm.rt.fibers.Put(fbr)
 }
 
-func (vm *Instance) EvalNode(node ast.Node) (result Value, err error) {
+func (vm *Instance) evalNode(node ast.Node) (result Value, err error) {
 	vm.rt.acquire()
 	defer vm.rt.release()
 
@@ -126,7 +126,7 @@ func (vm *Instance) EvalNode(node ast.Node) (result Value, err error) {
 		if r := recover(); r != nil {
 			if ce, ok := r.(*CompileError); ok {
 				err = ce
-			} else if exc, ok := r.(Exception); ok {
+			} else if exc, ok := r.(exception); ok {
 				err = exc
 			} else if e, ok := r.(error); ok {
 				err = e
@@ -147,10 +147,10 @@ func (vm *Instance) EvalNode(node ast.Node) (result Value, err error) {
 		}
 		result = v
 	} else {
-		fbr := vm.NewFiber()
-		defer vm.ReleaseFiber(fbr)
+		fbr := vm.newFiber()
+		defer vm.releaseFiber(fbr)
 		fbr.running = true // the runner is held above
-		fbr.active = &UserFn{funcInfoStatic: &funcInfoStatic{name: "anonymous"}}
+		fbr.active = &userFn{funcInfoStatic: &funcInfoStatic{name: "anonymous"}}
 
 		hasClosure := vm.cp.closures.Len() > 0
 		if !hasClosure {
@@ -191,7 +191,7 @@ func (vm *Instance) EvalSource(src *diag.Source) (Value, error) {
 	prev := vm.cp.src
 	vm.cp.src = src
 	defer func() { vm.cp.src = prev }()
-	return vm.EvalNode(node)
+	return vm.evalNode(node)
 }
 
 // EvalPackage compiles one package from all of its source files and runs its
@@ -228,7 +228,7 @@ func (vm *Instance) evalPackageUnits(units []unit) (err error) {
 		if r := recover(); r != nil {
 			if ce, ok := r.(*CompileError); ok {
 				err = ce
-			} else if exc, ok := r.(Exception); ok {
+			} else if exc, ok := r.(exception); ok {
 				err = exc
 			} else if e, ok := r.(error); ok {
 				err = e
@@ -244,10 +244,6 @@ func (vm *Instance) evalPackageUnits(units []unit) (err error) {
 	return nil
 }
 
-func (vm *Instance) EvalScript(input []byte) (Value, error) {
-	return vm.EvalSource(diag.NewSource("", input))
-}
-
 // Packages iterates through loaded packages
 func (vm *Instance) Packages() iter.Seq[*Package] {
 	return func(yield func(*Package) bool) {
@@ -259,8 +255,8 @@ func (vm *Instance) Packages() iter.Seq[*Package] {
 	}
 }
 
-// GetPackage retrieves a loaded package, if not found; then nil is returned
-func (vm *Instance) GetPackage(name string) (pkg *Package) {
+// Package retrieves a loaded package, if not found; then nil is returned
+func (vm *Instance) Package(name string) (pkg *Package) {
 	pkg, exists := vm.rt.packages[name]
 	if !exists {
 		return nil
@@ -291,10 +287,10 @@ type binding interface {
 	binding()
 }
 
-func (Value) operand()  {}
-func (local) operand()  {}
-func (local) binding()  {}
-func (Global) binding() {}
+func (Value) operand()     {}
+func (local) operand()     {}
+func (local) binding()     {}
+func (pkgGlobal) binding() {}
 
 // reach searches for a symbol across all scopes
 func (cp *compiler) reach(name string) (binding, error) {
@@ -324,7 +320,7 @@ func (cp *compiler) reach(name string) (binding, error) {
 		return ref, nil
 	}
 
-	ce := CompileErrorf("cannot find '%v' in this scope", name)
+	ce := compileErrorf("cannot find '%v' in this scope", name)
 	if closest, ok := diag.Suggest(name, cp.visibleNames()); ok {
 		ce.Hint = fmt.Sprintf("a binding with a similar name exists: '%s'", closest)
 	}

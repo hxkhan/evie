@@ -4,59 +4,59 @@ import (
 	"sync"
 )
 
-type TaskStatus int
+type taskStatus int
 
 const (
-	TaskPending TaskStatus = iota
-	TaskCompleted
-	TaskFailed
+	taskPending taskStatus = iota
+	taskCompleted
+	taskFailed
 )
 
 // Task represents an asynchronous unit of execution with memoized state.
 type Task struct {
 	mu     sync.RWMutex
 	done   chan struct{}
-	status TaskStatus
+	status taskStatus
 	result Value
-	err    Exception
+	err    exception
 }
 
-// NewTaskInstance creates a new pending Task.
-func NewTaskInstance() *Task {
+// newTaskInstance creates a new pending Task.
+func newTaskInstance() *Task {
 	return &Task{
 		done:   make(chan struct{}),
-		status: TaskPending,
+		status: taskPending,
 	}
 }
 
-// Resolve marks the task as completed with a successful result.
-func (t *Task) Resolve(res Value) {
+// resolve marks the task as completed with a successful result.
+func (t *Task) resolve(res Value) {
 	t.mu.Lock()
-	if t.status == TaskPending {
+	if t.status == taskPending {
 		t.result = res
-		t.status = TaskCompleted
+		t.status = taskCompleted
 		close(t.done)
 	}
 	t.mu.Unlock()
 }
 
-// Reject marks the task as failed with an exception.
-func (t *Task) Reject(err Exception) {
+// reject marks the task as failed with an exception.
+func (t *Task) reject(err exception) {
 	t.mu.Lock()
-	if t.status == TaskPending {
+	if t.status == taskPending {
 		t.err = err
-		t.status = TaskFailed
+		t.status = taskFailed
 		close(t.done)
 	}
 	t.mu.Unlock()
 }
 
-// Finish resolves or rejects the task depending on whether err is non-nil.
-func (t *Task) Finish(res Value, err Exception) {
+// finish resolves or rejects the task depending on whether err is non-nil.
+func (t *Task) finish(res Value, err exception) {
 	if err != nil {
-		t.Reject(err)
+		t.reject(err)
 	} else {
-		t.Resolve(res)
+		t.resolve(res)
 	}
 }
 
@@ -65,31 +65,24 @@ func (t *Task) Done() <-chan struct{} {
 	return t.done
 }
 
-// IsDone returns true if the task has settled (resolved or rejected).
-func (t *Task) IsDone() bool {
+// isDone returns true if the task has settled (resolved or rejected).
+func (t *Task) isDone() bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	return t.status != TaskPending
+	return t.status != taskPending
 }
 
-// Status returns the current status of the task.
-func (t *Task) Status() TaskStatus {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.status
-}
-
-// Result returns the result and error without blocking.
-func (t *Task) Result() (Value, Exception) {
+// outcome returns the result and error without blocking.
+func (t *Task) outcome() (Value, exception) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.result, t.err
 }
 
-// Await waits for the task to settle and returns its result or exception.
+// await waits for the task to settle and returns its result or exception.
 // A running fiber gives up the instance runner while it waits so that other
 // fibers of the instance can make progress. Safe to call multiple times.
-func (t *Task) Await(fbr *Fiber) (Value, Exception) {
+func (t *Task) await(fbr *fiber) (Value, exception) {
 	if fbr != nil && fbr.running {
 		fbr.unlock()
 		<-t.done
@@ -103,12 +96,24 @@ func (t *Task) Await(fbr *Fiber) (Value, Exception) {
 	return t.result, t.err
 }
 
-// NewTask wraps a Go function in a Task.
-func NewTask(fn func() (Value, Exception)) Value {
-	task := NewTaskInstance()
+// Result returns what the task finished with, or an error that it failed with.
+// It does not wait; use Done to wait for the task to finish.
+func (t *Task) Result() (Value, error) {
+	v, exc := t.outcome()
+	if exc != nil {
+		return v, exc
+	}
+	return v, nil
+}
+
+// Async runs fn on its own goroutine and returns a task scripts can await,
+// for natives whose work takes a while. An error fn returns is what awaiting
+// the task throws.
+func Async(fn func() (Value, error)) Value {
+	task := newTaskInstance()
 	go func() {
 		res, err := fn()
-		task.Finish(res, err)
+		task.finish(res, toException(err))
 	}()
-	return BoxTask(task)
+	return boxTask(task)
 }

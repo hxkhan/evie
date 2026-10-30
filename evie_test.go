@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/hxkhan/evie"
+	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/vm"
 )
 
@@ -44,7 +45,7 @@ func runCode(code string) (resVal vm.Value, retErr error) {
 		}
 	}
 
-	_, err := evm.EvalScript([]byte(script))
+	_, err := evm.Eval(script)
 	if err != nil {
 		return vm.Value{}, err
 	}
@@ -57,8 +58,7 @@ func runCode(code string) (resVal vm.Value, retErr error) {
 		return vm.Value{}, fmt.Errorf("main is not a function")
 	}
 
-	fbr := evm.NewFiber()
-	res, exc := fn.Call(fbr)
+	res, exc := fn.Call()
 	evm.WaitForNoActivity()
 	if exc != nil {
 		return res, exc
@@ -717,22 +717,22 @@ func TestErrorHandling(t *testing.T) {
 
 	// Verify compile errors return clean error without crashing/panicking
 	evm := evie.New()
-	_, err = evm.EvalScript([]byte(`
+	_, err = evm.Eval(`
 	package main
 	fn dup() {}
 	fn dup() {}
-	`))
+	`)
 	if err == nil || !strings.Contains(err.Error(), "declared twice") {
 		t.Fatalf("expected a declared-twice error, got: %v", err)
 	}
 
-	_, err = evm.EvalScript([]byte(`
+	_, err = evm.Eval(`
 	package main
 	const c := 10
 	fn main() {
 		c = 20
 	}
-	`))
+	`)
 	if err == nil || !strings.Contains(err.Error(), "because it is a constant") {
 		t.Fatalf("expected constant binding error, got: %v", err)
 	}
@@ -1304,7 +1304,7 @@ func TestForLoops(t *testing.T) {
 func TestTypeMarshaling(t *testing.T) {
 	// Primitives
 	bVal, err := vm.BoxAny(true)
-	if err != nil || !bVal.Bool() {
+	if err != nil || !boolOf(bVal) {
 		t.Fatalf("BoxAny bool failed: %v, %v", bVal, err)
 	}
 	if bVal.ToGo() != true {
@@ -1312,7 +1312,7 @@ func TestTypeMarshaling(t *testing.T) {
 	}
 
 	nVal, err := vm.BoxAny(42)
-	if err != nil || nVal.Int() != 42 {
+	if err != nil || intOf(nVal) != 42 {
 		t.Fatalf("BoxAny int failed: %v, %v", nVal, err)
 	}
 	if nVal.ToGo() != float64(42) {
@@ -1391,25 +1391,25 @@ func TestGoHostEmbedding(t *testing.T) {
 	env.SetStatic("taxRate", vm.BoxNumber(0.15))
 
 	// Use injected variable in Evie
-	val, err := env.EvalString(`
+	val, err := env.Eval(`
 	var price := 100
 	return price + (price * taxRate)
 	`)
 	if err != nil {
 		t.Fatalf("EvalString failed: %v", err)
 	}
-	if val.Float64() != 115 {
-		t.Fatalf("expected 115, got %v", val.Float64())
+	if floatOf(val) != 115 {
+		t.Fatalf("expected 115, got %v", floatOf(val))
 	}
 
 	// Lookup variable reference
 	taxVal, ok := env.Lookup("taxRate")
-	if !ok || taxVal.Float64() != 0.15 {
+	if !ok || floatOf(taxVal) != 0.15 {
 		t.Fatalf("Lookup failed: %v, %v", taxVal, ok)
 	}
 
 	// Package definition and calling Evie function reference from Go
-	_, err = env.EvalString(`
+	_, err = env.Eval(`
 	package main
 	fn multiply(a, b) {
 		return a * b
@@ -1424,18 +1424,17 @@ func TestGoHostEmbedding(t *testing.T) {
 		t.Fatalf("Lookup main.multiply failed")
 	}
 
-	fbr := env.NewFiber()
-	mulVal, exc := mulFn.Call(fbr, vm.BoxNumber(7), vm.BoxNumber(8))
+	mulVal, exc := mulFn.Call(vm.BoxNumber(7), vm.BoxNumber(8))
 	if exc != nil {
 		t.Fatalf("Call failed: %v", exc)
 	}
-	if mulVal.Int() != 56 {
-		t.Fatalf("expected 56, got %v", mulVal.Int())
+	if intOf(mulVal) != 56 {
+		t.Fatalf("expected 56, got %v", intOf(mulVal))
 	}
 
 	// Package with main() execution via Lookup reference
 	// a package is loaded once, so the second script declares its own
-	_, err = env.EvalString(`
+	_, err = env.Eval(`
 	package entry
 	fn main() {
 		return "executed main successfully"
@@ -1448,7 +1447,7 @@ func TestGoHostEmbedding(t *testing.T) {
 	if !ok || !mainFn.IsCallable() {
 		t.Fatalf("Lookup entry.main failed")
 	}
-	mainRes, exc := mainFn.Call(fbr)
+	mainRes, exc := mainFn.Call()
 	if exc != nil {
 		t.Fatalf("Call main failed: %v", exc)
 	}
@@ -1461,7 +1460,7 @@ func TestGoHostEmbedding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("evie.Eval failed: %v", err)
 	}
-	if res != float64(100) {
+	if res.ToGo() != float64(100) {
 		t.Fatalf("expected 100, got %v", res)
 	}
 }
@@ -1478,12 +1477,12 @@ func TestGoFuncWrapping(t *testing.T) {
 	}
 	env.SetStatic("add", addFn)
 
-	val, err := env.EvalString(`return add(20, 22)`)
+	val, err := env.Eval(`return add(20, 22)`)
 	if err != nil {
 		t.Fatalf("add call failed: %v", err)
 	}
-	if val.Int() != 42 {
-		t.Fatalf("expected 42, got %v", val.Int())
+	if intOf(val) != 42 {
+		t.Fatalf("expected 42, got %v", intOf(val))
 	}
 
 	// 2. String manipulation function
@@ -1495,7 +1494,7 @@ func TestGoFuncWrapping(t *testing.T) {
 	}
 	env.SetStatic("greet", greetFn)
 
-	val, err = env.EvalString(`return greet("Evie")`)
+	val, err = env.Eval(`return greet("Evie")`)
 	if err != nil {
 		t.Fatalf("greet call failed: %v", err)
 	}
@@ -1515,13 +1514,13 @@ func TestGoFuncWrapping(t *testing.T) {
 	}
 	env.SetStatic("divide", divFn)
 
-	val, err = env.EvalString(`return divide(10, 2)`)
-	if err != nil || val.Float64() != 5 {
+	val, err = env.Eval(`return divide(10, 2)`)
+	if err != nil || floatOf(val) != 5 {
 		t.Fatalf("expected 5, got %v (err: %v)", val, err)
 	}
 
 	// Test error returned from Go caught in Evie or reported
-	_, err = env.EvalString(`return divide(10, 0)`)
+	_, err = env.Eval(`return divide(10, 0)`)
 	if err == nil {
 		t.Fatalf("expected error from division by zero, got nil")
 	}
@@ -1539,12 +1538,12 @@ func TestGoFuncWrapping(t *testing.T) {
 	}
 	env.SetStatic("sumAll", sumFn)
 
-	val, err = env.EvalString(`return sumAll(1, 2, 3, 4, 5)`)
+	val, err = env.Eval(`return sumAll(1, 2, 3, 4, 5)`)
 	if err != nil {
 		t.Fatalf("sumAll call failed: %v", err)
 	}
-	if val.Int() != 15 {
-		t.Fatalf("expected 15, got %v", val.Int())
+	if intOf(val) != 15 {
+		t.Fatalf("expected 15, got %v", intOf(val))
 	}
 }
 
@@ -1629,7 +1628,7 @@ func TestConstantFolding(t *testing.T) {
 	vmNoInline := vm.New(vm.Options{
 		DisableInlining: true,
 	})
-	resNoInline, err := vmNoInline.EvalScript([]byte("return 10 + 20 * 3"))
+	resNoInline, err := vmNoInline.EvalSource(diag.NewSource("", []byte("return 10 + 20 * 3")))
 	if err != nil {
 		t.Fatalf("unexpected error with inlining disabled: %v", err)
 	}

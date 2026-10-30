@@ -43,22 +43,22 @@ func (vm *Instance) newFuncInfo(name string, args []string, isVariadic bool, isM
 }
 
 // accepts checks a call's argument count against the signature
-func (fn *funcInfoStatic) accepts(n int) Exception {
+func (fn *funcInfoStatic) accepts(n int) exception {
 	if n >= fn.minArgs && n <= fn.maxArgs {
 		return nil
 	}
 	return fn.arityError(n)
 }
 
-func (fn *funcInfoStatic) arityError(n int) Exception {
+func (fn *funcInfoStatic) arityError(n int) exception {
 	want, got := len(fn.args), n
 	if fn.isMethod {
 		want, got = want-1, got-1
 	}
 	if fn.isVariadic {
-		return CustomError("%s takes at least %s but %s supplied", fn.describe(), plural(want-1, "argument"), supplied(got))
+		return customError("%s takes at least %s but %s supplied", fn.describe(), plural(want-1, "argument"), supplied(got))
 	}
-	return CustomError("%s takes %s but %s supplied", fn.describe(), plural(want, "argument"), supplied(got))
+	return customError("%s takes %s but %s supplied", fn.describe(), plural(want, "argument"), supplied(got))
 }
 
 // plural renders a count with its noun: "1 argument", "2 arguments", "no arguments"
@@ -90,7 +90,7 @@ func (fn *funcInfoStatic) describe() string {
 	return fmt.Sprintf("function '%v'", fn.name)
 }
 
-type UserFn struct {
+type userFn struct {
 	*funcInfoStatic
 	references []*Value // captured variables
 }
@@ -108,7 +108,7 @@ type UserFn struct {
 
 // evalVariadicTail evaluates the arguments from index fixed onwards into an
 // array in the slot after the fixed parameters
-func (fbr *Fiber) evalVariadicTail(base int, slot int, fixed int, arguments []instruction) Exception {
+func (fbr *fiber) evalVariadicTail(base int, slot int, fixed int, arguments []instruction) exception {
 	tail := make([]Value, len(arguments)-fixed)
 	for t := range tail {
 		arg, exc := arguments[fixed+t](fbr)
@@ -122,22 +122,22 @@ func (fbr *Fiber) evalVariadicTail(base int, slot int, fixed int, arguments []in
 }
 
 // storeVariadicTail packs already evaluated arguments from index fixed onwards
-func (fbr *Fiber) storeVariadicTail(base int, slot int, fixed int, args []Value) {
+func (fbr *fiber) storeVariadicTail(base int, slot int, fixed int, args []Value) {
 	tail := make([]Value, len(args)-fixed)
 	copy(tail, args[fixed:])
 	*(fbr.stack[base+slot]) = BoxArray(&Array{Data: tail})
 }
 
-// Call invokes the function from Go. A nil fiber borrows one from the instance.
+// callGuarded invokes the function from Go. A nil fiber borrows one from the instance.
 // The calling fiber becomes the instance's running fiber for the duration of the
 // call unless it already is, which is the case for callbacks made from natives.
-func (fn *UserFn) Call(fbr *Fiber, args ...Value) (result Value, err Exception) {
+func (fn *userFn) callGuarded(fbr *fiber, args ...Value) (result Value, err exception) {
 	if fbr == nil {
 		if fn.vm == nil {
-			return Value{}, CustomError("cannot call function without a VM instance")
+			return Value{}, customError("cannot call function without a VM instance")
 		}
-		fbr = fn.vm.NewFiber()
-		defer fn.vm.ReleaseFiber(fbr)
+		fbr = fn.vm.newFiber()
+		defer fn.vm.releaseFiber(fbr)
 	}
 
 	if exc := fn.accepts(len(args)); exc != nil {
@@ -162,7 +162,7 @@ func (fn *UserFn) Call(fbr *Fiber, args ...Value) (result Value, err Exception) 
 // call runs the function on a fiber that is already running with arguments
 // that are known to match the signature. Nothing here recovers from a panic;
 // that is the job of the host boundary in Call.
-func (fn *UserFn) call(fbr *Fiber, args []Value) (Value, Exception) {
+func (fn *userFn) call(fbr *fiber, args []Value) (Value, exception) {
 	base := len(fbr.stack)
 	for _, escapes := range fn.locals {
 		if !escapes {
@@ -205,7 +205,7 @@ func (fn *UserFn) call(fbr *Fiber, args []Value) (Value, Exception) {
 
 // invoke evaluates the arguments straight into a new frame and runs the
 // function; the argument count is known to match the signature
-func (fn *UserFn) invoke(fbr *Fiber, site site, arguments []instruction) (Value, Exception) {
+func (fn *userFn) invoke(fbr *fiber, site site, arguments []instruction) (Value, exception) {
 	base := len(fbr.stack)
 	for _, escapes := range fn.locals {
 		if !escapes {
@@ -256,7 +256,7 @@ func (fn *UserFn) invoke(fbr *Fiber, site site, arguments []instruction) (Value,
 }
 
 // invokeMethod is invoke with the receiver placed in slot 0
-func (fn *UserFn) invokeMethod(fbr *Fiber, site site, this Value, arguments []instruction) (Value, Exception) {
+func (fn *userFn) invokeMethod(fbr *fiber, site site, this Value, arguments []instruction) (Value, exception) {
 	base := len(fbr.stack)
 	for _, escapes := range fn.locals {
 		if !escapes {
@@ -307,15 +307,15 @@ func (fn *UserFn) invokeMethod(fbr *Fiber, site site, this Value, arguments []in
 	}
 }
 
-// BoundMethod is a member extracted from a value without calling it, such as
+// boundMethod is a member extracted from a value without calling it, such as
 // `fnVal := p.greet`; calling it supplies the receiver again
-type BoundMethod struct {
+type boundMethod struct {
 	this Value
 	fn   Value
 }
 
-func (m BoundMethod) call(fbr *Fiber, site site, arguments []instruction) (Value, Exception) {
-	if ufn, isUserFn := m.fn.AsUserFn(); isUserFn {
+func (m boundMethod) call(fbr *fiber, site site, arguments []instruction) (Value, exception) {
+	if ufn, isUserFn := m.fn.asUserFn(); isUserFn {
 		if ufn.isMethod {
 			if exc := ufn.accepts(1 + len(arguments)); exc != nil {
 				return Value{}, exc.at(site)
@@ -329,7 +329,7 @@ func (m BoundMethod) call(fbr *Fiber, site site, arguments []instruction) (Value
 	}
 
 	if fn, isGoFunc := m.fn.AsGoFunc(); isGoFunc {
-		if fn.IsMethod {
+		if fn.isMethod {
 			return fn.callMethod(fbr, site, m.this, arguments)
 		}
 		// a native stored in an object field is a plain function, not a method of the object
@@ -345,14 +345,14 @@ func (m BoundMethod) call(fbr *Fiber, site site, arguments []instruction) (Value
 		}
 		args[i] = v
 	}
-	result, exc := m.fn.Call(fbr, args...)
+	result, exc := m.fn.callGuarded(fbr, args...)
 	if exc != nil {
 		exc = exc.at(site)
 	}
 	return result, exc
 }
 
-func (m BoundMethod) Call(fbr *Fiber, args ...Value) (Value, Exception) {
+func (m boundMethod) callGuarded(fbr *fiber, args ...Value) (Value, exception) {
 	withReceiver := func() []Value {
 		all := make([]Value, 1+len(args))
 		all[0] = m.this
@@ -360,21 +360,21 @@ func (m BoundMethod) Call(fbr *Fiber, args ...Value) (Value, Exception) {
 		return all
 	}
 
-	if ufn, isUserFn := m.fn.AsUserFn(); isUserFn {
+	if ufn, isUserFn := m.fn.asUserFn(); isUserFn {
 		if ufn.isMethod {
-			return ufn.Call(fbr, withReceiver()...)
+			return ufn.callGuarded(fbr, withReceiver()...)
 		}
-		return ufn.Call(fbr, args...)
+		return ufn.callGuarded(fbr, args...)
 	}
 
 	if fn, isGoFunc := m.fn.AsGoFunc(); isGoFunc {
-		if fn.IsMethod {
-			return fn.Call(fbr, withReceiver()...)
+		if fn.isMethod {
+			return fn.callGuarded(fbr, withReceiver()...)
 		}
-		return fn.Call(fbr, args...)
+		return fn.callGuarded(fbr, args...)
 	}
 
-	return m.fn.Call(fbr, args...)
+	return m.fn.callGuarded(fbr, args...)
 }
 
 // GoFunc is a native function exposed to evie code. Arguments counts the
@@ -383,42 +383,42 @@ func (m BoundMethod) Call(fbr *Fiber, args ...Value) (Value, Exception) {
 // use it for I/O and sleeps.
 type GoFunc struct {
 	Name       string
-	Arguments  int
-	IsVariadic bool
-	IsMethod   bool
+	arguments  int
+	isVariadic bool
+	isMethod   bool
 	Blocking   bool
-	Fn         NativeFn
+	fn         NativeFn
 }
 
-func (fn *GoFunc) accepts(n int) Exception {
-	if fn.IsVariadic {
-		if n >= fn.Arguments {
+func (fn *GoFunc) accepts(n int) exception {
+	if fn.isVariadic {
+		if n >= fn.arguments {
 			return nil
 		}
-	} else if n == fn.Arguments {
+	} else if n == fn.arguments {
 		return nil
 	}
 	return fn.arityError(n)
 }
 
-func (fn *GoFunc) arityError(n int) Exception {
-	want, got := fn.Arguments, n
-	if fn.IsMethod {
+func (fn *GoFunc) arityError(n int) exception {
+	want, got := fn.arguments, n
+	if fn.isMethod {
 		want, got = want-1, got-1
 	}
 	name := "this function"
 	if fn.Name != "" {
 		name = "'" + fn.Name + "'"
 	}
-	if fn.IsVariadic {
-		return CustomError("%s takes at least %s but %s supplied", name, plural(want, "argument"), supplied(got))
+	if fn.isVariadic {
+		return customError("%s takes at least %s but %s supplied", name, plural(want, "argument"), supplied(got))
 	}
-	return CustomError("%s takes %s but %s supplied", name, plural(want, "argument"), supplied(got))
+	return customError("%s takes %s but %s supplied", name, plural(want, "argument"), supplied(got))
 }
 
 // run executes the native on the frame at base, where its arguments are, and
 // releases the frame
-func (fn *GoFunc) run(fbr *Fiber, base int, pushed int) (Value, Exception) {
+func (fn *GoFunc) run(fbr *fiber, base int, pushed int) (Value, exception) {
 	prevBase := fbr.swapBase(base)
 	c := Call{fbr: fbr, fn: fn, base: base, n: pushed}
 
@@ -426,10 +426,10 @@ func (fn *GoFunc) run(fbr *Fiber, base int, pushed int) (Value, Exception) {
 	var err error
 	if fn.Blocking && fbr.running {
 		fbr.unlock()
-		result, err = fn.Fn(c)
+		result, err = fn.fn(c)
 		fbr.lock()
 	} else {
-		result, err = fn.Fn(c)
+		result, err = fn.fn(c)
 	}
 
 	fbr.push(pushed)
@@ -439,19 +439,19 @@ func (fn *GoFunc) run(fbr *Fiber, base int, pushed int) (Value, Exception) {
 }
 
 // pushArg places one evaluated argument in a fresh box on the stack
-func (fbr *Fiber) pushArg(v Value) {
+func (fbr *fiber) pushArg(v Value) {
 	box := fbr.pop()
 	*box = v
 	fbr.stack = append(fbr.stack, box)
 }
 
 // abandonArgs releases the n argument boxes pushed so far
-func (fbr *Fiber) abandonArgs(n int) {
+func (fbr *fiber) abandonArgs(n int) {
 	fbr.push(n)
 	fbr.popStack(n)
 }
 
-func (fn *GoFunc) call(fbr *Fiber, site site, arguments []instruction) (Value, Exception) {
+func (fn *GoFunc) call(fbr *fiber, site site, arguments []instruction) (Value, exception) {
 	if exc := fn.accepts(len(arguments)); exc != nil {
 		return Value{}, exc.at(site)
 	}
@@ -461,7 +461,7 @@ func (fn *GoFunc) call(fbr *Fiber, site site, arguments []instruction) (Value, E
 // invoke evaluates the arguments onto the stack and runs the native; the
 // argument count is known to match. An error the native returns is located
 // at the call.
-func (fn *GoFunc) invoke(fbr *Fiber, site site, arguments []instruction) (Value, Exception) {
+func (fn *GoFunc) invoke(fbr *fiber, site site, arguments []instruction) (Value, exception) {
 	base := len(fbr.stack)
 	for i, arg := range arguments {
 		v, exc := arg(fbr)
@@ -479,7 +479,7 @@ func (fn *GoFunc) invoke(fbr *Fiber, site site, arguments []instruction) (Value,
 }
 
 // callMethod is invoke with the receiver as the first argument
-func (fn *GoFunc) callMethod(fbr *Fiber, site site, this Value, arguments []instruction) (Value, Exception) {
+func (fn *GoFunc) callMethod(fbr *fiber, site site, this Value, arguments []instruction) (Value, exception) {
 	if exc := fn.accepts(1 + len(arguments)); exc != nil {
 		return Value{}, exc.at(site)
 	}
@@ -501,11 +501,11 @@ func (fn *GoFunc) callMethod(fbr *Fiber, site site, this Value, arguments []inst
 	return result, exc
 }
 
-// Call invokes the native from Go; a nil fiber is not allowed because a native
+// callGuarded invokes the native from Go; a nil fiber is not allowed because a native
 // needs a stack to read its arguments from
-func (fn *GoFunc) Call(fbr *Fiber, args ...Value) (result Value, exc Exception) {
+func (fn *GoFunc) callGuarded(fbr *fiber, args ...Value) (result Value, exc exception) {
 	if fbr == nil {
-		return Value{}, CustomError("cannot call GoFunc with nil fiber")
+		return Value{}, customError("cannot call GoFunc with nil fiber")
 	}
 
 	if exc := fn.accepts(len(args)); exc != nil {

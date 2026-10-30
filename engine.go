@@ -46,7 +46,7 @@ func (e *Engine) LoadedFiles() []string {
 // Eval parses and runs a script. A script that declares a package is loaded
 // as that package and nil is returned; a bare script returns its result.
 func (e *Engine) Eval(script string) (vm.Value, error) {
-	return e.EvalString(script)
+	return e.EvalSource(diag.NewSource("", []byte(script)))
 }
 
 // Load compiles a source that declares a package and returns the package;
@@ -77,10 +77,10 @@ func (e *Engine) Close() {
 // host's resolver before the filesystem; a path such as "./util" goes to the
 // filesystem.
 func (e *Engine) resolve(importPath string) (*vm.Package, error) {
-	if vm.IsPathImport(importPath) {
+	if isPathImport(importPath) {
 		return e.resolveFromFilesystem(importPath)
 	}
-	if pkg := e.GetPackage(importPath); pkg != nil {
+	if pkg := e.Package(importPath); pkg != nil {
 		return pkg, nil
 	}
 	if pkg, ok := e.packages[importPath]; ok {
@@ -401,10 +401,13 @@ func (e *Engine) runMain() (vm.Value, error) {
 	if !ok || !mainFn.IsCallable() {
 		return vm.Value{}, nil
 	}
-	res, exc := mainFn.Call(nil)
+	res, err := mainFn.Call()
 	e.Close()
-	if exc != nil {
-		return res, exc
-	}
-	return res, nil
+	return res, err
+}
+
+// isPathImport reports whether an import names a file or folder, such as
+// "./util" or "../lib/text", rather than a package by name, such as "io"
+func isPathImport(path string) bool {
+	return strings.HasPrefix(path, ".") || strings.ContainsAny(path, "/\\") || filepath.IsAbs(path)
 }

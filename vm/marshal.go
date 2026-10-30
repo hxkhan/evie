@@ -105,20 +105,20 @@ func BoxAny(v any) (Value, error) {
 		return BoxGoFunc(&val), nil
 	case NativeFn:
 		return BoxGoFunc(NewVariadic("native", 0, val)), nil
-	case *UserFn:
-		return BoxUserFn(*val), nil
-	case UserFn:
-		return BoxUserFn(val), nil
+	case *userFn:
+		return boxUserFn(*val), nil
+	case userFn:
+		return boxUserFn(val), nil
 	case *Task:
-		return BoxTask(val), nil
+		return boxTask(val), nil
 	case *Error:
-		return BoxError(val), nil
+		return boxError(val), nil
 	case error:
-		return BoxError(CustomError("%s", val.Error())), nil
+		return boxError(customError("%s", val.Error())), nil
 	}
 
 	// a Go type the host registered travels as it is
-	if boxed, ok := BoxHost(v); ok {
+	if boxed, ok := boxHost(v); ok {
 		return boxed, nil
 	}
 
@@ -203,8 +203,8 @@ func Reflect(fn any) *GoFunc {
 	}
 	errType := reflect.TypeOf((*error)(nil)).Elem()
 
-	gf := &GoFunc{Name: "native", Arguments: fixedCount, IsVariadic: isVariadic}
-	gf.Fn = func(c Call) (Value, error) {
+	gf := &GoFunc{Name: "native", arguments: fixedCount, isVariadic: isVariadic}
+	gf.fn = func(c Call) (Value, error) {
 		inArgs := make([]reflect.Value, numIn)
 		for i := 0; i < fixedCount; i++ {
 			goVal, err := unmarshalToType(c.Arg(i), fnType.In(i))
@@ -469,7 +469,7 @@ func (v Value) ToGo() any {
 		}
 		return res
 	}
-	if inst, ok := v.AsUserStructInstance(); ok {
+	if inst, ok := v.asStructInstance(); ok {
 		res := make(map[string]any, len(inst.Fields)+len(inst.Dynamic)+1)
 		if inst.InstanceOf != nil {
 			res["__struct"] = inst.InstanceOf.Name
@@ -490,7 +490,7 @@ func (v Value) ToGo() any {
 	if task, ok := v.AsTask(); ok {
 		return task
 	}
-	if fn, ok := v.AsUserFn(); ok {
+	if fn, ok := v.asUserFn(); ok {
 		return fn
 	}
 	if gf, ok := v.AsGoFunc(); ok {
@@ -505,11 +505,6 @@ func (v Value) ToGo() any {
 	return v
 }
 
-// Interface is an alias for ToGo to follow Go standard conventions.
-func (v Value) Interface() any {
-	return v.ToGo()
-}
-
 // Unmarshal decodes the Evie Value into a Go target pointer.
 func (v Value) Unmarshal(target any) error {
 	data, err := json.Marshal(v.ToGo())
@@ -517,36 +512,4 @@ func (v Value) Unmarshal(target any) error {
 		return fmt.Errorf("evie unmarshal error: %w", err)
 	}
 	return json.Unmarshal(data, target)
-}
-
-// Int returns the integer representation of a numeric Value (0 if not a number).
-func (v Value) Int() int {
-	if n, ok := v.AsFloat64(); ok {
-		return int(n)
-	}
-	return 0
-}
-
-// Int64 returns the int64 representation of a numeric Value (0 if not a number).
-func (v Value) Int64() int64 {
-	if n, ok := v.AsFloat64(); ok {
-		return int64(n)
-	}
-	return 0
-}
-
-// Float64 returns the float64 representation of a numeric Value (0 if not a number).
-func (v Value) Float64() float64 {
-	if n, ok := v.AsFloat64(); ok {
-		return n
-	}
-	return 0
-}
-
-// Bool returns the boolean representation of a Value (false if not a bool).
-func (v Value) Bool() bool {
-	if b, ok := v.AsBool(); ok {
-		return b
-	}
-	return false
 }

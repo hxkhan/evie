@@ -26,8 +26,8 @@ func TestLoaderSingleFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunFile failed: %v", err)
 	}
-	if val.Int() != 42 {
-		t.Fatalf("expected 42, got %v", val.Int())
+	if intOf(val) != 42 {
+		t.Fatalf("expected 42, got %v", intOf(val))
 	}
 }
 
@@ -60,8 +60,8 @@ func TestLoaderMultiFileRelativeImport(t *testing.T) {
 		t.Fatalf("RunFile failed: %v", err)
 	}
 	// 10 + 5 = 15; 2 * 3 = 6; 15 + 6 = 21
-	if val.Int() != 21 {
-		t.Fatalf("expected 21, got %v", val.Int())
+	if intOf(val) != 21 {
+		t.Fatalf("expected 21, got %v", intOf(val))
 	}
 }
 
@@ -108,8 +108,8 @@ func TestLoaderDirectoryPackage(t *testing.T) {
 		t.Fatalf("RunFile failed: %v", err)
 	}
 	// 120 + 40 = 160
-	if val.Int() != 160 {
-		t.Fatalf("expected 160, got %v", val.Int())
+	if intOf(val) != 160 {
+		t.Fatalf("expected 160, got %v", intOf(val))
 	}
 }
 
@@ -158,8 +158,8 @@ func TestLoaderNestedRelativeImports(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunFile failed: %v", err)
 	}
-	if val.Int() != 125 {
-		t.Fatalf("expected 125, got %v", val.Int())
+	if intOf(val) != 125 {
+		t.Fatalf("expected 125, got %v", intOf(val))
 	}
 }
 

@@ -1,12 +1,16 @@
 package vm
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/hxkhan/evie/diag"
+)
 
 // every call path must give back the stack entries and pooled boxes it took,
 // including when an argument throws before the callee runs
 func TestCallsReleaseFiberStateOnException(t *testing.T) {
 	evm := New(Options{})
-	_, err := evm.EvalScript([]byte(`
+	_, err := evm.EvalSource(diag.NewSource("", []byte(`
 	package main
 
 	struct Box(n) {
@@ -49,7 +53,7 @@ func TestCallsReleaseFiberStateOnException(t *testing.T) {
 		}
 		return caught
 	}
-	`))
+	`)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,10 +63,10 @@ func TestCallsReleaseFiberStateOnException(t *testing.T) {
 		t.Fatal("main.main not found")
 	}
 
-	fbr := evm.NewFiber()
+	fbr := evm.newFiber()
 	stackBefore, boxesBefore := len(fbr.stack), len(fbr.boxes)
 
-	result, exc := mainFn.Call(fbr)
+	result, exc := mainFn.callGuarded(fbr)
 	if exc != nil {
 		t.Fatal(exc)
 	}

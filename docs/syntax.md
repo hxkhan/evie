@@ -749,7 +749,7 @@ func main() {
 
     // 4. One-line quick evaluation
     ans, _ := evie.Eval("return [1, 2, 3].map(fn(x) => x * 10)")
-    fmt.Println(ans) // [10 20 30]
+    fmt.Println(ans) // [10, 20, 30]
 }
 ```
 
@@ -762,8 +762,12 @@ The pieces, from most to least convenient:
 | a group of functions scripts import by name | `vm.NewPackage("name")` passed in `evie.Options.Packages` |
 | symbols visible without an import | `eng.SetStatic` or `evie.Options.Prelude` |
 | lend a Go value to scripts as it is | `vm.NewHostType[T]("Name")` with `Method`, `Constructor`, `Wrap` |
-| call a script function | `eng.Call("pkg.fn", goArgs...)`, or `value.Call(nil, evieArgs...)` on a looked-up value |
+| a native whose work takes a while | return `vm.Async(func() (vm.Value, error) { ... })`, a task the script awaits |
+| call a script function | `eng.Call("pkg.fn", goArgs...)`, or `value.Call(evieArgs...)` on a value from `eng.Lookup("pkg.fn")` |
 | run a file or a project directory | `eng.RunFile`, `eng.RunProject`, or `evie.RunFile` for a one-off |
+| read a result | `AsFloat64`, `AsString`, `AsArray`, `AsObject` and the other `As` methods, `Field(name)` on objects and struct instances, `ToGo`, `Unmarshal(&target)` |
+| behave like the language in a native | `a.Add(b)`, `a.LessThan(b)` and the other operators, `Equals`, `IsTruthy`; a type mismatch returns the script's error |
+| show an error | `evie.Format(err, colors)` renders it the way the `evie` command does |
 
 ---
 

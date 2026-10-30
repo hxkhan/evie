@@ -87,7 +87,7 @@ import (
 )
 
 func main() {
-    // 1. A host package the script can import. Func2 wraps a Go function without reflection.
+    // 1. A host package the script can import. Func1 wraps a Go function without reflection.
     api := vm.NewPackage("api")
     api.Native("fetchData", vm.Func1(func(id int) map[string]any {
         return map[string]any{"id": id, "status": "active"}
@@ -106,9 +106,12 @@ func main() {
         panic(err)
     }
 
-    // 4. Call into it with Go arguments
+    // 4. Call into it with Go arguments; evie.Format prints an error the way the CLI does
     val, err := eng.Call("main.status", 42)
-    fmt.Println(val, err) // active <nil>
+    if err != nil {
+        fmt.Print(evie.Format(err, false))
+    }
+    fmt.Println(val) // active
 
     // 5. One-line evaluation
     result, _ := evie.Eval("return [1, 2, 3].len() * 10")

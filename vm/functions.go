@@ -163,6 +163,11 @@ func (fn *userFn) callGuarded(fbr *fiber, args ...Value) (result Value, err exce
 // that are known to match the signature. Nothing here recovers from a panic;
 // that is the job of the host boundary in Call.
 func (fn *userFn) call(fbr *fiber, args []Value) (Value, exception) {
+	if fbr.signaled() {
+		if exc := fbr.halt(fn.def); exc != nil {
+			return Value{}, exc
+		}
+	}
 	base := len(fbr.stack)
 	for _, escapes := range fn.locals {
 		if !escapes {
@@ -206,6 +211,11 @@ func (fn *userFn) call(fbr *fiber, args []Value) (Value, exception) {
 // invoke evaluates the arguments straight into a new frame and runs the
 // function; the argument count is known to match the signature
 func (fn *userFn) invoke(fbr *fiber, site site, arguments []instruction) (Value, exception) {
+	if fbr.signaled() {
+		if exc := fbr.halt(site); exc != nil {
+			return Value{}, exc
+		}
+	}
 	base := len(fbr.stack)
 	for _, escapes := range fn.locals {
 		if !escapes {
@@ -257,6 +267,11 @@ func (fn *userFn) invoke(fbr *fiber, site site, arguments []instruction) (Value,
 
 // invokeMethod is invoke with the receiver placed in slot 0
 func (fn *userFn) invokeMethod(fbr *fiber, site site, this Value, arguments []instruction) (Value, exception) {
+	if fbr.signaled() {
+		if exc := fbr.halt(site); exc != nil {
+			return Value{}, exc
+		}
+	}
 	base := len(fbr.stack)
 	for _, escapes := range fn.locals {
 		if !escapes {
@@ -428,6 +443,10 @@ func (fn *GoFunc) run(fbr *fiber, base int, pushed int) (Value, exception) {
 		fbr.unlock()
 		result, err = fn.fn(c)
 		fbr.lock()
+		if err != nil && fbr.stop.done() {
+			// the native gave up because the run is stopping
+			err = fbr.stop.failure()
+		}
 	} else {
 		result, err = fn.fn(c)
 	}

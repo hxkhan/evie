@@ -20,6 +20,8 @@ type Error struct {
 	diag.Report
 	Code  int
 	Cause error
+
+	fatal bool // the run was stopped; catch lets it pass
 }
 
 type exception = *Error

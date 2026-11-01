@@ -135,6 +135,11 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			// function, so the frame only needs a new base
 			if !fn.isVariadic && vm.cp.closures.Len() > 0 && fn.funcInfoStatic == vm.cp.closures.Last(0).info {
 				return func(fbr *fiber) (result Value, exc exception) {
+					if fbr.signaled() {
+						if exc := fbr.halt(site); exc != nil {
+							return Value{}, exc
+						}
+					}
 					base := len(fbr.stack)
 					for _, escapes := range fn.locals {
 						if !escapes {
@@ -178,6 +183,11 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				// the hot path: a static call with a fixed argument count,
 				// written out in full so nothing stands between the arguments and the body
 				return func(fbr *fiber) (result Value, exc exception) {
+					if fbr.signaled() {
+						if exc := fbr.halt(site); exc != nil {
+							return Value{}, exc
+						}
+					}
 					base := len(fbr.stack)
 					for _, escapes := range fn.locals {
 						if !escapes {
@@ -279,6 +289,11 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 		// the frame protocol again, spelled out: a call through a local or a
 		// closure is the second most common call shape
+		if fbr.signaled() {
+			if exc := fbr.halt(site); exc != nil {
+				return Value{}, exc
+			}
+		}
 		base := len(fbr.stack)
 		for _, escapes := range fn.locals {
 			if !escapes {

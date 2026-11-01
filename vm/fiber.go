@@ -11,6 +11,8 @@ type fiber struct {
 	boxes   []Value   // current chunk of pooled boxes: boxes[:len] are free, boxes[len:cap] are in use
 	spent   [][]Value // chunks whose boxes are all in use, oldest first
 	spare   [][]Value // chunks whose boxes are all free, kept for reuse
+	stop    *stopper  // says when this fiber has to stop
+	seen    uint32    // the instance's stop signal when this fiber last looked
 }
 
 // boxChunk is the number of boxes allocated at once for a fiber's pool

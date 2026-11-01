@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"context"
 	"fmt"
 	"math"
 
@@ -48,6 +49,14 @@ func (c Call) Args() []Value {
 		args[i] = *c.fbr.stack[c.base+i]
 	}
 	return args
+}
+
+// Context is done when the script has to stop: the host called Interrupt or
+// the context of the run was cancelled. Blocking natives that wait should
+// watch it, and returning its cause, or any error, once it is done stops the
+// script right away.
+func (c Call) Context() context.Context {
+	return c.fbr.stop.ctx
 }
 
 // Call invokes an evie callable on the same fiber, as a callback

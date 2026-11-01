@@ -6,11 +6,14 @@ import (
 
 // spawn runs fn with params on a new fiber of its own and returns the task that
 // settles with the outcome. The fiber waits for the instance runner before it
-// executes any evie code.
-func (vm *Instance) spawn(fn *userFn, params []Value) *Task {
+// executes any evie code, and it stops when its parent's run is stopped.
+func (vm *Instance) spawn(parent *fiber, fn *userFn, params []Value) *Task {
 	task := newTaskInstance()
+	stop := parent.stop
+	stop.hold() // the task's fiber uses it; held here so the run cannot end first
+	task.stop = stop
 	vm.rt.wg.Go(func() {
-		fbr := vm.newFiber()
+		fbr := vm.takeFiber(stop)
 		fbr.lock()
 		result, exc := fbr.runTask(fn, params)
 		fbr.unlock()
@@ -33,10 +36,13 @@ func (fbr *fiber) runTask(fn *userFn, params []Value) (result Value, exc excepti
 }
 
 // spawnNative runs a native function with params on a fiber of its own
-func (vm *Instance) spawnNative(fn *GoFunc, params []Value) *Task {
+func (vm *Instance) spawnNative(parent *fiber, fn *GoFunc, params []Value) *Task {
 	task := newTaskInstance()
+	stop := parent.stop
+	stop.hold()
+	task.stop = stop
 	vm.rt.wg.Go(func() {
-		fbr := vm.newFiber()
+		fbr := vm.takeFiber(stop)
 		fbr.lock()
 		result, exc := fn.callGuarded(fbr, params...)
 		fbr.unlock()
@@ -94,7 +100,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 			if exc != nil {
 				return Value{}, exc
 			}
-			return boxTask(vm.spawn(fn, params)), nil
+			return boxTask(vm.spawn(fbr, fn, params)), nil
 		}
 
 		if fn, isGoFunc := value.AsGoFunc(); isGoFunc {
@@ -105,7 +111,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 			if exc != nil {
 				return Value{}, exc
 			}
-			return boxTask(vm.spawnNative(fn, params)), nil
+			return boxTask(vm.spawnNative(fbr, fn, params)), nil
 		}
 
 		if m, isMethod := value.asMethod(); isMethod {
@@ -121,7 +127,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 				if exc != nil {
 					return Value{}, exc
 				}
-				return boxTask(vm.spawn(ufn, params)), nil
+				return boxTask(vm.spawn(fbr, ufn, params)), nil
 			}
 
 			if fn, isGoFunc := m.fn.AsGoFunc(); isGoFunc {
@@ -136,7 +142,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 				if exc != nil {
 					return Value{}, exc
 				}
-				return boxTask(vm.spawnNative(fn, params)), nil
+				return boxTask(vm.spawnNative(fbr, fn, params)), nil
 			}
 		}
 
@@ -250,11 +256,15 @@ func settle(fbr *fiber, tasks []*Task, successOnly bool) (outcome, bool) {
 	}
 
 	for failed := 0; failed < len(tasks); {
-		out := <-outcomes
-		if out.err == nil || !successOnly {
-			return out, true
+		select {
+		case out := <-outcomes:
+			if out.err == nil || !successOnly {
+				return out, true
+			}
+			failed++
+		case <-fbr.stop.ctx.Done():
+			return outcome{err: fbr.stop.failure()}, true
 		}
-		failed++
 	}
 	return outcome{}, false
 }

@@ -72,7 +72,7 @@ func (vm *Instance) emitCatch(node ast.Catch) instruction {
 	return func(fbr *fiber) (Value, exception) {
 		v, err := action(fbr)
 		if err != nil {
-			if err != signalReturn && err != signalContinue && err != signalBreak {
+			if err != signalReturn && err != signalContinue && err != signalBreak && !err.fatal {
 				// convert exception to error-as-value and return
 				return boxError(err), nil
 			}

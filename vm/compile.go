@@ -403,7 +403,7 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc exception) {
 		if init == nil {
 			continue
 		}
-		fbr := vm.newFiber()
+		fbr := vm.borrowFiber(vm.rt.forLoading())
 		fbr.running = true // the runner is held by EvalNode
 		_, exc := init.call(fbr, nil)
 		fbr.running = false

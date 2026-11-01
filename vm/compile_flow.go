@@ -124,11 +124,17 @@ func (vm *Instance) emitConditional(node ast.Conditional) instruction {
 }
 
 func (vm *Instance) emitWhile(node ast.While) instruction {
+	site := vm.at(node)
 	condition := vm.compileCondition(node.Condition)
 	action := vm.compile(node.Action)
 
 	return func(fbr *fiber) (Value, exception) {
 		for {
+			if fbr.signaled() {
+				if exc := fbr.halt(site); exc != nil {
+					return Value{}, exc
+				}
+			}
 			// evaluate condition
 			ok, err := condition(fbr)
 			if err != nil {
@@ -190,6 +196,11 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 
 		if arr, ok := collVal.AsArray(); ok {
 			for i, item := range arr.Data {
+				if fbr.signaled() {
+					if exc := fbr.halt(site); exc != nil {
+						return Value{}, exc
+					}
+				}
 				if idxIndex >= 0 {
 					fbr.setLocal(idxIndex, BoxNumber(float64(i)))
 				}
@@ -210,6 +221,11 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 
 		if obj, ok := collVal.AsObject(); ok {
 			for _, k := range sortedKeys(obj) {
+				if fbr.signaled() {
+					if exc := fbr.halt(site); exc != nil {
+						return Value{}, exc
+					}
+				}
 				keyVal := BoxString(k)
 				if idxIndex >= 0 {
 					fbr.setLocal(idxIndex, keyVal)
@@ -234,6 +250,11 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 		if str, ok := collVal.AsString(); ok {
 			i := 0
 			for _, r := range str {
+				if fbr.signaled() {
+					if exc := fbr.halt(site); exc != nil {
+						return Value{}, exc
+					}
+				}
 				if idxIndex >= 0 {
 					fbr.setLocal(idxIndex, BoxNumber(float64(i)))
 				}
@@ -255,6 +276,11 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 
 		if buf, ok := collVal.AsBuffer(); ok {
 			for i, b := range buf {
+				if fbr.signaled() {
+					if exc := fbr.halt(site); exc != nil {
+						return Value{}, exc
+					}
+				}
 				if idxIndex >= 0 {
 					fbr.setLocal(idxIndex, BoxNumber(float64(i)))
 				}

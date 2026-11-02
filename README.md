@@ -65,7 +65,7 @@ Two tasks incrementing one global always end at the exact total, because fibers 
 - **High-Performance NaN-Boxing**:
   - 64-bit NaN-boxed `Value` representation (`number`, `bool`, `string`, `buffer`, `array`, `object`, `struct`, `task`, `error`, `function`, `nil`).
 - **Seamless Go Host Embedding**:
-  - Automatic Go function reflection wrapping (`env.Set("fn", goFunc)`).
+  - Go functions become natives through typed wrappers (`vm.Func1(goFunc)`) or reflection (`vm.Reflect(goFunc)`).
   - Bidirectional marshaling and unmarshaling into native Go structs (`val.Unmarshal(&struct)`).
   - One-line script execution (`evie.Eval(...)`).
   - Stopping runaway scripts with `Interrupt()` or a context deadline, without the script being able to catch it.
@@ -219,11 +219,13 @@ go build ./evie
 # Run an example
 ./evie ./examples/fib.ev
 
+# Ctrl+C stops a running script with an error that shows where it was; press it again to exit at once
+
 # Run code without a file; the standard packages it names are imported for it
 ./evie -e 'math.sqrt(2)'
 ./evie -e 'for w in strings.fields("go evie go") { io.println(strings.upper(w)) }'
 
-# Print the version, or the commit the binary was built from
+# Print the version (also -v), or the commit the binary was built from
 ./evie --version
 ```
 

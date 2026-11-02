@@ -4,6 +4,9 @@
 //	evie project/         run a project directory's main.ev
 //	evie -e 'code'        run code given on the command line
 //	evie --version        print the version
+//
+// Ctrl+C stops a running script, which then reports where it stopped; a
+// second Ctrl+C exits at once.
 package main
 
 import (
@@ -11,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"regexp"
 	"runtime"
 	"runtime/debug"
@@ -35,6 +39,7 @@ Flags:
 func main() {
 	code := flag.String("e", "", "run `code` given on the command line; standard packages it names are imported for it")
 	version := flag.Bool("version", false, "print the version and exit")
+	flag.BoolVar(version, "v", false, "print the version and exit (short for -version)")
 	timing := flag.Bool("t", false, "print the execution time")
 	inline := flag.Bool("inline", true, "let the compiler use its fast paths; false is for debugging the compiler")
 	logCaptures := flag.Bool("log-captures", false, "log when and what closures capture")
@@ -53,6 +58,7 @@ func main() {
 		NoFastPaths: !*inline,
 		LogCaptures: *logCaptures,
 	}})
+	stopOnInterrupt(eng)
 
 	before := time.Now()
 	var res vm.Value
@@ -181,10 +187,28 @@ func versionString() string {
 	return fmt.Sprintf("evie %s (%s %s/%s)", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 }
 
-// report prints an error the way a compiler does and exits
+// stopOnInterrupt makes the first Ctrl+C stop the script, so it reports where
+// it was, and a second one exit at once, for a script stuck in a native that
+// cannot be woken (reading stdin, say)
+func stopOnInterrupt(eng *evie.Engine) {
+	signals := make(chan os.Signal, 2)
+	signal.Notify(signals, os.Interrupt)
+	go func() {
+		<-signals
+		eng.Interrupt()
+		<-signals
+		os.Exit(130)
+	}()
+}
+
+// report prints an error the way a compiler does and exits, with 130 for a
+// script stopped by Ctrl+C, as shells expect
 func report(err error) {
 	info, statErr := os.Stderr.Stat()
 	colors := statErr == nil && info.Mode()&os.ModeCharDevice != 0 && os.Getenv("NO_COLOR") == ""
 	fmt.Fprint(os.Stderr, evie.Format(err, colors))
+	if errors.Is(err, vm.ErrInterrupted) {
+		os.Exit(130)
+	}
 	os.Exit(1)
 }

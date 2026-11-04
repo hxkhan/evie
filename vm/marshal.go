@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"unsafe"
 
 	"github.com/hxkhan/evie/vm/fields"
 )
@@ -440,6 +441,10 @@ func unmarshalToType(val Value, targetType reflect.Type) (any, error) {
 
 // ToGo converts an Evie Value into a standard Go type.
 func (v Value) ToGo() any {
+	return v.toGo(nil)
+}
+
+func (v Value) toGo(seen map[unsafe.Pointer]any) any {
 	if v.IsNil() {
 		return nil
 	}
@@ -456,31 +461,62 @@ func (v Value) ToGo() any {
 		return buf
 	}
 	if arr, ok := v.AsArray(); ok {
+		ptr := unsafe.Pointer(arr)
+		if existing, ok := seen[ptr]; ok {
+			return existing
+		}
+		if seen == nil {
+			seen = make(map[unsafe.Pointer]any)
+		}
 		res := make([]any, len(arr.Data))
+		seen[ptr] = res
+		defer delete(seen, ptr)
 		for i, elem := range arr.Data {
-			res[i] = elem.ToGo()
+			res[i] = elem.toGo(seen)
 		}
 		return res
 	}
 	if obj, ok := v.AsObject(); ok {
+		ptr := *(*unsafe.Pointer)(v.pointer)
+		if ptr != nil {
+			if existing, ok := seen[ptr]; ok {
+				return existing
+			}
+		}
+		if seen == nil {
+			seen = make(map[unsafe.Pointer]any)
+		}
 		res := make(map[string]any, len(obj))
+		if ptr != nil {
+			seen[ptr] = res
+			defer delete(seen, ptr)
+		}
 		for k, val := range obj {
-			res[k] = val.ToGo()
+			res[k] = val.toGo(seen)
 		}
 		return res
 	}
 	if inst, ok := v.asStructInstance(); ok {
+		ptr := unsafe.Pointer(inst)
+		if existing, ok := seen[ptr]; ok {
+			return existing
+		}
+		if seen == nil {
+			seen = make(map[unsafe.Pointer]any)
+		}
 		res := make(map[string]any, len(inst.Fields)+len(inst.Dynamic)+1)
+		seen[ptr] = res
+		defer delete(seen, ptr)
 		if inst.InstanceOf != nil {
 			res["__struct"] = inst.InstanceOf.Name
 			for i, fid := range inst.InstanceOf.Fields {
 				if i < len(inst.Fields) {
-					res[fields.Lookup(fid)] = inst.Fields[i].ToGo()
+					res[fields.Lookup(fid)] = inst.Fields[i].toGo(seen)
 				}
 			}
 		}
 		for f, val := range inst.Dynamic {
-			res[f] = val.ToGo()
+			res[f] = val.toGo(seen)
 		}
 		return res
 	}

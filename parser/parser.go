@@ -39,6 +39,7 @@ var keywords = []string{
 	"echo",
 	"return",
 	"if", "else",
+	"switch", "case", "default",
 	"is",
 	"await", "go",
 	"catch", "throw",
@@ -248,7 +249,7 @@ func (ps *parser) handleWords(main token.Token, asExpr bool, precedenceLevel int
 		return ast.Continue{Pos: main.Pos}
 	case "return":
 		ret := ast.Return{Pos: main.Pos}
-		if !ps.PeekToken().IsSimple("}") {
+		if ps.PeekToken().Line == main.Line && !ps.PeekToken().IsSimple("}") && !ps.PeekToken().IsSimple(";") && !ps.PeekToken().IsEOS() {
 			ret.Value = ps.parse(0, true)
 		} else {
 			ret.Value = ast.Input[struct{}]{Pos: main.Pos}
@@ -274,7 +275,7 @@ func (ps *parser) handleWords(main token.Token, asExpr bool, precedenceLevel int
 
 	case "throw":
 		th := ast.Throw{Pos: main.Pos}
-		if ps.PeekToken().Line == main.Line && !ps.PeekToken().IsSimple("}") {
+		if ps.PeekToken().Line == main.Line && !ps.PeekToken().IsSimple("}") && !ps.PeekToken().IsSimple(";") && !ps.PeekToken().IsEOS() {
 			th.Value = ps.parse(0, true)
 		} else {
 			th.Value = ast.Input[string]{Pos: main.Pos, Value: "error"}
@@ -350,6 +351,13 @@ func (ps *parser) parseAwait(main token.Token) ast.Node {
 }
 
 func (ps *parser) parseIdent(main token.Token, precedenceLevel int) ast.Node {
+	if slices.Contains(keywords, main.Literal) {
+		if ps.PeekToken().IsSimple(":=") {
+			ps.fail(main.Pos, fmt.Sprintf("'%s' is a keyword and cannot be used as a variable name", main.Literal))
+		}
+		ps.fail(main.Pos, fmt.Sprintf("unexpected '%s'", main.Literal))
+	}
+
 	// handle const declarations explicitly
 	if ps.consume(":=") {
 		return ast.Decl{Pos: main.Pos, Name: main.Literal, IsStatic: true, Value: ps.parse(0, true)}
@@ -469,7 +477,7 @@ func (ps *parser) parseSwitch(main token.Token) ast.Node {
 			if next.IsEOS() {
 				ps.expected("'}'", open, "this '{' opens the switch")
 			}
-			block.Code = append(block.Code, ps.parseNode(0, true))
+			block.Code = append(block.Code, ps.parseNode(0, false))
 			ps.consume(";")
 		}
 		return block
@@ -514,7 +522,7 @@ func (ps *parser) parseBlock(open token.Token) ast.Node {
 		if ps.PeekToken().IsEOS() {
 			ps.expected("'}'", open, "this '{' is never closed")
 		}
-		block.Code = append(block.Code, ps.parseNode(0, true))
+		block.Code = append(block.Code, ps.parseNode(0, false))
 	}
 	return block
 }
@@ -523,7 +531,7 @@ func (ps *parser) parseBlock(open token.Token) ast.Node {
 func (ps *parser) parseFn(main token.Token, asExpr bool) ast.Node {
 	fn := ast.Fn{Pos: main.Pos, UsedAsExpr: asExpr}
 	if ps.PeekToken().Type == token.Word {
-		name := ps.NextToken()
+		name := ps.name("the function name")
 		fn.Name = name.Literal
 		fn.Pos = main.Pos.To(name.Pos)
 	}
@@ -546,7 +554,7 @@ func (ps *parser) parseFn(main token.Token, asExpr bool) ast.Node {
 func (ps *parser) parseStruct(main token.Token) ast.Node {
 	str := ast.StructDefinition{Pos: main.Pos}
 	if ps.PeekToken().Type == token.Word {
-		name := ps.NextToken()
+		name := ps.name("the struct name")
 		str.Name = name.Literal
 		str.Pos = main.Pos.To(name.Pos)
 	}
@@ -771,7 +779,8 @@ func (ps *parser) parseNode(precedenceLevel int, asExpr bool) (node ast.Node) {
 			num := ps.NextToken()
 			node = ast.Input[float64]{Pos: main.Pos.To(num.Pos), Value: ps.parseFloat(num)}
 		} else {
-			node = ps.parse(4, true)
+			operand := ps.parse(4, true)
+			node = ast.Plus{Pos: main.Pos.To(operand.Where()), Value: operand}
 		}
 
 	case main.IsSimple("-"):

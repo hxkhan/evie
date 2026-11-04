@@ -1,8 +1,6 @@
 package vm
 
 import (
-	"fmt"
-
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/vm/fields"
 )
@@ -35,12 +33,13 @@ func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
 	// generic
 	value := vm.compile(node.Value)
 	return func(fbr *fiber) (Value, exception) {
+		cell := fbr.newLocal(index)
 		v, err := value(fbr)
 		if err != nil {
 			return v, err
 		}
 
-		fbr.setLocal(index, v)
+		*cell = v
 		return Value{}, nil
 	}
 }
@@ -694,7 +693,38 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 			if arr, ok := lhs.AsArray(); ok {
 				if idxFloat, ok := k.AsFloat64(); ok {
 					idx := int(idxFloat)
+					if float64(idx) != idxFloat {
+						return BoxBool(false), nil
+					}
 					length := len(arr.Data)
+					if idx < 0 {
+						idx = length + idx
+					}
+					return BoxBool(idx >= 0 && idx < length), nil
+				}
+				return BoxBool(false), nil
+			}
+			if str, ok := lhs.AsString(); ok {
+				if idxFloat, ok := k.AsFloat64(); ok {
+					idx := int(idxFloat)
+					if float64(idx) != idxFloat {
+						return BoxBool(false), nil
+					}
+					length := len(str)
+					if idx < 0 {
+						idx = length + idx
+					}
+					return BoxBool(idx >= 0 && idx < length), nil
+				}
+				return BoxBool(false), nil
+			}
+			if buf, ok := lhs.AsBuffer(); ok {
+				if idxFloat, ok := k.AsFloat64(); ok {
+					idx := int(idxFloat)
+					if float64(idx) != idxFloat {
+						return BoxBool(false), nil
+					}
+					length := len(buf)
 					if idx < 0 {
 						idx = length + idx
 					}
@@ -712,7 +742,7 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 		}
 	}
 
-	panic(fmt.Errorf("implement %T?", node.Value))
+	panic(vm.compileErrorAt(node, "'?' can only check a field or index access, such as obj.field? or arr[i]?"))
 }
 
 // compoundOperator returns the arithmetic behind a compound assignment like `+=`

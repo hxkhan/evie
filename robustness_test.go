@@ -751,3 +751,210 @@ func TestEngineOptions(t *testing.T) {
 		t.Fatalf("expected the standard library to be unavailable, got %v", err)
 	}
 }
+
+// nested named functions bind in local scope, support recursion, and work in switch cases
+func TestNestedNamedFunctions(t *testing.T) {
+	code := `package main
+	fn main() {
+		fn addOne(x) => x + 1
+		fn fact(n) {
+			if n <= 1 { return 1 }
+			return n * fact(n - 1)
+		}
+		var swRes := 0
+		switch 1 {
+		case 1:
+			fn double(v) => v * 2
+			swRes = double(21)
+		}
+		return [addOne(5), fact(5), swRes]
+	}`
+	val := run(t, code)
+	if want := "[6, 120, 42]"; val.String() != want {
+		t.Fatalf("got %s, want %s", val, want)
+	}
+}
+
+// closures and tasks inside for and while loops capture per-iteration bindings
+func TestLoopClosureAndTaskCaptures(t *testing.T) {
+	code := `package main
+	fn main() {
+		var fns := []
+		for i, x in [10, 20, 30] {
+			y := x + i
+			fn localFn() => [i, x, y]
+			fns.push(fn() => [i, x, y, localFn()[2]])
+		}
+
+		var wfns := []
+		var k := 0
+		while k < 3 {
+			v := k * 100
+			wfns.push(fn() => v)
+			k += 1
+		}
+
+		var tasks := []
+		for item in ["a", "b", "c"] {
+			tag := item
+			tasks.push(go (fn() => tag + "!")())
+		}
+
+		return [
+			[fns[0](), fns[1](), fns[2]()],
+			[wfns[0](), wfns[1](), wfns[2]()],
+			await.all(tasks),
+		]
+	}`
+	val := run(t, code)
+	want := `[[[0, 10, 10, 10], [1, 20, 21, 21], [2, 30, 32, 32]], [0, 100, 200], ["a!", "b!", "c!"]]`
+	if val.String() != want {
+		t.Fatalf("got  %s\nwant %s", val, want)
+	}
+}
+
+// break and continue outside a loop or across a function boundary are rejected at compile time
+func TestBreakAndContinueValidation(t *testing.T) {
+	cases := map[string]string{
+		"package main\nfn main() { break }":                                      "break outside of a loop or switch",
+		"package main\nfn main() { continue }":                                   "continue outside of a loop",
+		"package main\nfn main() { switch 1 { case 1: continue } }":              "continue outside of a loop",
+		"package main\nfn f() { break }\nfn main() { while true { f() } }":       "break outside of a loop or switch",
+		"package main\nfn main() { while true { f := fn() { break }\n f() } }":   "break outside of a loop or switch",
+		"package main\nfn main() { for x in [1] { f := fn() { continue }\n f() } }": "continue outside of a loop",
+	}
+	for src, want := range cases {
+		_, err := runCode(src)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: want error containing %q, got %v", src, want, err)
+		}
+	}
+}
+
+// local structs, struct body validation, postfix '?', unary '+', and block value consistency
+func TestCompilerAndGrammarEdgeCases(t *testing.T) {
+	// 1. Local struct declaration with inheritance and methods
+	localStructCode := `package main
+	fn main() {
+		struct Base(x) {
+			fn getX() => this.x
+		}
+		struct Sub(x, y) : Base {
+			fn sum() => this.getX() + this.y
+		}
+		s := Sub(10, 32)
+		return [s.sum(), s is Sub, s is Base]
+	}`
+	if val := run(t, localStructCode); val.String() != "[42, true, true]" {
+		t.Fatalf("local struct: got %s", val)
+	}
+
+	// 2. Existence check on string and buffer indices
+	existsCode := `package main
+	fn main() {
+		return ["hi"[0]?, "hi"[2]?, "hi"[-1]?, "hi"[0.5]?]
+	}`
+	if val := run(t, existsCode); val.String() != "[true, false, true, false]" {
+		t.Fatalf("string index exists: got %s", val)
+	}
+
+	// 3. Unary '+' on numbers and runtime error on non-numbers
+	if val := run(t, "x := 7\nreturn +x + +(3 + 4)"); val.String() != "14" {
+		t.Fatalf("unary plus: got %s", val)
+	}
+	if _, err := runCode(`return +("hello")`); err == nil || !strings.Contains(err.Error(), "cannot apply unary '+' to a string") {
+		t.Fatalf("expected unary '+' type error, got %v", err)
+	}
+
+	// 4. Compile errors on invalid '?' target and non-method in struct body
+	for src, want := range map[string]string{
+		"package main\nfn main() { x := 1\n return x? }":             "'?' can only check a field or index access",
+		"package main\nstruct Bad() { x := 1 }\nfn main() {}":        "only methods ('fn') are allowed inside a struct body",
+		"package main\nstruct Dup() { fn f() {}\n fn f() {} }":       "method 'f' is declared twice on Dup",
+	} {
+		_, err := runCode(src)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: want error containing %q, got %v", src, want, err)
+		}
+	}
+
+	// 5. await.any failure is located
+	_, err := runCode(`package main
+	fn fail() { throw error("nope") }
+	fn main() {
+		return await.any(go fail(), go fail())
+	}`)
+	if err == nil || !strings.Contains(err.Error(), "all tasks failed in await.any") {
+		t.Fatalf("expected await.any failure, got %v", err)
+	}
+
+	// 6. Single-statement block in catch behaves identically with fast paths on and off
+	for _, noFast := range []bool{false, true} {
+		eng := evie.New(evie.Options{Debug: evie.Debug{NoFastPaths: noFast}})
+		v, err := eng.Eval("return [catch { 42 }, catch(42)]")
+		if err != nil {
+			t.Fatalf("NoFastPaths=%v: %v", noFast, err)
+		}
+		if v.String() != "[nil, 42]" {
+			t.Fatalf("NoFastPaths=%v: got %s, want [nil, 42]", noFast, v)
+		}
+	}
+}
+
+// cyclic arrays, objects and struct instances format and convert to Go without overflowing the stack
+func TestCyclicValuesAndMainArgs(t *testing.T) {
+	cyclicCode := `package main
+	struct Node(val, next) {}
+	fn main() {
+		a := [1, 2]
+		a.push(a)
+
+		o := {k: "v"}
+		o.self = o
+
+		n := Node(10, nil)
+		n.next = n
+
+		shared := [7]
+		dag := [shared, shared]
+
+		return [string(a), string(o), string(n), string(dag), a == a, o == o, n == n]
+	}`
+	val := run(t, cyclicCode)
+	want := `["[1, 2, [...]]", "{k: "v", self: {...}}", "Node{val: 10, next: Node{...}}", "[[7], [7]]", true, true, true]`
+	if val.String() != want {
+		t.Fatalf("cyclic formatting:\ngot  %s\nwant %s", val.String(), want)
+	}
+
+	// Verify ToGo() on cyclic array terminates and preserves structure
+	eng := evie.New()
+	cyclicArr, err := eng.Eval("a := [1]\na.push(a)\nreturn a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	goVal := cyclicArr.ToGo()
+	slice, ok := goVal.([]any)
+	if !ok || len(slice) != 2 || slice[0] != float64(1) {
+		t.Fatalf("unexpected ToGo result: %#v", goVal)
+	}
+
+	// Verify Engine Options.Args passes arguments when main accepts them, and ignores them when main() takes 0 args
+	dir := t.TempDir()
+	variadicMain := filepath.Join(dir, "var_main.ev")
+	if err := os.WriteFile(variadicMain, []byte("package main\nfn main(...args) => args.join(\":\")\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := evie.New(evie.Options{Args: []string{"alpha", "beta", "gamma"}}).RunFile(variadicMain)
+	if err != nil || res.String() != "alpha:beta:gamma" {
+		t.Fatalf("variadic main with Args: got %v, %v", res, err)
+	}
+
+	zeroArgMain := filepath.Join(dir, "zero_main.ev")
+	if err := os.WriteFile(zeroArgMain, []byte("package main\nfn main() => 99\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err = evie.New(evie.Options{Args: []string{"unused1", "unused2"}}).RunFile(zeroArgMain)
+	if err != nil || res.String() != "99" {
+		t.Fatalf("0-arg main with Args: got %v, %v", res, err)
+	}
+}

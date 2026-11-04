@@ -134,6 +134,11 @@ func (node MutableBinOp) String() string {
 	return "unknown"
 }
 
+type Plus struct {
+	token.Pos      // [required]
+	Value     Node // [required]
+}
+
 type Neg struct {
 	token.Pos      // [required]
 	Value     Node // [required]

@@ -100,7 +100,23 @@ func (fbr *fiber) setLocal(index int, value Value) {
 	for len(fbr.stack) <= fbr.base+index {
 		fbr.stack = append(fbr.stack, &Value{})
 	}
+	if fbr.active != nil && index < len(fbr.active.locals) && fbr.active.locals[index] {
+		fbr.stack[fbr.base+index] = &value
+		return
+	}
 	*(fbr.stack[fbr.base+index]) = value
+}
+
+func (fbr *fiber) newLocal(index int) *Value {
+	for len(fbr.stack) <= fbr.base+index {
+		fbr.stack = append(fbr.stack, &Value{})
+	}
+	if fbr.active != nil && index < len(fbr.active.locals) && fbr.active.locals[index] {
+		cell := &Value{}
+		fbr.stack[fbr.base+index] = cell
+		return cell
+	}
+	return fbr.stack[fbr.base+index]
 }
 
 func (fbr *fiber) getCaptured(index int16) Value {

@@ -36,6 +36,16 @@ func TestParseErrors(t *testing.T) {
 		"fn main() { x := return 1 }":                      "expected a value, found 'return'",
 		"struct C(n) { fn reset() => this.n = 0 }":         "",
 		"fn main() { var n := 0\n inc := fn() => n += 1 }": "",
+		"fn main() { else := 1 }":                          "keyword",
+		"fn main() { in := 1 }":                            "keyword",
+		"fn main() { var switch := 1 }":                    "keyword",
+		"fn main() { case := 1 }":                          "keyword",
+		"fn main() { default := 1 }":                       "keyword",
+		"fn if() {}":                                       "keyword",
+		"struct while(x) {}":                               "keyword",
+		"fn main() { switch 1 { case 1: return\ncase 2: return 2 } }": "",
+		"fn main() { switch 1 { case 1: return; case 2: return 2 } }": "",
+		"fn main() { return\nx := 1 }":                                "",
 	}
 	for src, want := range cases {
 		node, err := parser.Parse([]byte(src))
@@ -62,9 +72,6 @@ func TestParseErrors(t *testing.T) {
 func TestParseExamples(t *testing.T) {
 	files, _ := filepath.Glob("../examples/*.ev")
 	for _, file := range files {
-		if filepath.Base(file) == "types.ev" {
-			continue // a syntax sketch, not a program
-		}
 		src, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)

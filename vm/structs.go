@@ -2,6 +2,7 @@ package vm
 
 import (
 	"strings"
+	"unsafe"
 
 	"github.com/hxkhan/evie/vm/fields"
 )
@@ -182,7 +183,28 @@ func (usi *structInstance) hasFieldByName(name string) bool {
 }
 
 func (usi *structInstance) String() string {
-	builder := strings.Builder{}
+	var builder strings.Builder
+	usi.writeTo(&builder, nil)
+	return builder.String()
+}
+
+func (usi *structInstance) writeTo(builder *strings.Builder, seen map[unsafe.Pointer]bool) {
+	if usi == nil {
+		builder.WriteString("{}")
+		return
+	}
+	ptr := unsafe.Pointer(usi)
+	if seen[ptr] {
+		builder.WriteString(usi.InstanceOf.Name)
+		builder.WriteString("{...}")
+		return
+	}
+	if seen == nil {
+		seen = make(map[unsafe.Pointer]bool)
+	}
+	seen[ptr] = true
+	defer delete(seen, ptr)
+
 	builder.WriteString(usi.InstanceOf.Name)
 	builder.WriteByte('{')
 
@@ -192,13 +214,7 @@ func (usi *structInstance) String() string {
 	writeField := func(name string, v Value) {
 		builder.WriteString(name)
 		builder.WriteString(": ")
-		if str, ok := v.AsString(); ok {
-			builder.WriteByte('"')
-			builder.WriteString(str)
-			builder.WriteByte('"')
-		} else {
-			builder.WriteString(v.String())
-		}
+		v.writeTo(builder, seen, true)
 		if iter != total-1 {
 			builder.WriteString(", ")
 		}
@@ -217,5 +233,4 @@ func (usi *structInstance) String() string {
 	}
 
 	builder.WriteByte('}')
-	return builder.String()
 }

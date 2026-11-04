@@ -158,6 +158,7 @@ func boolToInt(b bool) int {
 }
 
 func (vm *Instance) emitAwait(node ast.Await) instruction {
+	site := vm.at(node)
 	value := vm.compile(node.Task)
 
 	return func(fbr *fiber) (Value, exception) {
@@ -167,7 +168,11 @@ func (vm *Instance) emitAwait(node ast.Await) instruction {
 		}
 
 		if task, ok := v.AsTask(); ok {
-			return task.await(fbr)
+			res, exc := task.await(fbr)
+			if exc != nil {
+				return res, exc.at(site)
+			}
+			return res, nil
 		}
 
 		// Awaiting a non-task value returns the value directly (identity await)
@@ -200,6 +205,7 @@ func extractTasks(evaluated []Value) ([]*Task, []Value) {
 }
 
 func (vm *Instance) emitAwaitAll(node ast.AwaitAll) instruction {
+	site := vm.at(node)
 	values := make([]instruction, len(node.Tasks))
 	for i, task := range node.Tasks {
 		values[i] = vm.compile(task)
@@ -221,7 +227,7 @@ func (vm *Instance) emitAwaitAll(node ast.AwaitAll) instruction {
 			if t != nil {
 				res, err := t.await(fbr)
 				if err != nil {
-					return res, err
+					return res, err.at(site)
 				}
 				results[i] = res
 			} else {
@@ -261,10 +267,16 @@ func settle(fbr *fiber, tasks []*Task, successOnly bool) (outcome, bool) {
 			if out.err == nil || !successOnly {
 				return out, true
 			}
+			if fbr.stop.done() {
+				return outcome{err: fbr.stop.failure()}, true
+			}
 			failed++
 		case <-fbr.stop.ctx.Done():
 			return outcome{err: fbr.stop.failure()}, true
 		}
+	}
+	if fbr.stop.done() {
+		return outcome{err: fbr.stop.failure()}, true
 	}
 	return outcome{}, false
 }
@@ -305,9 +317,12 @@ func (vm *Instance) emitAwaitAny(node ast.AwaitAny) instruction {
 		}
 
 		if first, ok := settle(fbr, tasks, true); ok {
+			if first.err != nil {
+				return Value{}, first.err.at(site)
+			}
 			return first.res, nil
 		}
-		return Value{}, customError("all tasks failed in await.any")
+		return Value{}, errorAt(site, "all tasks failed in await.any")
 	}
 }
 
@@ -339,11 +354,18 @@ func (vm *Instance) emitAwaitRace(node ast.AwaitRace) instruction {
 				return raw[i], nil
 			}
 			if t.isDone() {
-				return t.outcome()
+				res, err := t.outcome()
+				if err != nil {
+					return res, err.at(site)
+				}
+				return res, nil
 			}
 		}
 
 		first, _ := settle(fbr, tasks, false)
-		return first.res, first.err
+		if first.err != nil {
+			return first.res, first.err.at(site)
+		}
+		return first.res, nil
 	}
 }

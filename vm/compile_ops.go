@@ -24,6 +24,29 @@ func (vm *Instance) assignee(node ast.Node) binding {
 	return variable
 }
 
+func (vm *Instance) emitPlus(node ast.Plus) instruction {
+	site := vm.at(node)
+	if val, ok := vm.evaluate(node).(Value); ok {
+		return func(fbr *fiber) (Value, exception) {
+			return val, nil
+		}
+	}
+
+	value := vm.compile(node.Value)
+
+	return func(fbr *fiber) (Value, exception) {
+		value, exc := value(fbr)
+		if exc != nil {
+			return value, exc
+		}
+
+		if _, ok := value.AsFloat64(); ok {
+			return value, nil
+		}
+		return Value{}, errorAt(site, "cannot apply unary '+' to %s", article(value))
+	}
+}
+
 func (vm *Instance) emitNeg(node ast.Neg) instruction {
 	site := vm.at(node)
 	if val, ok := vm.evaluate(node).(Value); ok {

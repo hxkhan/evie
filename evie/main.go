@@ -30,8 +30,8 @@ import (
 )
 
 const usage = `Usage:
-  evie [flags] <file.ev | directory>
-  evie [flags] -e <code>
+  evie [flags] <file.ev | directory> [args...]
+  evie [flags] -e <code> [args...]
 
 Flags:
 `
@@ -54,29 +54,39 @@ func main() {
 		return
 	}
 
-	eng := evie.New(evie.Options{Debug: evie.Debug{
-		NoFastPaths: !*inline,
-		LogCaptures: *logCaptures,
-	}})
+	var scriptArgs []string
+	switch {
+	case *code != "":
+		scriptArgs = flag.Args()
+	case flag.NArg() >= 1:
+		scriptArgs = flag.Args()[1:]
+	default:
+		flag.Usage()
+		os.Exit(2)
+	}
+
+	eng := evie.New(evie.Options{
+		Args: scriptArgs,
+		Debug: evie.Debug{
+			NoFastPaths: !*inline,
+			LogCaptures: *logCaptures,
+		},
+	})
 	stopOnInterrupt(eng)
 
 	before := time.Now()
 	var res vm.Value
 	var err error
 
-	switch {
-	case *code != "":
-		res, err = runInline(eng, *code)
-	case flag.NArg() == 1:
+	if *code != "" {
+		res, err = runInline(eng, *code, scriptArgs)
+	} else {
 		target := flag.Arg(0)
 		if info, statErr := os.Stat(target); statErr == nil && info.IsDir() {
 			res, err = eng.RunProject(target)
 		} else {
 			res, err = eng.RunFile(target)
 		}
-	default:
-		flag.Usage()
-		os.Exit(2)
 	}
 
 	elapsed := time.Since(before)
@@ -100,9 +110,9 @@ var packageUse = regexp.MustCompile(`\b(` + strings.Join(standard, "|") + `)\.`)
 // runInline runs code from the command line. A program that declares its own
 // package runs as written; anything else becomes the body of main, returning
 // its value when it is a single expression.
-func runInline(eng *evie.Engine, code string) (vm.Value, error) {
+func runInline(eng *evie.Engine, code string, scriptArgs []string) (vm.Value, error) {
 	if strings.HasPrefix(strings.TrimSpace(code), "package ") {
-		return runSource(eng, code)
+		return runSource(eng, code, scriptArgs)
 	}
 
 	used := map[string]bool{}
@@ -130,9 +140,9 @@ func runInline(eng *evie.Engine, code string) (vm.Value, error) {
 		return vm.Value{}, err
 	}
 	if block, ok := node.(ast.Block); ok && len(block.Code) == 1 && isExpression(block.Code[0]) {
-		return runSource(eng, header+"return "+code+"\n}")
+		return runSource(eng, header+"return "+code+"\n}", scriptArgs)
 	}
-	return runSource(eng, header+code+"\n}")
+	return runSource(eng, header+code+"\n}", scriptArgs)
 }
 
 // isExpression reports whether a parsed top-level node has a value to print
@@ -147,7 +157,7 @@ func isExpression(node ast.Node) bool {
 	return true
 }
 
-func runSource(eng *evie.Engine, src string) (vm.Value, error) {
+func runSource(eng *evie.Engine, src string, scriptArgs []string) (vm.Value, error) {
 	if _, err := eng.Load("-e", []byte(src)); err != nil {
 		return vm.Value{}, err
 	}
@@ -155,7 +165,14 @@ func runSource(eng *evie.Engine, src string) (vm.Value, error) {
 	if !ok || !main.IsCallable() {
 		return vm.Value{}, errors.New("-e: the program has no main function")
 	}
-	res, err := main.Call()
+	var args []vm.Value
+	if len(scriptArgs) > 0 && main.AcceptsArgs() {
+		args = make([]vm.Value, len(scriptArgs))
+		for i, arg := range scriptArgs {
+			args[i] = vm.BoxString(arg)
+		}
+	}
+	res, err := main.Call(args...)
 	eng.Close()
 	return res, err
 }

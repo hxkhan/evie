@@ -44,11 +44,17 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		}
 
 	case ast.Break:
+		if vm.cp.closures.Len() == 0 || (vm.cp.closures.Last(0).loops == 0 && vm.cp.closures.Last(0).switches == 0) {
+			panic(vm.compileErrorAt(node, "break outside of a loop or switch"))
+		}
 		return func(fbr *fiber) (Value, exception) {
 			return Value{}, signalBreak
 		}
 
 	case ast.Continue:
+		if vm.cp.closures.Len() == 0 || vm.cp.closures.Last(0).loops == 0 {
+			panic(vm.compileErrorAt(node, "continue outside of a loop"))
+		}
 		return func(fbr *fiber) (Value, exception) {
 			return Value{}, signalContinue
 		}
@@ -116,6 +122,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	case ast.AwaitRace:
 		return vm.emitAwaitRace(node)
 
+	case ast.Plus:
+		return vm.emitPlus(node)
+
 	case ast.Neg:
 		return vm.emitNeg(node)
 
@@ -142,6 +151,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 
 	case ast.Subscript:
 		return vm.emitSubscript(node)
+
+	case ast.StructDefinition:
+		return vm.emitStruct(node)
 	}
 
 	panic(fmt.Errorf("implement %T", node))
@@ -384,13 +396,18 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc exception) {
 
 			if block, ok := str.Action.(ast.Block); ok {
 				for _, stmt := range block.Code {
-					if mFn, isFn := stmt.(ast.Fn); isFn {
-						if mFn.Name == "" {
-							panic(vm.compileErrorAt(mFn, "a struct method needs a name"))
-						}
-						methodFn := vm.compileStructMethod(ustruct, mFn)
-						ustruct.Methods[fields.Get(mFn.Name)] = methodFn
+					mFn, isFn := stmt.(ast.Fn)
+					if !isFn {
+						panic(vm.compileErrorAt(stmt, "only methods ('fn') are allowed inside a struct body"))
 					}
+					if mFn.Name == "" {
+						panic(vm.compileErrorAt(mFn, "a struct method needs a name"))
+					}
+					if _, exists := ustruct.Methods[fields.Get(mFn.Name)]; exists {
+						panic(vm.compileErrorAt(mFn, "method '%s' is declared twice on %s", mFn.Name, str.Name))
+					}
+					methodFn := vm.compileStructMethod(ustruct, mFn)
+					ustruct.Methods[fields.Get(mFn.Name)] = methodFn
 				}
 			}
 		}
@@ -534,4 +551,101 @@ func (vm *Instance) compileInit(pkg *Package, code []ast.Node, deferred map[stri
 	}
 	vm.closeFunction(info, closure)
 	return &userFn{funcInfoStatic: info}
+}
+
+func (vm *Instance) emitStruct(str ast.StructDefinition) instruction {
+	if str.Name == "" {
+		panic(vm.compileErrorAt(str, "cannot declare a struct with no name"))
+	}
+
+	if vm.cp.closures.Len() == 0 {
+		vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: &funcInfoStatic{name: "anonymous"}})
+		vm.cp.closures.Last(0).scope.OpenBlock()
+	}
+
+	index, ok := vm.cp.closures.Last(0).scope.Declare(str.Name, true)
+	if !ok {
+		panic(vm.compileErrorAt(str, "double declaration of %s", str.Name))
+	}
+
+	args := make([]fields.ID, len(str.Args))
+	offsets := make(map[fields.ID]int, len(str.Args))
+	for i, a := range str.Args {
+		fid := fields.Get(a)
+		args[i] = fid
+		offsets[fid] = i
+	}
+
+	ustruct := &userStruct{
+		Name:         str.Name,
+		def:          vm.at(str),
+		Fields:       args,
+		FieldOffsets: offsets,
+		Methods:      make(map[fields.ID]*userFn),
+	}
+
+	var parentInst instruction
+	if str.Parent != "" {
+		if str.Parent == str.Name {
+			panic(vm.compileErrorAt(str, "'%v' and '%v' inherit from each other", str.Name, str.Parent))
+		}
+		parentBinding, err := vm.cp.reach(str.Parent)
+		if err != nil {
+			panic(vm.compileErrorAt(str, "cannot find the parent struct '%v'", str.Parent))
+		}
+		if pg, isGlobal := parentBinding.(pkgGlobal); isGlobal && pg.IsConstant {
+			parentStruct, ok := pg.Value.asUserStruct()
+			if !ok {
+				panic(vm.compileErrorAt(str, "'%v' is %s, not a struct", str.Parent, article(*pg.Value)))
+			}
+			ustruct.Parent = parentStruct
+		} else {
+			parentInst = vm.emitIdentGet(ast.Ident{Pos: str.Pos, Name: str.Parent})
+		}
+	}
+
+	if block, ok := str.Action.(ast.Block); ok {
+		for _, stmt := range block.Code {
+			mFn, isFn := stmt.(ast.Fn)
+			if !isFn {
+				panic(vm.compileErrorAt(stmt, "only methods ('fn') are allowed inside a struct body"))
+			}
+			if mFn.Name == "" {
+				panic(vm.compileErrorAt(mFn, "a struct method needs a name"))
+			}
+			if _, exists := ustruct.Methods[fields.Get(mFn.Name)]; exists {
+				panic(vm.compileErrorAt(mFn, "method '%s' is declared twice on %s", mFn.Name, str.Name))
+			}
+			methodFn := vm.compileStructMethod(ustruct, mFn)
+			ustruct.Methods[fields.Get(mFn.Name)] = methodFn
+		}
+	}
+
+	site := vm.at(str)
+	boxed := boxUserStruct(ustruct)
+	if parentInst == nil {
+		return func(fbr *fiber) (Value, exception) {
+			fbr.setLocal(index, boxed)
+			return Value{}, nil
+		}
+	}
+
+	return func(fbr *fiber) (Value, exception) {
+		pVal, exc := parentInst(fbr)
+		if exc != nil {
+			return pVal, exc
+		}
+		parentStruct, ok := pVal.asUserStruct()
+		if !ok {
+			return Value{}, errorAt(site, "'%v' is %s, not a struct", str.Parent, article(pVal))
+		}
+		for p := parentStruct; p != nil; p = p.Parent {
+			if p == ustruct {
+				return Value{}, errorAt(site, "'%v' and '%v' inherit from each other", str.Name, str.Parent)
+			}
+		}
+		ustruct.Parent = parentStruct
+		fbr.setLocal(index, boxed)
+		return Value{}, nil
+	}
 }

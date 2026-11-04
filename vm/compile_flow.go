@@ -126,7 +126,14 @@ func (vm *Instance) emitConditional(node ast.Conditional) instruction {
 func (vm *Instance) emitWhile(node ast.While) instruction {
 	site := vm.at(node)
 	condition := vm.compileCondition(node.Condition)
+
+	if vm.cp.closures.Len() == 0 {
+		vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: &funcInfoStatic{name: "anonymous"}})
+		vm.cp.closures.Last(0).scope.OpenBlock()
+	}
+	vm.cp.closures.Last(0).loops++
 	action := vm.compile(node.Action)
+	vm.cp.closures.Last(0).loops--
 
 	return func(fbr *fiber) (Value, exception) {
 		for {
@@ -186,7 +193,9 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 		panic(vm.compileErrorAt(node, "double declaration of %s in for loop", node.ItemVar))
 	}
 
+	vm.cp.closures.Last(0).loops++
 	bodyInst := vm.compile(node.Action)
+	vm.cp.closures.Last(0).loops--
 
 	return func(fbr *fiber) (Value, exception) {
 		collVal, err := collInst(fbr)
@@ -309,21 +318,31 @@ type switchCaseCompiled struct {
 }
 
 func (vm *Instance) emitSwitch(node ast.Switch) instruction {
+	if vm.cp.closures.Len() == 0 {
+		vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: &funcInfoStatic{name: "anonymous"}})
+		vm.cp.closures.Last(0).scope.OpenBlock()
+	}
+
 	cases := make([]switchCaseCompiled, len(node.Cases))
 	for i, c := range node.Cases {
 		vals := make([]instruction, len(c.Values))
 		for j, val := range c.Values {
 			vals[j] = vm.compile(val)
 		}
+		vm.cp.closures.Last(0).switches++
+		action := vm.compile(c.Action)
+		vm.cp.closures.Last(0).switches--
 		cases[i] = switchCaseCompiled{
 			values: vals,
-			action: vm.compile(c.Action),
+			action: action,
 		}
 	}
 
 	var defaultAction instruction
 	if node.Default != nil {
+		vm.cp.closures.Last(0).switches++
 		defaultAction = vm.compile(node.Default)
+		vm.cp.closures.Last(0).switches--
 	}
 
 	// Tagless switch: switch { case cond1, cond2: ... }
@@ -452,8 +471,15 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 			}
 		}
 
-		// generic
-		return vm.compile(node)
+		// generic statement extraction for statements that evaluate to Value{}
+		switch n := node.(type) {
+		case ast.Decl, ast.Assign, ast.MutableBinOp, ast.Conditional, ast.While, ast.For, ast.Switch, ast.Echo, ast.Break, ast.Continue, ast.Throw, ast.Block, ast.StructDefinition:
+			return vm.compile(node)
+		case ast.Fn:
+			if !n.UsedAsExpr {
+				return vm.compile(node)
+			}
+		}
 	}
 
 	block := make([]instruction, len(node.Code))

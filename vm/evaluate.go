@@ -122,6 +122,13 @@ func (vm *Instance) evaluate(node ast.Node) operand {
 			return BoxBool(!val.IsTruthy())
 		}
 
+	case ast.Plus:
+		if val, ok := vm.evaluate(node.Value).(Value); ok {
+			if _, ok := val.AsFloat64(); ok {
+				return val
+			}
+		}
+
 	case ast.Neg:
 		if val, ok := vm.evaluate(node.Value).(Value); ok {
 			if f, ok := val.AsFloat64(); ok {

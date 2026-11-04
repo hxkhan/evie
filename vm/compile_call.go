@@ -49,12 +49,11 @@ func (vm *Instance) closeFunction(info *funcInfoStatic, closure *closure) {
 func (vm *Instance) emitFn(node ast.Fn) instruction {
 	info := vm.newFuncInfo(node.Name, node.Args, node.IsVariadic, false)
 	info.def = vm.at(node)
-	closure := vm.compileFunction(info, node.Args, node.Action, nil)
-
-	captures := closure.captures
 
 	// create the function & return it
 	if node.UsedAsExpr {
+		closure := vm.compileFunction(info, node.Args, node.Action, nil)
+		captures := closure.captures
 		return func(fbr *fiber) (Value, exception) {
 			captured := make([]*Value, len(captures))
 			for i, ref := range captures {
@@ -72,13 +71,22 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 		panic(vm.compileErrorAt(node, "cannot declare an fn statement with no name"))
 	}
 
+	if vm.cp.closures.Len() == 0 {
+		vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: &funcInfoStatic{name: "anonymous"}})
+		vm.cp.closures.Last(0).scope.OpenBlock()
+	}
+
 	index, ok := vm.cp.closures.Last(0).scope.Declare(node.Name, true)
 	if !ok {
 		panic(vm.compileErrorAt(node, "double declaration of %s", node.Name))
 	}
 
+	closure := vm.compileFunction(info, node.Args, node.Action, nil)
+	captures := closure.captures
+
 	// create the function & declare it
 	return func(fbr *fiber) (Value, exception) {
+		cell := fbr.newLocal(index)
 		captured := make([]*Value, len(captures))
 		for i, ref := range captures {
 			if ref.isLocal {
@@ -87,7 +95,7 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 				captured[i] = fbr.getCapturedByRef(ref.index)
 			}
 		}
-		fbr.setLocal(index, boxUserFn(userFn{funcInfoStatic: info, references: captured}))
+		*cell = boxUserFn(userFn{funcInfoStatic: info, references: captured})
 		return Value{}, nil
 	}
 }

@@ -1,10 +1,37 @@
 package io
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
+	goio "io"
+	"os"
+	"strings"
+	"sync"
 
 	"github.com/hxkhan/evie/vm"
 )
+
+var (
+	stdinMu   sync.Mutex
+	stdinFile *os.File
+	stdinBuf  *bufio.Reader
+)
+
+func readLine() (string, error) {
+	stdinMu.Lock()
+	defer stdinMu.Unlock()
+
+	if stdinBuf == nil || stdinFile != os.Stdin {
+		stdinFile = os.Stdin
+		stdinBuf = bufio.NewReader(os.Stdin)
+	}
+	line, err := stdinBuf.ReadString('\n')
+	if err != nil && !errors.Is(err, goio.EOF) {
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
+}
 
 // Construct builds the io package: console output and input
 func Construct() *vm.Package {
@@ -30,13 +57,17 @@ func Construct() *vm.Package {
 	})
 	pkg.Func("prompt", 1, func(c vm.Call) (vm.Value, error) {
 		fmt.Print(c.Arg(0))
-		var input string
-		fmt.Scanln(&input)
+		input, err := readLine()
+		if err != nil {
+			return vm.Value{}, err
+		}
 		return vm.BoxString(input), nil
 	}).Blocking = true
 	pkg.Func("readln", 0, func(c vm.Call) (vm.Value, error) {
-		var input string
-		fmt.Scanln(&input)
+		input, err := readLine()
+		if err != nil {
+			return vm.Value{}, err
+		}
 		return vm.BoxString(input), nil
 	}).Blocking = true
 	return pkg

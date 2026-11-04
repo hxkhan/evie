@@ -81,7 +81,17 @@ func Construct() *vm.Package {
 	}))
 
 	// path helpers touch no files and do not block
-	pkg.Native("join", vm.Func2(func(a, b string) string { return filepath.ToSlash(filepath.Join(a, b)) }))
+	pkg.Variadic("join", 1, func(c vm.Call) (vm.Value, error) {
+		parts := make([]string, c.Len())
+		for i := range parts {
+			s, err := c.String(i)
+			if err != nil {
+				return vm.Value{}, err
+			}
+			parts[i] = s
+		}
+		return vm.BoxString(filepath.ToSlash(filepath.Join(parts...))), nil
+	})
 	pkg.Native("base", vm.Func1(filepath.Base))
 	pkg.Native("dir", vm.Func1(func(name string) string { return filepath.ToSlash(filepath.Dir(name)) }))
 	pkg.Native("ext", vm.Func1(filepath.Ext))

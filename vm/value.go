@@ -345,7 +345,9 @@ func (x Value) String() string {
 		//return (*UserFn)(x.pointer).String()
 		return "callable"
 	case kindStructInstance:
-		return (*structInstance)(x.pointer).String()
+		var builder strings.Builder
+		(*structInstance)(x.pointer).writeTo(&builder, nil)
+		return builder.String()
 	case kindGoFunc:
 		fn := (*GoFunc)(x.pointer)
 		if fn.isMethod {
@@ -354,32 +356,13 @@ func (x Value) String() string {
 		return "<callable>"
 
 	case kindArray:
-		return (*Array)(x.pointer).String()
+		var builder strings.Builder
+		(*Array)(x.pointer).writeTo(&builder, nil)
+		return builder.String()
 
 	case kindObject:
-		obj := *(*map[string]Value)(x.pointer)
-
-		builder := strings.Builder{}
-		builder.WriteByte('{')
-
-		for i, name := range sortedKeys(obj) {
-			if i > 0 {
-				builder.WriteString(", ")
-			}
-			builder.WriteString(name)
-			builder.WriteString(": ")
-
-			v := obj[name]
-			if str, ok := v.AsString(); ok {
-				builder.WriteByte('"')
-				builder.WriteString(str)
-				builder.WriteByte('"')
-			} else {
-				builder.WriteString(v.String())
-			}
-		}
-
-		builder.WriteByte('}')
+		var builder strings.Builder
+		x.writeTo(&builder, nil, false)
 		return builder.String()
 
 	case kindStruct:
@@ -412,6 +395,55 @@ func (x Value) String() string {
 	}
 
 	return "<unknown>"
+}
+
+func (x Value) writeTo(builder *strings.Builder, seen map[unsafe.Pointer]bool, quoteStrings bool) {
+	if !isKnown(x.pointer) {
+		switch x.scalar {
+		case kindString:
+			s := *(*string)(x.pointer)
+			if quoteStrings {
+				builder.WriteByte('"')
+				builder.WriteString(s)
+				builder.WriteByte('"')
+			} else {
+				builder.WriteString(s)
+			}
+			return
+		case kindArray:
+			(*Array)(x.pointer).writeTo(builder, seen)
+			return
+		case kindStructInstance:
+			(*structInstance)(x.pointer).writeTo(builder, seen)
+			return
+		case kindObject:
+			obj := *(*map[string]Value)(x.pointer)
+			ptr := *(*unsafe.Pointer)(x.pointer)
+			if ptr != nil && seen[ptr] {
+				builder.WriteString("{...}")
+				return
+			}
+			if seen == nil {
+				seen = make(map[unsafe.Pointer]bool)
+			}
+			if ptr != nil {
+				seen[ptr] = true
+				defer delete(seen, ptr)
+			}
+			builder.WriteByte('{')
+			for i, name := range sortedKeys(obj) {
+				if i > 0 {
+					builder.WriteString(", ")
+				}
+				builder.WriteString(name)
+				builder.WriteString(": ")
+				obj[name].writeTo(builder, seen, true)
+			}
+			builder.WriteByte('}')
+			return
+		}
+	}
+	builder.WriteString(x.String())
 }
 
 func (x Value) TypeOf() string {
@@ -657,6 +689,25 @@ func (x Value) IsCallable() bool {
 		switch x.scalar {
 		case kindUserFn, kindGoFunc, kindBoundMethod, kindStruct, kindBuiltinType:
 			return true
+		}
+	}
+	return false
+}
+
+// AcceptsArgs reports whether a callable value accepts one or more arguments
+func (x Value) AcceptsArgs() bool {
+	if !isKnown(x.pointer) {
+		switch x.scalar {
+		case kindUserFn:
+			return (*userFn)(x.pointer).maxArgs > 0
+		case kindGoFunc:
+			fn := (*GoFunc)(x.pointer)
+			return fn.isVariadic || fn.arguments > 0
+		case kindStruct:
+			return len((*userStruct)(x.pointer).Fields) > 0
+		case kindBuiltinType:
+			fn := (*builtinType)(x.pointer).Constructor
+			return fn.isVariadic || fn.arguments > 0
 		}
 	}
 	return false

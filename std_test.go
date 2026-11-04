@@ -104,7 +104,7 @@ func TestStdFs(t *testing.T) {
 	script := fmt.Sprintf(`package main imports("fs")
 fn main() {
 	root := %q
-	sub := fs.join(root, "a/b")
+	sub := fs.join(root, "a", "b")
 	fs.mkdir(sub)
 	file := fs.join(sub, "note.txt")
 	fs.writeFile(file, "one")
@@ -115,13 +115,13 @@ fn main() {
 	fs.rename(file, moved)
 	gone := !fs.exists(file)
 	fs.remove(fs.join(root, "a"))
-	return [text, listed.len(), fs.isDir(sub), gone, fs.exists(moved), fs.base(moved), fs.ext(moved), fs.readFile(moved).len()]
+	return [text, listed.len(), fs.isDir(sub), gone, fs.exists(moved), fs.base(moved), fs.ext(moved), fs.readFile(moved).len(), fs.join("x", "y", "z", "w")]
 }`, dir)
 	got, err := runCode(script)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := `["one,two", 1, false, true, true, "moved.txt", ".txt", 7]`; got.String() != want {
+	if want := `["one,two", 1, false, true, true, "moved.txt", ".txt", 7, "x/y/z/w"]`; got.String() != want {
 		t.Fatalf("got %s, want %s", got.String(), want)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "a")); !os.IsNotExist(err) {
@@ -129,6 +129,40 @@ fn main() {
 	}
 	stdFails(t, `fs.readText("no/such/file")`, "no/such/file")
 	stdFails(t, `fs.writeFile("x", 1)`, "string or a buffer")
+	stdFails(t, `fs.join()`, "at least 1 argument")
+}
+
+func TestStdIOInput(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStdin := os.Stdin
+	os.Stdin = r
+	defer func() {
+		os.Stdin = oldStdin
+		r.Close()
+	}()
+
+	if _, err := w.WriteString("John Doe\r\n25\nthird line with spaces\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	got, err := runCode(`package main imports("io")
+fn main() {
+	name := io.prompt("")
+	age := io.prompt("")
+	extra := io.readln()
+	return [name, age, extra]
+}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `["John Doe", "25", "third line with spaces"]`
+	if got.String() != want {
+		t.Fatalf("got %s, want %s", got.String(), want)
+	}
 }
 
 func TestStdTime(t *testing.T) {

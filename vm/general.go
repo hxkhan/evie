@@ -29,6 +29,8 @@ type closure struct {
 	scope    ds.Scope
 	info     *funcInfoStatic
 	ustruct  *userStruct
+	loops    int
+	switches int
 }
 
 // PackageResolver resolves a package by import name or path.
@@ -182,7 +184,11 @@ func (vm *Instance) evalNode(node ast.Node, s *stopper) (result Value, err error
 			}()
 		}
 
-		v, exc := fbr.runGuarded(vm.compile(node))
+		code := vm.compile(node)
+		if !hasClosure {
+			vm.closeFunction(fbr.active.funcInfoStatic, vm.cp.closures.Last(0))
+		}
+		v, exc := fbr.runGuarded(code)
 		if exc != nil {
 			err = exc
 		}
@@ -192,7 +198,7 @@ func (vm *Instance) evalNode(node ast.Node, s *stopper) (result Value, err error
 	// don't implicitly return the return value of the last executed instruction
 	switch err {
 	case nil:
-		return result, nil
+		return Value{}, nil
 	case signalReturn:
 		return result, nil
 	default:

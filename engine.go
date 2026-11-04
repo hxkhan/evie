@@ -430,7 +430,14 @@ func (e *Engine) runMain(ctx context.Context) (vm.Value, error) {
 	if !ok || !mainFn.IsCallable() {
 		return vm.Value{}, nil
 	}
-	res, err := e.CallContext(ctx, "main.main")
+	var args []any
+	if len(e.opts.Args) > 0 && mainFn.AcceptsArgs() {
+		args = make([]any, len(e.opts.Args))
+		for i, arg := range e.opts.Args {
+			args[i] = arg
+		}
+	}
+	res, err := e.CallContext(ctx, "main.main", args...)
 	e.Close()
 	return res, err
 }

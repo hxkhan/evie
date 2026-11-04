@@ -55,6 +55,18 @@ fn waiter() {
 	return await t
 }
 
+fn waitAny() {
+	t1 := go time.sleep(60000)
+	t2 := go time.sleep(60000)
+	return await.any(t1, t2)
+}
+
+fn waitRace() {
+	t1 := go time.sleep(60000)
+	t2 := go time.sleep(60000)
+	return await.race(t1, t2)
+}
+
 fn background() {
 	go spin()
 	go spin()
@@ -91,7 +103,7 @@ func within(t *testing.T, d time.Duration, what string, fn func()) {
 
 // Interrupt stops loops, recursion and code that tries to catch the stop
 func TestInterruptStopsRunawayCode(t *testing.T) {
-	for _, fn := range []string{"spin", "fib", "swallow", "sleepy", "waiter"} {
+	for _, fn := range []string{"spin", "fib", "swallow", "sleepy", "waiter", "waitAny", "waitRace"} {
 		t.Run(fn, func(t *testing.T) {
 			eng := load(t)
 			timer := time.AfterFunc(30*time.Millisecond, eng.Interrupt)
@@ -125,7 +137,7 @@ func TestInterruptedErrorHasLocation(t *testing.T) {
 
 // a deadline stops the call with the context's cause, wherever it waits
 func TestCallContextDeadline(t *testing.T) {
-	for _, fn := range []string{"spin", "walk", "sleepy", "waiter"} {
+	for _, fn := range []string{"spin", "walk", "sleepy", "waiter", "waitAny", "waitRace"} {
 		t.Run(fn, func(t *testing.T) {
 			eng := load(t)
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)

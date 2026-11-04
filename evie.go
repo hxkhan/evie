@@ -37,6 +37,7 @@ type Options struct {
 	Resolve  func(path string) (*vm.Package, error) // consulted for an import before the filesystem
 	Root     string                                 // directory that relative imports resolve against; the entry file's directory when empty
 	Prelude  *vm.Package                            // symbols visible to every script without an import
+	Args     []string                               // arguments passed to main when it accepts parameters
 
 	Debug Debug // switches for working on Evie itself
 }

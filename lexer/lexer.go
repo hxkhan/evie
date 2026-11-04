@@ -30,15 +30,15 @@ func (lex *Lexer) NextToken() (next token.Token) {
 func (lex *Lexer) PeekToken() (next token.Token) {
 	// If we have tokens in backlog, return them first
 	if lex.bi < len(lex.backlog) {
-		next = lex.backlog[lex.bi]
-		return next
+		return lex.backlog[lex.bi]
 	}
 
-	// weird ahh logic because compose might write to backlog
-	i := len(lex.backlog)
-	lex.backlog = append(lex.backlog, token.Token{})
 	next = lex.compose()
-	lex.backlog[i] = next
+	if lex.bi > 0 {
+		lex.bi--
+		return next
+	}
+	lex.backlog = append(lex.backlog, next)
 	return next
 }
 

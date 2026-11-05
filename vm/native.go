@@ -65,6 +65,9 @@ func (c Call) Call(fn Value, args ...Value) (Value, error) {
 		if exc := ufn.accepts(len(args)); exc != nil {
 			return Value{}, exc
 		}
+		if c.fbr.lock() {
+			defer c.fbr.unlock()
+		}
 		return plain(ufn.call(c.fbr, args))
 	}
 	return plain(fn.callGuarded(c.fbr, args...))

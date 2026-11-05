@@ -958,3 +958,121 @@ func TestCyclicValuesAndMainArgs(t *testing.T) {
 		t.Fatalf("0-arg main with Args: got %v, %v", res, err)
 	}
 }
+
+// a blocking native that panics or calls back into evie keeps the single-runner lock consistent
+func TestBlockingNativePanicAndCallback(t *testing.T) {
+	pkg := vm.NewPackage("host")
+	pkg.Func("boom", 0, func(c vm.Call) (vm.Value, error) {
+		panic("boom from blocking native")
+	}).Blocking = true
+
+	var active atomic.Int32
+	var overlap atomic.Int32
+	enter := func() {
+		if active.Add(1) > 1 {
+			overlap.Add(1)
+		}
+	}
+	leave := func() {
+		active.Add(-1)
+	}
+	pkg.Func("step", 0, func(c vm.Call) (vm.Value, error) {
+		enter()
+		defer leave()
+		return vm.Value{}, nil
+	})
+	pkg.Func("withCallback", 1, func(c vm.Call) (vm.Value, error) {
+		fn, err := c.Callable(0)
+		if err != nil {
+			return vm.Value{}, err
+		}
+		return c.Call(fn, vm.BoxNumber(21))
+	}).Blocking = true
+
+	eng := evie.New(evie.Options{Packages: []*vm.Package{pkg}})
+	if _, err := eng.Eval(`package main imports("host")
+	fn callBoom() {
+		return host.boom()
+	}
+	fn main() {
+		// 1. Panic in blocking native running inside a background task
+		t := go host.boom()
+		c := catch(await t)
+		if c == nil {
+			throw error("expected background panic to be caught as an error")
+		}
+
+		// 2. Callback from blocking native while another fiber runs
+		worker := go (fn() {
+			var i := 0
+			while i < 200 {
+				host.step()
+				i += 1
+			}
+		})()
+		res := host.withCallback(fn(x) {
+			host.step()
+			return x * 2
+		})
+		await worker
+		if res != 42 {
+			throw error("unexpected callback result")
+		}
+	}`); err != nil {
+		t.Fatal(err)
+	}
+	// A direct panic in a blocking native recovers cleanly and leaves the engine lock intact
+	if _, err := eng.Call("main.callBoom"); err == nil || !strings.Contains(err.Error(), "boom from blocking native") {
+		t.Fatalf("expected recovered panic error, got %v", err)
+	}
+	if _, err := eng.Call("main.main"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n := overlap.Load(); n != 0 {
+		t.Fatalf("blocking callback overlapped with worker %d times", n)
+	}
+}
+
+// blocking natives wrapped with Func* or Reflect marshal mutable arguments under the runner lock
+func TestBlockingNativeArgMarshaling(t *testing.T) {
+	pkg := vm.NewPackage("host")
+	pkg.Native("inspectAny", vm.Func1(func(v any) int {
+		m, ok := v.(map[string]any)
+		if !ok {
+			return 0
+		}
+		return len(m)
+	})).Blocking = true
+	pkg.Native("inspectMap", vm.Reflect(func(m map[string]int) int {
+		return len(m)
+	})).Blocking = true
+
+	eng := evie.New(evie.Options{Packages: []*vm.Package{pkg}})
+	if _, err := eng.Eval(`package main imports("host")
+	fn main() {
+		shared := {a: 1, b: 2}
+		writer := go (fn() {
+			var i := 0
+			while i < 200 {
+				shared["k" + string(i)] = i
+				i += 1
+			}
+		})()
+		var ok := true
+		var j := 0
+		while j < 50 {
+			if host.inspectAny(shared) < 2 || host.inspectMap(shared) < 2 {
+				ok = false
+			}
+			j += 1
+		}
+		await writer
+		return ok
+	}`); err != nil {
+		t.Fatal(err)
+	}
+	res, err := eng.Call("main.main")
+	if err != nil || res.String() != "true" {
+		t.Fatalf("got %v, %v", res, err)
+	}
+}

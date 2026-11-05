@@ -42,7 +42,12 @@ func argOf[T any]() argConv[T] {
 		return func(c Call, i int) (T, error) { o, err := c.Object(i); return same[T](o), err }
 	}
 	if _, isAny := any(&zero).(*any); isAny {
-		return func(c Call, i int) (T, error) { return same[T](c.Arg(i).ToGo()), nil }
+		return func(c Call, i int) (T, error) {
+			if c.fbr.lock() {
+				defer c.fbr.unlock()
+			}
+			return same[T](c.Arg(i).ToGo()), nil
+		}
 	}
 	// anything else must be a registered host type
 	return func(c Call, i int) (T, error) { return HostArg[T](c, i) }

@@ -122,6 +122,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	case ast.AwaitRace:
 		return vm.emitAwaitRace(node)
 
+	case ast.AwaitTimeout:
+		return vm.emitAwaitTimeout(node)
+
 	case ast.Plus:
 		return vm.emitPlus(node)
 

@@ -440,13 +440,7 @@ func (fn *GoFunc) run(fbr *fiber, base int, pushed int) (Value, exception) {
 	var result Value
 	var err error
 	if fn.Blocking && fbr.running {
-		fbr.unlock()
-		result, err = fn.fn(c)
-		fbr.lock()
-		if err != nil && fbr.stop.done() {
-			// the native gave up because the run is stopping
-			err = fbr.stop.failure()
-		}
+		result, err = fn.runBlocking(fbr, c)
 	} else {
 		result, err = fn.fn(c)
 	}
@@ -455,6 +449,17 @@ func (fn *GoFunc) run(fbr *fiber, base int, pushed int) (Value, exception) {
 	fbr.popStack(pushed)
 	fbr.swapBase(prevBase)
 	return result, toException(err)
+}
+
+// runBlocking runs fn without the instance runner and re-acquires it even if fn panics
+func (fn *GoFunc) runBlocking(fbr *fiber, c Call) (Value, error) {
+	fbr.unlock()
+	defer fbr.lock()
+	result, err := fn.fn(c)
+	if fbr.stop.done() {
+		return Value{}, fbr.stop.failure()
+	}
+	return result, err
 }
 
 // pushArg places one evaluated argument in a fresh box on the stack
@@ -533,6 +538,12 @@ func (fn *GoFunc) callGuarded(fbr *fiber, args ...Value) (result Value, exc exce
 
 	if fbr.lock() {
 		defer fbr.unlock()
+	}
+
+	if fbr.signaled() {
+		if exc := fbr.stopped(); exc != nil {
+			return Value{}, exc
+		}
 	}
 
 	base := len(fbr.stack)

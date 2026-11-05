@@ -1,16 +1,18 @@
 package vm
 
 import (
+	"time"
+
 	"github.com/hxkhan/evie/ast"
 )
 
 // spawn runs fn with params on a new fiber of its own and returns the task that
 // settles with the outcome. The fiber waits for the instance runner before it
-// executes any evie code, and it stops when its parent's run is stopped.
+// executes any evie code, and it stops when its parent's run is stopped or when
+// the task itself is cancelled.
 func (vm *Instance) spawn(parent *fiber, fn *userFn, params []Value) *Task {
 	task := newTaskInstance()
-	stop := parent.stop
-	stop.hold() // the task's fiber uses it; held here so the run cannot end first
+	stop := vm.rt.newTaskStopper(parent.stop)
 	task.stop = stop
 	vm.rt.wg.Go(func() {
 		fbr := vm.takeFiber(stop)
@@ -38,8 +40,7 @@ func (fbr *fiber) runTask(fn *userFn, params []Value) (result Value, exc excepti
 // spawnNative runs a native function with params on a fiber of its own
 func (vm *Instance) spawnNative(parent *fiber, fn *GoFunc, params []Value) *Task {
 	task := newTaskInstance()
-	stop := parent.stop
-	stop.hold()
+	stop := vm.rt.newTaskStopper(parent.stop)
 	task.stop = stop
 	vm.rt.wg.Go(func() {
 		fbr := vm.takeFiber(stop)
@@ -264,11 +265,14 @@ func settle(fbr *fiber, tasks []*Task, successOnly bool) (outcome, bool) {
 	for failed := 0; failed < len(tasks); {
 		select {
 		case out := <-outcomes:
-			if out.err == nil || !successOnly {
-				return out, true
-			}
 			if fbr.stop.done() {
 				return outcome{err: fbr.stop.failure()}, true
+			}
+			if out.err != nil && out.err.fatal {
+				out.err = &Error{Report: out.err.Report, Code: out.err.Code, Cause: out.err.Cause}
+			}
+			if out.err == nil || !successOnly {
+				return out, true
 			}
 			failed++
 		case <-fbr.stop.ctx.Done():
@@ -304,19 +308,28 @@ func (vm *Instance) emitAwaitAny(node ast.AwaitAny) instruction {
 		}
 
 		// Check if any item is already a resolved non-task or completed task without error
+		var pending []*Task
 		for i, t := range tasks {
 			if t == nil {
 				return raw[i], nil
 			}
 			if t.isDone() {
-				res, err := t.outcome()
+				res, err := t.outcomeFor(fbr)
 				if err == nil {
 					return res, nil
 				}
+				continue
 			}
+			pending = append(pending, t)
+		}
+		if len(pending) == 0 {
+			if exc := fbr.halt(site); exc != nil {
+				return Value{}, exc
+			}
+			return Value{}, errorAt(site, "all tasks failed in await.any")
 		}
 
-		if first, ok := settle(fbr, tasks, true); ok {
+		if first, ok := settle(fbr, pending, true); ok {
 			if first.err != nil {
 				return Value{}, first.err.at(site)
 			}
@@ -354,7 +367,7 @@ func (vm *Instance) emitAwaitRace(node ast.AwaitRace) instruction {
 				return raw[i], nil
 			}
 			if t.isDone() {
-				res, err := t.outcome()
+				res, err := t.outcomeFor(fbr)
 				if err != nil {
 					return res, err.at(site)
 				}
@@ -367,5 +380,72 @@ func (vm *Instance) emitAwaitRace(node ast.AwaitRace) instruction {
 			return first.res, first.err.at(site)
 		}
 		return first.res, nil
+	}
+}
+
+func (vm *Instance) emitAwaitTimeout(node ast.AwaitTimeout) instruction {
+	site := vm.at(node)
+	taskExpr := vm.compile(node.Task)
+	timeoutExpr := vm.compile(node.Timeout)
+
+	return func(fbr *fiber) (Value, exception) {
+		v, exc := taskExpr(fbr)
+		if exc != nil {
+			return v, exc
+		}
+		durVal, exc := timeoutExpr(fbr)
+		if exc != nil {
+			return durVal, exc
+		}
+		ms, ok := durVal.AsFloat64()
+		if !ok {
+			return Value{}, errorAt(site, "await.timeout: duration must be a number, got %s", durVal.TypeOf())
+		}
+
+		task, isTask := v.AsTask()
+		if !isTask {
+			return v, nil
+		}
+
+		if task.isDone() {
+			res, err := task.outcomeFor(fbr)
+			if err != nil {
+				return res, err.at(site)
+			}
+			return res, nil
+		}
+
+		if ms <= 0 {
+			task.Cancel()
+			return Value{}, errorAt(site, "await.timeout: timed out after %vms", ms)
+		}
+
+		timer := time.NewTimer(time.Duration(ms * float64(time.Millisecond)))
+		defer timer.Stop()
+
+		if fbr.running {
+			fbr.unlock()
+			defer fbr.lock()
+		}
+
+		select {
+		case <-task.Done():
+			if fbr.stop.done() {
+				return Value{}, fbr.stop.failure().at(site)
+			}
+			res, err := task.outcomeFor(fbr)
+			if err != nil {
+				return res, err.at(site)
+			}
+			return res, nil
+		case <-timer.C:
+			if fbr.stop.done() {
+				return Value{}, fbr.stop.failure().at(site)
+			}
+			task.Cancel()
+			return Value{}, errorAt(site, "await.timeout: timed out after %vms", ms)
+		case <-fbr.stop.ctx.Done():
+			return Value{}, fbr.stop.failure().at(site)
+		}
 	}
 }

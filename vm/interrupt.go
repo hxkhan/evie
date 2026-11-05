@@ -14,6 +14,9 @@ import (
 // instead, such as context.DeadlineExceeded.
 var ErrInterrupted = errors.New("interrupted")
 
+// ErrCanceled is the cause of the error a task stops with when it is cancelled.
+var ErrCanceled = errors.New("cancelled")
+
 // ---- stopping running code ----
 //
 // Code runs under a stopper, which says when it has to give up: when the
@@ -38,7 +41,8 @@ type stopper struct {
 	ctx    context.Context
 	cancel context.CancelCauseFunc
 	end    func() bool  // removes the watcher that changes the signal
-	scoped bool         // bound to a host context, released when its last user is done
+	parent *stopper     // the stopper this task stopper was derived from
+	root   *stopper     // the scoped run stopper to refcount, if any
 	users  atomic.Int32 // callers and fibers that use a scoped stopper
 	stops  *stops
 }
@@ -56,6 +60,21 @@ func (st *stops) newStopper(parent context.Context) *stopper {
 	return s
 }
 
+// newTaskStopper derives a child stopper for a spawned task. It stops when
+// parent stops or when the task itself is cancelled, and holds one use of
+// parent's scoped root until the task's fiber detaches.
+func (st *stops) newTaskStopper(parent *stopper) *stopper {
+	parent.hold()
+	ctx, cancel := context.WithCancelCause(parent.ctx)
+	return &stopper{
+		ctx:    ctx,
+		cancel: cancel,
+		parent: parent,
+		root:   parent.root,
+		stops:  st,
+	}
+}
+
 // scope makes a stopper for a run bound to ctx. The caller is its first user
 // and gives it up with drop; tasks the run spawns keep it alive until they end.
 // A context that is never done, such as context.Background, adds nothing to
@@ -65,7 +84,7 @@ func (st *stops) scope(ctx context.Context) *stopper {
 		return st.current.Load()
 	}
 	s := st.newStopper(ctx)
-	s.scoped = true
+	s.root = s
 	s.users.Store(1)
 	st.mu.Lock()
 	st.scoped[s] = struct{}{}
@@ -75,22 +94,36 @@ func (st *stops) scope(ctx context.Context) *stopper {
 
 // hold records one more user of a scoped stopper
 func (s *stopper) hold() {
-	if s.scoped {
-		s.users.Add(1)
+	if s.root != nil {
+		s.root.users.Add(1)
 	}
 }
 
-// drop gives up one use of a scoped stopper; the last user releases it, which
-// detaches it from the host's context
+// drop gives up one use of a stopper; a task stopper detaches from its parent
+// context, and the last user of a scoped run stopper releases it
 func (s *stopper) drop() {
-	if !s.scoped || s.users.Add(-1) != 0 {
+	if s.parent != nil {
+		s.cancel(context.Canceled)
+	}
+	r := s.root
+	if r == nil || r.users.Add(-1) != 0 {
 		return
 	}
-	s.stops.mu.Lock()
-	delete(s.stops.scoped, s)
-	s.stops.mu.Unlock()
-	s.end() // finishing normally is not a reason for others to look
-	s.cancel(context.Canceled)
+	r.stops.mu.Lock()
+	delete(r.stops.scoped, r)
+	r.stops.mu.Unlock()
+	r.end() // finishing normally is not a reason for others to look
+	r.cancel(context.Canceled)
+}
+
+// stopsWith reports whether s stops whenever other stops
+func (s *stopper) stopsWith(other *stopper) bool {
+	for p := s; p != nil; p = p.parent {
+		if p == other {
+			return true
+		}
+	}
+	return false
 }
 
 // done reports whether code under s has to stop

@@ -331,7 +331,7 @@ func (ps *parser) parseStringTemplate(main token.Token) (st ast.StringTemplate) 
 }
 
 func (ps *parser) parseAwait(main token.Token) ast.Node {
-	// await.all(x, y, z), await.any(x, y, z), or await.race(x, y, z)
+	// await.all(x, y, z), await.any(x, y, z), await.race(x, y, z), or await.timeout(t, ms)
 	if !ps.consume(".") {
 		task := ps.parse(0, true)
 		return ast.Await{Pos: main.Pos.To(task.Where()), Task: task}
@@ -346,7 +346,14 @@ func (ps *parser) parseAwait(main token.Token) ast.Node {
 	if ps.consumeName("race") {
 		return ast.AwaitRace{Pos: main.Pos, Tasks: ps.parseArgsList()}
 	}
-	ps.expected("'all', 'any' or 'race' after 'await.'", main, "")
+	if ps.consumeName("timeout") {
+		args := ps.parseArgsList()
+		if len(args) != 2 {
+			ps.fail(main.Pos.To(ps.last.Pos), fmt.Sprintf("await.timeout takes 2 arguments (task, ms) but %d were supplied", len(args)))
+		}
+		return ast.AwaitTimeout{Pos: main.Pos.To(ps.last.Pos), Task: args[0], Timeout: args[1]}
+	}
+	ps.expected("'all', 'any', 'race' or 'timeout' after 'await.'", main, "")
 	return nil
 }
 

@@ -206,35 +206,9 @@ func Reflect(fn any) *GoFunc {
 
 	gf := &GoFunc{Name: "native", arguments: fixedCount, isVariadic: isVariadic}
 	gf.fn = func(c Call) (Value, error) {
-		inArgs := make([]reflect.Value, numIn)
-		for i := 0; i < fixedCount; i++ {
-			goVal, err := unmarshalToType(c.Arg(i), fnType.In(i))
-			if err != nil {
-				return Value{}, fmt.Errorf("argument %d: %v", i+1, err)
-			}
-			if goVal == nil {
-				inArgs[i] = reflect.Zero(fnType.In(i))
-			} else {
-				inArgs[i] = reflect.ValueOf(goVal)
-			}
-		}
-
-		if isVariadic {
-			elemType := fnType.In(numIn - 1).Elem()
-			varCount := c.Len() - fixedCount
-			sliceVal := reflect.MakeSlice(fnType.In(numIn-1), varCount, varCount)
-			for j := 0; j < varCount; j++ {
-				goVal, err := unmarshalToType(c.Arg(fixedCount+j), elemType)
-				if err != nil {
-					return Value{}, fmt.Errorf("variadic argument %d: %v", j+1, err)
-				}
-				if goVal == nil {
-					sliceVal.Index(j).Set(reflect.Zero(elemType))
-				} else {
-					sliceVal.Index(j).Set(reflect.ValueOf(goVal))
-				}
-			}
-			inArgs[numIn-1] = sliceVal
+		inArgs, err := marshalReflectArgs(c, fnType, numIn, fixedCount, isVariadic)
+		if err != nil {
+			return Value{}, err
 		}
 
 		var out []reflect.Value
@@ -273,6 +247,43 @@ func Reflect(fn any) *GoFunc {
 		return BoxArray(NewArray(results...)), nil
 	}
 	return gf
+}
+
+func marshalReflectArgs(c Call, fnType reflect.Type, numIn, fixedCount int, isVariadic bool) ([]reflect.Value, error) {
+	if c.fbr.lock() {
+		defer c.fbr.unlock()
+	}
+	inArgs := make([]reflect.Value, numIn)
+	for i := 0; i < fixedCount; i++ {
+		goVal, err := unmarshalToType(c.Arg(i), fnType.In(i))
+		if err != nil {
+			return nil, fmt.Errorf("argument %d: %v", i+1, err)
+		}
+		if goVal == nil {
+			inArgs[i] = reflect.Zero(fnType.In(i))
+		} else {
+			inArgs[i] = reflect.ValueOf(goVal)
+		}
+	}
+
+	if isVariadic {
+		elemType := fnType.In(numIn - 1).Elem()
+		varCount := c.Len() - fixedCount
+		sliceVal := reflect.MakeSlice(fnType.In(numIn-1), varCount, varCount)
+		for j := 0; j < varCount; j++ {
+			goVal, err := unmarshalToType(c.Arg(fixedCount+j), elemType)
+			if err != nil {
+				return nil, fmt.Errorf("variadic argument %d: %v", j+1, err)
+			}
+			if goVal == nil {
+				sliceVal.Index(j).Set(reflect.Zero(elemType))
+			} else {
+				sliceVal.Index(j).Set(reflect.ValueOf(goVal))
+			}
+		}
+		inArgs[numIn-1] = sliceVal
+	}
+	return inArgs, nil
 }
 
 func unmarshalToType(val Value, targetType reflect.Type) (any, error) {

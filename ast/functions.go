@@ -52,6 +52,12 @@ type AwaitRace struct {
 	Tasks []Node
 }
 
+type AwaitTimeout struct {
+	token.Pos
+	Task    Node
+	Timeout Node
+}
+
 func (fn Fn) String() string {
 	b := strings.Builder{}
 	b.WriteString("fn")

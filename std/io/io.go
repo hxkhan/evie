@@ -2,35 +2,65 @@ package io
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	goio "io"
 	"os"
 	"strings"
-	"sync"
 
 	"github.com/hxkhan/evie/vm"
 )
 
+type lineResult struct {
+	line string
+	err  error
+}
+
 var (
-	stdinMu   sync.Mutex
-	stdinFile *os.File
-	stdinBuf  *bufio.Reader
+	stdinSem     = make(chan struct{}, 1)
+	stdinFile    *os.File
+	stdinBuf     *bufio.Reader
+	stdinPending chan lineResult
 )
 
-func readLine() (string, error) {
-	stdinMu.Lock()
-	defer stdinMu.Unlock()
+func readLine(ctx context.Context) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", context.Cause(ctx)
+	}
+	select {
+	case stdinSem <- struct{}{}:
+	case <-ctx.Done():
+		return "", context.Cause(ctx)
+	}
+	defer func() { <-stdinSem }()
 
 	if stdinBuf == nil || stdinFile != os.Stdin {
 		stdinFile = os.Stdin
 		stdinBuf = bufio.NewReader(os.Stdin)
+		stdinPending = nil
 	}
-	line, err := stdinBuf.ReadString('\n')
-	if err != nil && !errors.Is(err, goio.EOF) {
-		return "", err
+	if stdinPending == nil {
+		ch := make(chan lineResult, 1)
+		stdinPending = ch
+		buf := stdinBuf
+		go func() {
+			line, err := buf.ReadString('\n')
+			if err != nil && !errors.Is(err, goio.EOF) {
+				ch <- lineResult{err: err}
+				return
+			}
+			ch <- lineResult{line: strings.TrimRight(line, "\r\n")}
+		}()
 	}
-	return strings.TrimRight(line, "\r\n"), nil
+
+	select {
+	case res := <-stdinPending:
+		stdinPending = nil
+		return res.line, res.err
+	case <-ctx.Done():
+		return "", context.Cause(ctx)
+	}
 }
 
 // Construct builds the io package: console output and input
@@ -57,14 +87,14 @@ func Construct() *vm.Package {
 	})
 	pkg.Func("prompt", 1, func(c vm.Call) (vm.Value, error) {
 		fmt.Print(c.Arg(0))
-		input, err := readLine()
+		input, err := readLine(c.Context())
 		if err != nil {
 			return vm.Value{}, err
 		}
 		return vm.BoxString(input), nil
 	}).Blocking = true
 	pkg.Func("readln", 0, func(c vm.Call) (vm.Value, error) {
-		input, err := readLine()
+		input, err := readLine(c.Context())
 		if err != nil {
 			return vm.Value{}, err
 		}

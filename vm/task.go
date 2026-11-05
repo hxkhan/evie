@@ -2,6 +2,8 @@ package vm
 
 import (
 	"sync"
+
+	"github.com/hxkhan/evie/diag"
 )
 
 type taskStatus int
@@ -80,6 +82,16 @@ func (t *Task) outcome() (Value, exception) {
 	return t.result, t.err
 }
 
+// outcomeFor returns the task's outcome as seen by fbr: a stop from another
+// run becomes an ordinary catchable error for a fiber that is still running.
+func (t *Task) outcomeFor(fbr *fiber) (Value, exception) {
+	res, err := t.outcome()
+	if err != nil && err.fatal && (fbr == nil || !fbr.stop.done()) {
+		err = &Error{Report: err.Report, Code: err.Code, Cause: err.Cause}
+	}
+	return res, err
+}
+
 // await waits for the task to settle and returns its result or exception.
 // A running fiber gives up the instance runner while it waits so that other
 // fibers of the instance can make progress. Safe to call multiple times.
@@ -100,7 +112,7 @@ func (t *Task) await(fbr *fiber) (Value, exception) {
 			fbr.unlock()
 			defer fbr.lock()
 		}
-		if t.stop == fbr.stop {
+		if t.stop != nil && t.stop.stopsWith(fbr.stop) {
 			// the task stops when this fiber has to, and then it settles
 			<-t.done
 			break
@@ -112,12 +124,26 @@ func (t *Task) await(fbr *fiber) (Value, exception) {
 		}
 	}
 
-	res, err := t.outcome()
-	if err != nil && err.fatal && !fbr.stop.done() {
-		// another run was stopped; for this one it is an ordinary failure
-		err = &Error{Report: err.Report, Code: err.Code, Cause: err.Cause}
+	return t.outcomeFor(fbr)
+}
+
+// Cancel asks the task to stop. It has no effect when the task has already
+// settled.
+func (t *Task) Cancel() {
+	t.mu.Lock()
+	if t.status != taskPending {
+		t.mu.Unlock()
+		return
 	}
-	return res, err
+	stop := t.stop
+	t.mu.Unlock()
+
+	if stop != nil {
+		stop.cancel(ErrCanceled)
+		stop.stops.signal.Add(1)
+	} else {
+		t.reject(&Error{Report: diag.Report{Message: ErrCanceled.Error()}, Cause: ErrCanceled})
+	}
 }
 
 // Result returns what the task finished with, or an error that it failed with.

@@ -344,6 +344,10 @@ var typeTask = newBuiltinType("task", NewFunc("task", 0, func(c Call) (Value, er
 	newMethod("await", 0, func(c Call) (Value, error) {
 		return plain(c.This().mustTask().await(c.fbr))
 	}),
+	newMethod("cancel", 0, func(c Call) (Value, error) {
+		c.This().mustTask().Cancel()
+		return c.This(), nil
+	}),
 ))
 
 // alias registers the same native under a second name

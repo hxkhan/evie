@@ -29,6 +29,9 @@ func (vm *Instance) evaluate(node ast.Node) operand {
 		return Value{}
 
 	case ast.Ident:
+		if node.Name == "super" {
+			return nil
+		}
 		variable, err := vm.cp.reach(node.Name)
 		if err != nil {
 			panic(vm.locate(err, node))

@@ -37,11 +37,12 @@ var builtins = map[string]*Value{
 
 // receivers of builtin methods are always of the right kind: the runtime only
 // binds a method to a value of its own type, so these conversions cannot fail
-func (x Value) mustError() *Error  { e, _ := x.AsError(); return e }
-func (x Value) mustString() string { s, _ := x.AsString(); return s }
-func (x Value) mustArray() *Array  { a, _ := x.AsArray(); return a }
-func (x Value) mustBuffer() []byte { b, _ := x.AsBuffer(); return b }
-func (x Value) mustTask() *Task    { t, _ := x.AsTask(); return t }
+func (x Value) mustError() *Error      { e, _ := x.AsError(); return e }
+func (x Value) mustString() string     { s, _ := x.AsString(); return s }
+func (x Value) mustArray() *Array      { a, _ := x.AsArray(); return a }
+func (x Value) mustBuffer() []byte     { b, _ := x.AsBuffer(); return b }
+func (x Value) mustBufferPtr() *[]byte { return (*[]byte)(x.pointer) }
+func (x Value) mustTask() *Task        { t, _ := x.AsTask(); return t }
 func (x Value) mustObject() map[string]Value {
 	o, _ := x.AsObject()
 	return o
@@ -135,7 +136,34 @@ var typeString = newBuiltinType("string", NewFunc("string", 1, func(c Call) (Val
 		}
 		return BoxArray(NewArray(result...)), nil
 	}),
+	newVariadicMethod("slice", 1, func(c Call) (Value, error) {
+		str := c.This().mustString()
+		s, e, err := sliceArgs(c, len(str))
+		if err != nil {
+			return Value{}, err
+		}
+		return BoxString(str[s:e]), nil
+	}),
 ))
+
+func sliceArgs(c Call, n int) (int, int, error) {
+	if c.Len() > 3 {
+		return 0, 0, fmt.Errorf("slice takes 1 or 2 arguments, got %d", c.Len()-1)
+	}
+	start, err := c.Int(1)
+	if err != nil {
+		return 0, 0, err
+	}
+	end := n
+	if c.Len() == 3 {
+		end, err = c.Int(2)
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+	s, e := clampSlice(n, start, end)
+	return s, e, nil
+}
 
 var arrayPush = newMethod("push", 1, func(c Call) (Value, error) {
 	arr := c.This().mustArray()
@@ -161,29 +189,14 @@ var typeArray = newBuiltinType("array", NewFunc("array", 0, func(c Call) (Value,
 		arr.Data = arr.Data[:last]
 		return val, nil
 	}),
-	newMethod("slice", 2, func(c Call) (Value, error) {
-		start, err := c.Int(1)
-		if err != nil {
-			return Value{}, err
-		}
-		end, err := c.Int(2)
-		if err != nil {
-			return Value{}, err
-		}
+	newVariadicMethod("slice", 1, func(c Call) (Value, error) {
 		data := c.This().mustArray().Data
-		n := len(data)
-		if start < 0 {
-			start = max(n+start, 0)
+		s, e, err := sliceArgs(c, len(data))
+		if err != nil {
+			return Value{}, err
 		}
-		if end < 0 {
-			end = max(n+end, 0)
-		}
-		start, end = min(start, n), min(end, n)
-		if start > end {
-			return BoxArray(NewArray()), nil
-		}
-		sub := make([]Value, end-start)
-		copy(sub, data[start:end])
+		sub := make([]Value, e-s)
+		copy(sub, data[s:e])
 		return BoxArray(NewArray(sub...)), nil
 	}),
 	newMethod("filter", 1, func(c Call) (Value, error) {
@@ -310,14 +323,81 @@ var typeObject = newBuiltinType("object", NewFunc("object", 0, func(c Call) (Val
 	}),
 ))
 
-var typeBuffer = newBuiltinType("buffer", NewFunc("buffer", 0, func(c Call) (Value, error) {
-	return BoxBuffer([]byte{}), nil
+var bufferPush = newMethod("push", 1, func(c Call) (Value, error) {
+	bp := c.This().mustBufferPtr()
+	arg := c.Arg(1)
+	if s, ok := arg.AsString(); ok {
+		*bp = append(*bp, s...)
+		return c.This(), nil
+	}
+	if other, ok := arg.AsBuffer(); ok {
+		*bp = append(*bp, other...)
+		return c.This(), nil
+	}
+	b, err := c.Int(1)
+	if err != nil {
+		return Value{}, fmt.Errorf("buffer.push: argument must be a byte (0..255), string or buffer, got %s", arg.TypeOf())
+	}
+	if b < 0 || b > 255 {
+		return Value{}, fmt.Errorf("buffer.push: byte value %d out of range 0..255", b)
+	}
+	*bp = append(*bp, byte(b))
+	return c.This(), nil
+})
+
+var typeBuffer = newBuiltinType("buffer", NewVariadic("buffer", 0, func(c Call) (Value, error) {
+	if c.Len() == 0 {
+		return BoxBuffer([]byte{}), nil
+	}
+	if c.Len() > 1 {
+		return Value{}, fmt.Errorf("buffer takes at most 1 argument, got %d", c.Len())
+	}
+	arg := c.Arg(0)
+	if s, ok := arg.AsString(); ok {
+		return BoxBuffer([]byte(s)), nil
+	}
+	if b, ok := arg.AsBuffer(); ok {
+		cp := make([]byte, len(b))
+		copy(cp, b)
+		return BoxBuffer(cp), nil
+	}
+	if arr, ok := arg.AsArray(); ok {
+		out := make([]byte, len(arr.Data))
+		for i, item := range arr.Data {
+			f, ok := item.AsFloat64()
+			if !ok || float64(int(f)) != f || f < 0 || f > 255 {
+				return Value{}, fmt.Errorf("buffer: array element %d must be an integer in 0..255", i)
+			}
+			out[i] = byte(int(f))
+		}
+		return BoxBuffer(out), nil
+	}
+	n, err := c.Int(0)
+	if err != nil {
+		return Value{}, fmt.Errorf("buffer: argument must be a string, array, buffer or size, got %s", arg.TypeOf())
+	}
+	if n < 0 {
+		return Value{}, fmt.Errorf("buffer: size must not be negative, got %d", n)
+	}
+	return BoxBuffer(make([]byte, n)), nil
 }), methodTable(
 	newMethod("string", 0, func(c Call) (Value, error) {
 		return BoxString(string(c.This().mustBuffer())), nil
 	}),
 	newMethod("len", 0, func(c Call) (Value, error) {
 		return BoxNumber(float64(len(c.This().mustBuffer()))), nil
+	}),
+	bufferPush,
+	alias("append", bufferPush),
+	newVariadicMethod("slice", 1, func(c Call) (Value, error) {
+		buf := c.This().mustBuffer()
+		s, e, err := sliceArgs(c, len(buf))
+		if err != nil {
+			return Value{}, err
+		}
+		sub := make([]byte, e-s)
+		copy(sub, buf[s:e])
+		return BoxBuffer(sub), nil
 	}),
 ))
 

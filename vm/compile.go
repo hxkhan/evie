@@ -155,6 +155,9 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	case ast.Subscript:
 		return vm.emitSubscript(node)
 
+	case ast.Slice:
+		return vm.emitSlice(node)
+
 	case ast.StructDefinition:
 		return vm.emitStruct(node)
 	}
@@ -308,6 +311,7 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc exception) {
 			v := boxUserStruct(&userStruct{
 				Name:         str.Name,
 				def:          vm.at(str),
+				hasParent:    str.Parent != "",
 				Fields:       args,
 				FieldOffsets: offsets,
 				Methods:      make(map[fields.ID]*userFn),
@@ -582,6 +586,7 @@ func (vm *Instance) emitStruct(str ast.StructDefinition) instruction {
 	ustruct := &userStruct{
 		Name:         str.Name,
 		def:          vm.at(str),
+		hasParent:    str.Parent != "",
 		Fields:       args,
 		FieldOffsets: offsets,
 		Methods:      make(map[fields.ID]*userFn),

@@ -152,6 +152,9 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 
 	// handle field access assignments
 	if fa, isFieldAccess := node.Lhs.(ast.FieldAccess); isFieldAccess {
+		if ident, ok := fa.Lhs.(ast.Ident); ok && ident.Name == "super" {
+			panic(vm.compileErrorAt(node, "cannot assign to 'super.%s'", fa.Rhs))
+		}
 		// Lhs can for e.g. be an ast.Ident
 		switch lhs := vm.evaluate(fa.Lhs).(type) {
 		case local:
@@ -361,6 +364,31 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 				return Value{}, nil
 			}
 
+			// 4. Buffer byte assignment: buf[i] = byteVal
+			if buf, ok := target.AsBuffer(); ok {
+				idxFloat, ok := keyVal.AsFloat64()
+				if !ok {
+					return Value{}, errorAt(site, "buffer index must be a number, got '%s'", keyVal.TypeOf())
+				}
+				idx := int(idxFloat)
+				if float64(idx) != idxFloat {
+					return Value{}, errorAt(site, "buffer index must be an integer, got %v", idxFloat)
+				}
+				length := len(buf)
+				if idx < 0 {
+					idx = length + idx
+				}
+				if idx < 0 || idx >= length {
+					return Value{}, errorAt(site, "IndexError: buffer index %d out of bounds (length %d)", int(idxFloat), length)
+				}
+				b, exc := checkByte(site, newVal)
+				if exc != nil {
+					return Value{}, exc
+				}
+				buf[idx] = b
+				return Value{}, nil
+			}
+
 			return Value{}, errorAt(site, "cannot assign to subscript of type '%s'", target.TypeOf())
 		}
 	}
@@ -368,10 +396,43 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 	panic(vm.compileErrorAt(node, "cannot assign to '%v'", node.Lhs))
 }
 
+func (vm *Instance) resolveSuper(node ast.Node) (*userStruct, local) {
+	var ustruct *userStruct
+	for scroll := range vm.cp.closures.Len() {
+		if s := vm.cp.closures.Last(scroll).ustruct; s != nil {
+			ustruct = s
+			break
+		}
+	}
+	if ustruct == nil {
+		panic(vm.compileErrorAt(node, "'super' can only be used inside a struct method"))
+	}
+	if !ustruct.hasParent {
+		panic(vm.compileErrorAt(node, "struct '%s' has no parent struct", ustruct.Name))
+	}
+	thisBinding, err := vm.cp.reach("this")
+	if err != nil {
+		panic(vm.compileErrorAt(node, "'super' can only be used inside a struct method"))
+	}
+	return ustruct, thisBinding.(local)
+}
+
 func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 	site := vm.at(node)
 	key := fieldKeyOf(node.Rhs)
 	index := key.id
+
+	if ident, ok := node.Lhs.(ast.Ident); ok && ident.Name == "super" {
+		ustruct, thisLocal := vm.resolveSuper(ident)
+		return func(fbr *fiber) (Value, exception) {
+			fn := ustruct.Parent.lookupMethod(index)
+			if fn == nil {
+				return Value{}, errorAt(site, "no method '%s' on parent struct '%s'", node.Rhs, ustruct.Parent.Name)
+			}
+			thisVal := *fbr.get(thisLocal)
+			return boxMethod(boundMethod{this: thisVal, fn: boxUserFn(*fn)}), nil
+		}
+	}
 
 	// optimise: ident as lhs
 	if lhs := vm.evaluate(node.Lhs); lhs != nil {
@@ -597,6 +658,124 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 		}
 
 		return Value{}, errorAt(site, "cannot index value of type '%s'", target.TypeOf())
+	}
+}
+
+func checkByte(site site, val Value) (byte, exception) {
+	f, ok := val.AsFloat64()
+	if !ok {
+		return 0, errorAt(site, "buffer element must be a number, got '%s'", val.TypeOf())
+	}
+	b := int(f)
+	if float64(b) != f || b < 0 || b > 255 {
+		return 0, errorAt(site, "buffer element must be an integer in 0..255, got %v", f)
+	}
+	return byte(b), nil
+}
+
+func clampSlice(n, start, end int) (int, int) {
+	if start < 0 {
+		start = max(n+start, 0)
+	} else if start > n {
+		start = n
+	}
+	if end < 0 {
+		end = max(n+end, 0)
+	} else if end > n {
+		end = n
+	}
+	if start > end {
+		start = end
+	}
+	return start, end
+}
+
+func checkSliceBound(site site, val Value, which string) (int, exception) {
+	f, ok := val.AsFloat64()
+	if !ok {
+		return 0, errorAt(site, "slice %s index must be a number, got '%s'", which, val.TypeOf())
+	}
+	idx := int(f)
+	if float64(idx) != f {
+		return 0, errorAt(site, "slice %s index must be an integer, got %v", which, f)
+	}
+	return idx, nil
+}
+
+func (vm *Instance) emitSlice(node ast.Slice) instruction {
+	site := vm.at(node)
+	lhs := vm.compile(node.Lhs)
+	var startInst, endInst instruction
+	if node.Start != nil {
+		startInst = vm.compile(node.Start)
+	}
+	if node.End != nil {
+		endInst = vm.compile(node.End)
+	}
+
+	return func(fbr *fiber) (Value, exception) {
+		target, exc := lhs(fbr)
+		if exc != nil {
+			return target, exc
+		}
+
+		start := 0
+		if startInst != nil {
+			v, exc := startInst(fbr)
+			if exc != nil {
+				return v, exc
+			}
+			start, exc = checkSliceBound(site, v, "start")
+			if exc != nil {
+				return Value{}, exc
+			}
+		}
+
+		var end int
+		hasEnd := endInst != nil
+		if hasEnd {
+			v, exc := endInst(fbr)
+			if exc != nil {
+				return v, exc
+			}
+			end, exc = checkSliceBound(site, v, "end")
+			if exc != nil {
+				return Value{}, exc
+			}
+		}
+
+		if arr, ok := target.AsArray(); ok {
+			n := len(arr.Data)
+			if !hasEnd {
+				end = n
+			}
+			s, e := clampSlice(n, start, end)
+			sub := make([]Value, e-s)
+			copy(sub, arr.Data[s:e])
+			return BoxArray(NewArray(sub...)), nil
+		}
+
+		if str, ok := target.AsString(); ok {
+			n := len(str)
+			if !hasEnd {
+				end = n
+			}
+			s, e := clampSlice(n, start, end)
+			return BoxString(str[s:e]), nil
+		}
+
+		if buf, ok := target.AsBuffer(); ok {
+			n := len(buf)
+			if !hasEnd {
+				end = n
+			}
+			s, e := clampSlice(n, start, end)
+			sub := make([]byte, e-s)
+			copy(sub, buf[s:e])
+			return BoxBuffer(sub), nil
+		}
+
+		return Value{}, errorAt(site, "cannot slice value of type '%s'", target.TypeOf())
 	}
 }
 
@@ -913,6 +1092,34 @@ func (vm *Instance) emitCompoundSubscriptAssign(node ast.MutableBinOp, sub ast.S
 				return Value{}, errorAt(site, "undefined field '%s' on %s", keyStr, usi.InstanceOf.Name)
 			}
 			return Value{}, exc
+		}
+
+		if buf, ok := obj.AsBuffer(); ok {
+			idxFloat, ok := keyVal.AsFloat64()
+			if !ok {
+				return Value{}, errorAt(site, "buffer index must be a number, got '%s'", keyVal.TypeOf())
+			}
+			idx := int(idxFloat)
+			if float64(idx) != idxFloat {
+				return Value{}, errorAt(site, "buffer index must be an integer, got %v", idxFloat)
+			}
+			length := len(buf)
+			if idx < 0 {
+				idx = length + idx
+			}
+			if idx < 0 || idx >= length {
+				return Value{}, errorAt(site, "IndexError: buffer index %d out of bounds (length %d)", int(idxFloat), length)
+			}
+			result, exc := apply(fbr, BoxNumber(float64(buf[idx])), value)
+			if exc != nil {
+				return result, exc
+			}
+			b, exc := checkByte(site, result)
+			if exc != nil {
+				return Value{}, exc
+			}
+			buf[idx] = b
+			return Value{}, nil
 		}
 
 		return Value{}, errorAt(site, "cannot assign to subscript of type '%s'", obj.TypeOf())

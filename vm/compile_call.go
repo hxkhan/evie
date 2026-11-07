@@ -274,6 +274,18 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 	// optimise: calling a member, as in `obj.method(...)` or `this.items[i].update()`
 	if iFA, ok := node.Fn.(ast.FieldAccess); ok {
+		if ident, ok := iFA.Lhs.(ast.Ident); ok && ident.Name == "super" {
+			ustruct, thisLocal := vm.resolveSuper(ident)
+			methodID := fieldKeyOf(iFA.Rhs).id
+			return func(fbr *fiber) (Value, exception) {
+				fn := ustruct.Parent.lookupMethod(methodID)
+				if fn == nil {
+					return Value{}, errorAt(site, "no method '%s' on parent struct '%s'", iFA.Rhs, ustruct.Parent.Name)
+				}
+				thisVal := *fbr.get(thisLocal)
+				return fn.invokeMethod(fbr, site, thisVal, arguments)
+			}
+		}
 		if lhs, ok := vm.evaluate(iFA.Lhs).(local); ok {
 			return vm.emitMemberCall(iFA, lhs, arguments)
 		}

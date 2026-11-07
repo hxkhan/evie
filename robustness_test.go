@@ -1076,3 +1076,105 @@ func TestBlockingNativeArgMarshaling(t *testing.T) {
 		t.Fatalf("got %v, %v", res, err)
 	}
 }
+
+// [:] slice syntax and .slice(start[, end]) work across arrays, strings and buffers
+func TestSlicingSyntaxAndMethods(t *testing.T) {
+	eng := evie.New()
+	eng.SetStatic("sampleBuf", vm.BoxBuffer([]byte("abcdef")))
+	_, err := eng.Eval(`package main
+	fn main() {
+		a := [10, 20, 30, 40, 50]
+		copyA := a[:]
+		copyA[0] = 99
+		arrSlices := [a[1:4], a[:2], a[3:], a[1:-1], a.slice(2), a.slice(1, 3), a[0]]
+
+		s := "hello world"
+		strSlices := [s[0:5], s[:5], s[6:], s[1:-1], s[:], s.slice(6), s.slice(0, 5)]
+
+		b := sampleBuf
+		bufSlices := [string(b[1:4]), string(b[:3]), string(b[3:]), string(b[1:-1]), string(b[:]), string(b.slice(2)), string(b.slice(1, 4))]
+
+		errs := [
+			catch(a["bad":2]).message,
+			catch(s[0:1.5]).message,
+			catch((123)[0:1]).message,
+		]
+		return [arrSlices, strSlices, bufSlices, errs]
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := eng.Call("main.main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[[[20, 30, 40], [10, 20], [40, 50], [20, 30, 40], [30, 40, 50], [20, 30], 10], ["hello", "hello", "world", "ello worl", "hello world", "world", "hello"], ["bcd", "abc", "def", "bcde", "abcdef", "cdef", "bcd"], ["slice start index must be a number, got 'string'", "slice end index must be an integer, got 1.5", "cannot slice value of type 'number'"]]`
+	if res.String() != want {
+		t.Fatalf("got  %s\nwant %s", res, want)
+	}
+}
+
+// buffers support construction from strings/arrays/sizes, subscript mutation, compound assignment and push
+func TestBufferMutationAndConstruction(t *testing.T) {
+	val := run(t, `package main
+	fn main() {
+		b1 := buffer("abc")
+		b1[0] = 65
+		b1[-1] += 1
+		b1.push(33).push("?")
+
+		b2 := buffer([72, 105])
+		b3 := buffer(3)
+		b3[1] = 42
+
+		errs := [
+			catch { b1[0] = 300 }.message,
+			catch { b1[0] = -1 }.message,
+			catch { b1[10] = 65 }.message,
+			catch(buffer(-2)).message,
+		]
+		return [b1.string(), b2.string(), [b3[0], b3[1], b3[2]], errs]
+	}`)
+	want := `["Abd!?", "Hi", [0, 42, 0], ["buffer element must be an integer in 0..255, got 300", "buffer element must be an integer in 0..255, got -1", "IndexError: buffer index 10 out of bounds (length 5)", "buffer: size must not be negative, got -2"]]`
+	if val.String() != want {
+		t.Fatalf("got  %s\nwant %s", val, want)
+	}
+}
+
+// super invokes overridden methods up a multi-level inheritance chain and inside closures
+func TestStructSuperCalls(t *testing.T) {
+	val := run(t, `package main
+	struct Animal(name) {
+		fn speak() => this.name + " makes a sound"
+	}
+	struct Dog(name, breed) : Animal {
+		fn speak() => super.speak() + " (woof from " + this.breed + ")"
+	}
+	struct GuideDog(name, breed, owner) : Dog {
+		fn speak() => super.speak() + " for " + this.owner
+		fn deferredSpeak() {
+			fn inner() => super.speak()
+			bound := super.speak
+			return [inner(), bound()]
+		}
+	}
+	fn main() {
+		g := GuideDog("Rex", "Lab", "Alice")
+		return [g.speak(), g.deferredSpeak()]
+	}`)
+	want := `["Rex makes a sound (woof from Lab) for Alice", ["Rex makes a sound (woof from Lab)", "Rex makes a sound (woof from Lab)"]]`
+	if val.String() != want {
+		t.Fatalf("got  %s\nwant %s", val, want)
+	}
+
+	for src, wantErr := range map[string]string{
+		"package main\nfn main() => super.foo()":                            "'super' can only be used inside a struct method",
+		"package main\nstruct A() { fn f() => super.f() }\nfn main() {}":    "struct 'A' has no parent struct",
+		"package main\nfn main() { x := super }":                            "expected '.' and a method name after 'super'",
+		"package main\nstruct A() {}\nstruct B() : A { fn f() { super.g = 1 } }": "cannot assign to 'super.g'",
+	} {
+		if _, err := runCode(src); err == nil || !strings.Contains(err.Error(), wantErr) {
+			t.Errorf("%q: want error containing %q, got %v", src, wantErr, err)
+		}
+	}
+}

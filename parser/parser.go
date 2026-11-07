@@ -35,7 +35,7 @@ type parser struct {
 var keywords = []string{
 	"package", "imports",
 	"nil", "true", "false",
-	"var", "const", "fn", "struct",
+	"var", "const", "fn", "struct", "super",
 	"echo",
 	"return",
 	"if", "else",
@@ -225,6 +225,16 @@ func (ps *parser) handleWords(main token.Token, asExpr bool, precedenceLevel int
 		return ps.parseFn(main, asExpr)
 	case "struct":
 		return ps.parseStruct(main)
+	case "super":
+		if !ps.PeekToken().IsSimple(".") {
+			ps.expected("'.' and a method name after 'super'", main, "")
+		}
+		left := ps.parseInfixExpression(ast.Ident{Pos: main.Pos, Name: "super"}, precedenceLevel)
+		if ps.consume("=") {
+			value := ps.parse(0, true)
+			return ast.Assign{Pos: left.Where().To(value.Where()), Lhs: left, Value: value}
+		}
+		return left
 	case "go":
 		return ast.Go{Pos: main.Pos, Fn: ps.parse(0, true)}
 	case "await":
@@ -838,14 +848,38 @@ func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) ast.N
 			continue
 		}
 
-		// subscript access
+		// subscript or slice access
 		if next.IsSimple("[") {
 			ps.NextToken() // consume '['
-			key := ps.parse(0, true)
+			if ps.consume(":") {
+				var end ast.Node
+				if !ps.PeekToken().IsSimple("]") {
+					end = ps.parse(0, true)
+				}
+				if !ps.consume("]") {
+					ps.expected("']'", next, "this '[' opens the slice")
+				}
+				left = ast.Slice{Pos: left.Where().To(ps.last.Pos), Lhs: left, End: end}
+				continue
+			}
+
+			first := ps.parse(0, true)
+			if ps.consume(":") {
+				var end ast.Node
+				if !ps.PeekToken().IsSimple("]") {
+					end = ps.parse(0, true)
+				}
+				if !ps.consume("]") {
+					ps.expected("']'", next, "this '[' opens the slice")
+				}
+				left = ast.Slice{Pos: left.Where().To(ps.last.Pos), Lhs: left, Start: first, End: end}
+				continue
+			}
+
 			if !ps.consume("]") {
 				ps.expected("']'", next, "this '[' opens the index")
 			}
-			left = ast.Subscript{Pos: left.Where().To(ps.last.Pos), Lhs: left, Key: key}
+			left = ast.Subscript{Pos: left.Where().To(ps.last.Pos), Lhs: left, Key: first}
 			continue
 		}
 

@@ -68,6 +68,42 @@ func Construct() *vm.Package {
 		return vm.NewArray(chars...)
 	}))
 	pkg.Native("len", vm.Func1(utf8.RuneCountInString))
+	pkg.Variadic("slice", 2, func(c vm.Call) (vm.Value, error) {
+		if c.Len() > 3 {
+			return vm.Value{}, fmt.Errorf("slice takes 2 or 3 arguments, got %d", c.Len())
+		}
+		s, err := c.String(0)
+		if err != nil {
+			return vm.Value{}, err
+		}
+		start, err := c.Int(1)
+		if err != nil {
+			return vm.Value{}, err
+		}
+		runes := []rune(s)
+		n := len(runes)
+		end := n
+		if c.Len() == 3 {
+			end, err = c.Int(2)
+			if err != nil {
+				return vm.Value{}, err
+			}
+		}
+		if start < 0 {
+			start = max(n+start, 0)
+		} else if start > n {
+			start = n
+		}
+		if end < 0 {
+			end = max(n+end, 0)
+		} else if end > n {
+			end = n
+		}
+		if start > end {
+			return vm.BoxString(""), nil
+		}
+		return vm.BoxString(string(runes[start:end])), nil
+	})
 	pkg.Native("parseNumber", vm.Func1E(func(s string) (float64, error) {
 		f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
 		if err != nil {

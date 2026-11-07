@@ -91,6 +91,9 @@ func TestStdStrings(t *testing.T) {
 		`strings.padEnd("ab", 5, "xy")`:           "abxyx",
 		`strings.chars("héy").len()`:              "3",
 		`strings.len("héy")`:                      "3",
+		`strings.slice("héllo", 1, 4)`:            "éll",
+		`strings.slice("héllo", 2)`:               "llo",
+		`strings.slice("héllo", -3, -1)`:          "ll",
 		`strings.parseNumber(" 2.5 ") * 2`:        "5",
 	} {
 		stdCase(t, expr, want)

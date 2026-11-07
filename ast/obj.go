@@ -56,6 +56,24 @@ func (node Subscript) String() string {
 	return fmt.Sprintf("%v[%v]", node.Lhs, node.Key)
 }
 
+type Slice struct {
+	token.Pos
+	Lhs   Node
+	Start Node
+	End   Node
+}
+
+func (node Slice) String() string {
+	var start, end string
+	if node.Start != nil {
+		start = fmt.Sprint(node.Start)
+	}
+	if node.End != nil {
+		end = fmt.Sprint(node.End)
+	}
+	return fmt.Sprintf("%v[%s:%s]", node.Lhs, start, end)
+}
+
 type ArrayLiteral struct {
 	token.Pos
 	Elements []Node

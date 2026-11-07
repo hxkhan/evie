@@ -10,6 +10,7 @@ import (
 type userStruct struct {
 	Name         string
 	def          site
+	hasParent    bool
 	Parent       *userStruct
 	Fields       []fields.ID
 	FieldOffsets map[fields.ID]int

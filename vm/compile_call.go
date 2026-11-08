@@ -263,6 +263,9 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 		}
 
 		if bt, isBuiltinType := value.asBuiltinType(); isBuiltinType {
+			if bt.Constructor == nil {
+				panic(vm.compileErrorAt(node, "type '%s' cannot be called as a constructor", bt.Name))
+			}
 			vm.arity(bt.Constructor.accepts(len(arguments)), node, unknownSite)
 			return func(fbr *fiber) (Value, exception) {
 				return bt.Constructor.invoke(fbr, site, arguments)
@@ -275,12 +278,21 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 	// optimise: calling a member, as in `obj.method(...)` or `this.items[i].update()`
 	if iFA, ok := node.Fn.(ast.FieldAccess); ok {
 		if ident, ok := iFA.Lhs.(ast.Ident); ok && ident.Name == "super" {
-			ustruct, thisLocal := vm.resolveSuper(ident)
+			ustruct, structLocal, dynamicStruct, thisLocal := vm.resolveSuper(ident)
 			methodID := fieldKeyOf(iFA.Rhs).id
 			return func(fbr *fiber) (Value, exception) {
-				fn := ustruct.Parent.lookupMethod(methodID)
+				parent := ustruct.Parent
+				if dynamicStruct {
+					if us, ok := fbr.get(structLocal).asUserStruct(); ok {
+						parent = us.Parent
+					}
+				}
+				fn := parent.lookupMethod(methodID)
 				if fn == nil {
-					return Value{}, errorAt(site, "no method '%s' on parent struct '%s'", iFA.Rhs, ustruct.Parent.Name)
+					return Value{}, errorAt(site, "no method '%s' on parent struct '%s'", iFA.Rhs, parent.Name)
+				}
+				if exc := fn.accepts(1 + len(arguments)); exc != nil {
+					return Value{}, exc.at(site)
 				}
 				thisVal := *fbr.get(thisLocal)
 				return fn.invokeMethod(fbr, site, thisVal, arguments)
@@ -382,6 +394,9 @@ func callValue(fbr *fiber, site site, value Value, arguments []instruction) (Val
 		return us.construct(fbr, site, arguments)
 	}
 	if bt, isBuiltinType := value.asBuiltinType(); isBuiltinType {
+		if bt.Constructor == nil {
+			return Value{}, errorAt(site, "type '%s' cannot be called as a constructor", bt.Name)
+		}
 		return bt.Constructor.call(fbr, site, arguments)
 	}
 	return Value{}, errorAt(site, "cannot call %s", article(value)).labelled("this is " + article(value))
@@ -432,7 +447,7 @@ func (m *memberSite) call(fbr *fiber, obj Value, arguments []instruction) (Value
 
 	if pkg, ok := obj.AsPackage(); ok {
 		value, exists := pkg.globals[m.key.id]
-		if !exists {
+		if !exists || !value.IsPublic {
 			return Value{}, memberError(m.site, m.name, obj)
 		}
 		return callValue(fbr, m.site, *value.Value, arguments)

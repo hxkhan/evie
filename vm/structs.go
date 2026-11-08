@@ -15,6 +15,8 @@ type userStruct struct {
 	Fields       []fields.ID
 	FieldOffsets map[fields.ID]int
 	Methods      map[fields.ID]*userFn
+	declClosure  *closure // non-nil only for local structs with a runtime-resolved parent
+	declIndex    int
 }
 
 // instantiate creates an instance from the constructor arguments

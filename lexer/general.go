@@ -6,7 +6,7 @@ import (
 	"github.com/hxkhan/evie/token"
 )
 
-const iEOS rune = 0x03 // 0x03 = End of Source
+const iEOS rune = -1 // out-of-band End of Source sentinel
 
 type Lexer struct {
 	src       []byte // the whole input
@@ -19,9 +19,7 @@ type Lexer struct {
 }
 
 func New(input []byte) *Lexer {
-	lex := &Lexer{src: input, cursor: 0, line: 1}
-	lex.backlog = append(lex.backlog, lex.compose())
-	return lex
+	return &Lexer{src: input, cursor: 0, line: 1}
 }
 
 // decodes a rune starting on the given index, use carefully so not to step in the middle of a rune

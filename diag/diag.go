@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/hxkhan/evie/token"
 )
@@ -25,7 +26,8 @@ type Source struct {
 	Name string
 	Text []byte
 
-	lines [][]byte
+	linesOnce sync.Once
+	lines     [][]byte
 }
 
 // NewSource names a script
@@ -38,9 +40,9 @@ func (s *Source) Line(n int) ([]byte, bool) {
 	if s == nil {
 		return nil, false
 	}
-	if s.lines == nil {
+	s.linesOnce.Do(func() {
 		s.lines = bytes.Split(s.Text, []byte{'\n'})
-	}
+	})
 	if n < 1 || n > len(s.lines) {
 		return nil, false
 	}
@@ -137,7 +139,8 @@ func (r *Report) Render(p Palette) string {
 		}
 		text := strings.ReplaceAll(string(line), "\t", "    ")
 		// a column counts tabs before it as four columns too
-		col := pos.Column - 1 + 3*strings.Count(string(line[:min(pos.Column-1, len(line))]), "\t")
+		colByte := max(pos.Column-1, 0)
+		col := colByte + 3*strings.Count(string(line[:min(colByte, len(line))]), "\t")
 		length := max(pos.Length, 1)
 		if col+length > len(text) {
 			length = max(len(text)-col, 1)

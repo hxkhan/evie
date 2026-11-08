@@ -61,6 +61,9 @@ func (c Call) Context() context.Context {
 
 // Call invokes an evie callable on the same fiber, as a callback
 func (c Call) Call(fn Value, args ...Value) (Value, error) {
+	if c.fbr.vm == nil {
+		return plain(fn.callGuarded(nil, args...))
+	}
 	if ufn, ok := fn.asUserFn(); ok {
 		if exc := ufn.accepts(len(args)); exc != nil {
 			return Value{}, exc
@@ -78,7 +81,11 @@ func (c Call) typeError(i int, want string) error {
 	if name == "" {
 		name = "native"
 	}
-	return fmt.Errorf("%s: argument %d must be %s, got %s", name, i+1, want, c.Arg(i).TypeOf())
+	pos := i + 1
+	if c.fn.isMethod {
+		pos = i
+	}
+	return fmt.Errorf("%s: argument %d must be %s, got %s", name, pos, want, c.Arg(i).TypeOf())
 }
 
 // Number returns argument i as a number
@@ -89,13 +96,14 @@ func (c Call) Number(i int) (float64, error) {
 	return 0, c.typeError(i, "a number")
 }
 
-// Int returns argument i as an integer; a number with a fraction is an error
+// Int returns argument i as an integer; a number with a fraction, NaN, infinity
+// or a value outside int's range is an error
 func (c Call) Int(i int) (int, error) {
 	f, ok := c.Arg(i).AsFloat64()
 	if !ok {
 		return 0, c.typeError(i, "an integer")
 	}
-	if f != math.Trunc(f) {
+	if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) || f < math.MinInt || f >= -float64(math.MinInt) {
 		return 0, c.typeError(i, "an integer")
 	}
 	return int(f), nil

@@ -173,16 +173,17 @@ func (vm *Instance) evalNode(node ast.Node, s *stopper) (result Value, err error
 		fbr.running = true // the runner is held above
 		fbr.active = &userFn{funcInfoStatic: &funcInfoStatic{name: "anonymous"}}
 
-		hasClosure := vm.cp.closures.Len() > 0
+		prevClosures := vm.cp.closures.Len()
+		hasClosure := prevClosures > 0
 		if !hasClosure {
 			vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: fbr.active.funcInfoStatic})
 			vm.cp.closures.Last(0).scope.OpenBlock()
-			defer func() {
-				if vm.cp.closures.Len() > 0 {
-					vm.cp.closures.Pop()
-				}
-			}()
 		}
+		defer func() {
+			for vm.cp.closures.Len() > prevClosures {
+				vm.cp.closures.Pop()
+			}
+		}()
 
 		code := vm.compile(node)
 		if !hasClosure {
@@ -415,13 +416,14 @@ func (cp *compiler) addToCaptured(scroll int, index int) (idx int) {
 		owner.freeVars.Add(index)
 	}
 
-	// 2. propagate the capture down to where we need it (only if ref.scroll > 1)
+	// 2. propagate the capture down to where we need it (only if scroll > 1)
 	for i := iCaptureLocal + 1; i < cp.closures.Len(); i++ {
 		closure := cp.closures[i]
-		// if not referenced already; reference now, as captured
-		if idx = slices.Index(closure.captures, capture{false, idx}); idx == -1 {
+		parentIdx := idx
+		// if not referenced already; reference now, as captured from parent
+		if idx = slices.Index(closure.captures, capture{false, parentIdx}); idx == -1 {
 			idx = closure.captures.Len()
-			closure.captures.Push(capture{false, idx})
+			closure.captures.Push(capture{false, parentIdx})
 		}
 	}
 	return idx

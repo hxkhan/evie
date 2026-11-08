@@ -570,7 +570,8 @@ func (vm *Instance) emitStruct(str ast.StructDefinition) instruction {
 		vm.cp.closures.Last(0).scope.OpenBlock()
 	}
 
-	index, ok := vm.cp.closures.Last(0).scope.Declare(str.Name, true)
+	enclosing := vm.cp.closures.Last(0)
+	index, ok := enclosing.scope.Declare(str.Name, true)
 	if !ok {
 		panic(vm.compileErrorAt(str, "double declaration of %s", str.Name))
 	}
@@ -609,9 +610,12 @@ func (vm *Instance) emitStruct(str ast.StructDefinition) instruction {
 			ustruct.Parent = parentStruct
 		} else {
 			parentInst = vm.emitIdentGet(ast.Ident{Pos: str.Pos, Name: str.Parent})
+			ustruct.declClosure = enclosing
+			ustruct.declIndex = index
 		}
 	}
 
+	hasCaptures := false
 	if block, ok := str.Action.(ast.Block); ok {
 		for _, stmt := range block.Code {
 			mFn, isFn := stmt.(ast.Fn)
@@ -625,13 +629,16 @@ func (vm *Instance) emitStruct(str ast.StructDefinition) instruction {
 				panic(vm.compileErrorAt(mFn, "method '%s' is declared twice on %s", mFn.Name, str.Name))
 			}
 			methodFn := vm.compileStructMethod(ustruct, mFn)
+			if len(methodFn.captures) > 0 {
+				hasCaptures = true
+			}
 			ustruct.Methods[fields.Get(mFn.Name)] = methodFn
 		}
 	}
 
 	site := vm.at(str)
-	boxed := boxUserStruct(ustruct)
-	if parentInst == nil {
+	if parentInst == nil && !hasCaptures {
+		boxed := boxUserStruct(ustruct)
 		return func(fbr *fiber) (Value, exception) {
 			fbr.setLocal(index, boxed)
 			return Value{}, nil
@@ -639,21 +646,48 @@ func (vm *Instance) emitStruct(str ast.StructDefinition) instruction {
 	}
 
 	return func(fbr *fiber) (Value, exception) {
-		pVal, exc := parentInst(fbr)
-		if exc != nil {
-			return pVal, exc
-		}
-		parentStruct, ok := pVal.asUserStruct()
-		if !ok {
-			return Value{}, errorAt(site, "'%v' is %s, not a struct", str.Parent, article(pVal))
-		}
-		for p := parentStruct; p != nil; p = p.Parent {
-			if p == ustruct {
-				return Value{}, errorAt(site, "'%v' and '%v' inherit from each other", str.Name, str.Parent)
+		parent := ustruct.Parent
+		if parentInst != nil {
+			pVal, exc := parentInst(fbr)
+			if exc != nil {
+				return pVal, exc
 			}
+			parentStruct, ok := pVal.asUserStruct()
+			if !ok {
+				return Value{}, errorAt(site, "'%v' is %s, not a struct", str.Parent, article(pVal))
+			}
+			parent = parentStruct
 		}
-		ustruct.Parent = parentStruct
-		fbr.setLocal(index, boxed)
+
+		runtimeStruct := &userStruct{
+			Name:         ustruct.Name,
+			def:          ustruct.def,
+			hasParent:    ustruct.hasParent,
+			Parent:       parent,
+			Fields:       ustruct.Fields,
+			FieldOffsets: ustruct.FieldOffsets,
+			Methods:      make(map[fields.ID]*userFn, len(ustruct.Methods)),
+		}
+
+		cell := fbr.newLocal(index)
+		*cell = boxUserStruct(runtimeStruct)
+
+		for id, tmpl := range ustruct.Methods {
+			if len(tmpl.captures) == 0 {
+				runtimeStruct.Methods[id] = tmpl
+				continue
+			}
+			captured := make([]*Value, len(tmpl.captures))
+			for i, ref := range tmpl.captures {
+				if ref.isLocal {
+					captured[i] = fbr.getLocalByRef(ref.index)
+				} else {
+					captured[i] = fbr.getCapturedByRef(ref.index)
+				}
+			}
+			runtimeStruct.Methods[id] = &userFn{funcInfoStatic: tmpl.funcInfoStatic, references: captured}
+		}
+
 		return Value{}, nil
 	}
 }

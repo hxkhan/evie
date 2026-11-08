@@ -1,7 +1,9 @@
 package vm
 
 import (
+	"context"
 	"fmt"
+	"sync/atomic"
 )
 
 type capture struct {
@@ -525,24 +527,27 @@ func (fn *GoFunc) callMethod(fbr *fiber, site site, this Value, arguments []inst
 	return result, exc
 }
 
-// callGuarded invokes the native from Go; a nil fiber is not allowed because a native
-// needs a stack to read its arguments from
+// callGuarded invokes the native from Go; when fbr is nil, a lightweight
+// standalone fiber holds the arguments for the duration of the call
 func (fn *GoFunc) callGuarded(fbr *fiber, args ...Value) (result Value, exc exception) {
-	if fbr == nil {
-		return Value{}, customError("cannot call GoFunc with nil fiber")
-	}
-
 	if exc := fn.accepts(len(args)); exc != nil {
 		return Value{}, exc
 	}
 
-	if fbr.lock() {
-		defer fbr.unlock()
-	}
-
-	if fbr.signaled() {
-		if exc := fbr.stopped(); exc != nil {
-			return Value{}, exc
+	if fbr == nil {
+		fbr = &fiber{
+			boxes:  make([]Value, max(len(args), 8)),
+			signal: new(atomic.Uint32),
+			stop:   &stopper{ctx: context.Background()},
+		}
+	} else {
+		if fbr.vm != nil && fbr.lock() {
+			defer fbr.unlock()
+		}
+		if fbr.signaled() {
+			if exc := fbr.stopped(); exc != nil {
+				return Value{}, exc
+			}
 		}
 	}
 

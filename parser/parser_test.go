@@ -46,6 +46,14 @@ func TestParseErrors(t *testing.T) {
 		"fn main() { switch 1 { case 1: return\ncase 2: return 2 } }": "",
 		"fn main() { switch 1 { case 1: return; case 2: return 2 } }": "",
 		"fn main() { return\nx := 1 }":                                "",
+		"/* unclosed":                                                 "block comment is never closed",
+		"x := \"a\\\\\"":                                              "",
+		"x := `a\\\\`":                                                "",
+		"`hi {1}`":                                                    "",
+		"`a {`b {1}`}`":                                               "",
+		"x := await t1 + await t2":                                    "",
+		"x := await.all(t1, t2)[0]":                                   "",
+		"x := fn(n) { return n }(1)":                                  "",
 	}
 	for src, want := range cases {
 		node, err := parser.Parse([]byte(src))

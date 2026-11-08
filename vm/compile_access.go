@@ -69,7 +69,7 @@ func (vm *Instance) emitIdentGet(node ast.Ident) instruction {
 func assignField(fbr *fiber, site site, obj Value, name string, index fields.ID, value instruction) (Value, exception) {
 	if pkg, ok := obj.AsPackage(); ok {
 		field, exists := pkg.globals[index]
-		if !exists {
+		if !exists || !field.IsPublic {
 			return Value{}, errorAt(site, "package '%s' has no symbol '%s'", pkg.name, name)
 		}
 		if field.IsStatic {
@@ -215,7 +215,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 			// an imported package folds to a constant; its symbols are checked now
 			if pkg, ok := lhs.AsPackage(); ok {
 				field, exists := pkg.globals[fields.Get(fa.Rhs)]
-				if !exists {
+				if !exists || !field.IsPublic {
 					panic(vm.compileErrorAt(fa, "package '%s' has no symbol '%s'", pkg.name, fa.Rhs))
 				}
 
@@ -242,7 +242,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 			return func(fbr *fiber) (Value, exception) {
 				if pkg, ok := lhs.AsPackage(); ok {
 					field, exists := pkg.globals[index]
-					if !exists {
+					if !exists || !field.IsPublic {
 						return Value{}, errorAt(site, "package '%s' has no symbol '%s'", pkg.name, fa.Rhs)
 					}
 
@@ -396,8 +396,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 	panic(vm.compileErrorAt(node, "cannot assign to '%v'", node.Lhs))
 }
 
-func (vm *Instance) resolveSuper(node ast.Node) (*userStruct, local) {
-	var ustruct *userStruct
+func (vm *Instance) resolveSuper(node ast.Node) (ustruct *userStruct, structLocal local, dynamicStruct bool, thisLocal local) {
 	for scroll := range vm.cp.closures.Len() {
 		if s := vm.cp.closures.Last(scroll).ustruct; s != nil {
 			ustruct = s
@@ -414,7 +413,20 @@ func (vm *Instance) resolveSuper(node ast.Node) (*userStruct, local) {
 	if err != nil {
 		panic(vm.compileErrorAt(node, "'super' can only be used inside a struct method"))
 	}
-	return ustruct, thisBinding.(local)
+	if ustruct.declClosure != nil {
+		for scroll := range vm.cp.closures.Len() {
+			if vm.cp.closures.Last(scroll) == ustruct.declClosure {
+				if scroll == 0 {
+					structLocal = local{index: int16(ustruct.declIndex), isCaptured: false, isStatic: true}
+				} else {
+					structLocal = local{index: int16(vm.cp.addToCaptured(scroll, ustruct.declIndex)), isCaptured: true, isStatic: true}
+				}
+				dynamicStruct = true
+				break
+			}
+		}
+	}
+	return ustruct, structLocal, dynamicStruct, thisBinding.(local)
 }
 
 func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
@@ -423,14 +435,20 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 	index := key.id
 
 	if ident, ok := node.Lhs.(ast.Ident); ok && ident.Name == "super" {
-		ustruct, thisLocal := vm.resolveSuper(ident)
+		ustruct, structLocal, dynamicStruct, thisLocal := vm.resolveSuper(ident)
 		return func(fbr *fiber) (Value, exception) {
-			fn := ustruct.Parent.lookupMethod(index)
+			parent := ustruct.Parent
+			if dynamicStruct {
+				if us, ok := fbr.get(structLocal).asUserStruct(); ok {
+					parent = us.Parent
+				}
+			}
+			fn := parent.lookupMethod(index)
 			if fn == nil {
-				return Value{}, errorAt(site, "no method '%s' on parent struct '%s'", node.Rhs, ustruct.Parent.Name)
+				return Value{}, errorAt(site, "no method '%s' on parent struct '%s'", node.Rhs, parent.Name)
 			}
 			thisVal := *fbr.get(thisLocal)
-			return boxMethod(boundMethod{this: thisVal, fn: boxUserFn(*fn)}), nil
+			return boxMethod(boundMethod{this: thisVal, fn: boxUserFnPtr(fn)}), nil
 		}
 	}
 
@@ -996,11 +1014,11 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 
 		if pkg, ok := obj.AsPackage(); ok {
 			field, exists := pkg.globals[index]
-			if !exists {
-				return Value{}, errorAt(site, "Symbol '%s' not found in package '%s'.", fa.Rhs, pkg.name)
+			if !exists || !field.IsPublic {
+				return Value{}, errorAt(site, "package '%s' has no symbol '%s'", pkg.name, fa.Rhs)
 			}
 			if field.IsStatic {
-				return Value{}, errorAt(site, "Assignment to constant symbol '%v' of package '%v'.", fa.Rhs, pkg.name)
+				return Value{}, errorAt(site, "cannot assign to '%s.%s' because it is a constant", pkg.name, fa.Rhs)
 			}
 			result, exc := apply(fbr, *field.Value, value)
 			if exc != nil {

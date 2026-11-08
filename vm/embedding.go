@@ -48,7 +48,9 @@ func (vm *Instance) Call(path string, args ...any) (Value, error) {
 	if err != nil {
 		return Value{}, err
 	}
-	return plain(fn.callGuarded(nil, boxed...))
+	fbr := vm.newFiber()
+	defer vm.releaseFiber(fbr)
+	return plain(fn.callGuarded(fbr, boxed...))
 }
 
 // CallContext is Call bound to ctx: when ctx is done, the call stops with an

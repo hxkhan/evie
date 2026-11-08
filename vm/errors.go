@@ -161,7 +161,7 @@ func article(v Value) string {
 	if usi, ok := v.asStructInstance(); ok {
 		t = usi.InstanceOf.Name
 	}
-	if t == "nil" {
+	if t == "nil" || len(t) == 0 {
 		return t
 	}
 	if strings.ContainsRune("aeiouAEIOU", rune(t[0])) {

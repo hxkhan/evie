@@ -278,39 +278,38 @@ func (x Value) IsTruthy() bool {
 	switch x.scalar {
 	case kindString:
 		return *(*string)(x.pointer) != ""
-	case kindUserFn:
-		// In both JavaScript and Python, functions are inherently truthy
-		return true
 	case kindArray:
-		array := (*Array)(x.pointer)
-		return len(array.Data) != 0
+		return len((*Array)(x.pointer).Data) != 0
 	case kindObject:
-		obj := *(*map[string]Value)(x.pointer)
-		return len(obj) != 0
-	case kindTask:
-		return true
+		return len(*(*map[string]Value)(x.pointer)) != 0
 	case kindBuffer:
-		buffer := *(*[]byte)(x.pointer)
-		return len(buffer) != 0
-	case kindHost:
+		return len(*(*[]byte)(x.pointer)) != 0
+	default:
+		// functions, bound methods, struct types and instances, tasks, errors,
+		// packages, builtin types and host values are truthy
 		return true
 	}
-
-	return false
 }
 
 func (x Value) Equals(y Value) bool {
+	if x.pointer == f64Type && y.pointer == f64Type {
+		return math.Float64frombits(x.scalar) == math.Float64frombits(y.scalar)
+	}
+	return x.equalsSlow(y)
+}
+
+func (x Value) equalsSlow(y Value) bool {
 	switch x.pointer {
 	case nil:
 		return y.pointer == nil
 	case boolType:
-		return x.scalar == y.scalar
+		return y.pointer == boolType && x.scalar == y.scalar
 	case f64Type:
-		return math.Float64frombits(x.scalar) == math.Float64frombits(y.scalar)
+		return false
 	}
 
-	// guarantees that their types are the same beyond this point
-	if x.scalar != y.scalar {
+	// guarantees that both are reference values of the same kind beyond this point
+	if x.scalar != y.scalar || isKnown(y.pointer) {
 		return false
 	}
 
@@ -609,8 +608,10 @@ func (x Value) memberNames() []string {
 		return ids(x.host().typ.typ.Fields)
 	case kindPackage:
 		var names []string
-		for id := range (*Package)(x.pointer).globals {
-			names = append(names, fields.Lookup(id))
+		for id, g := range (*Package)(x.pointer).globals {
+			if g.IsPublic {
+				names = append(names, fields.Lookup(id))
+			}
 		}
 		return names
 	case kindStructInstance:
@@ -687,8 +688,10 @@ func (x Value) dotAccess(k fieldKey) (field Value) {
 func (x Value) IsCallable() bool {
 	if !isKnown(x.pointer) {
 		switch x.scalar {
-		case kindUserFn, kindGoFunc, kindBoundMethod, kindStruct, kindBuiltinType:
+		case kindUserFn, kindGoFunc, kindBoundMethod, kindStruct:
 			return true
+		case kindBuiltinType:
+			return (*builtinType)(x.pointer).Constructor != nil
 		}
 	}
 	return false
@@ -703,11 +706,26 @@ func (x Value) AcceptsArgs() bool {
 		case kindGoFunc:
 			fn := (*GoFunc)(x.pointer)
 			return fn.isVariadic || fn.arguments > 0
+		case kindBoundMethod:
+			bm := (*boundMethod)(x.pointer)
+			if fn, ok := bm.fn.asUserFn(); ok {
+				if fn.isMethod {
+					return fn.maxArgs > 1
+				}
+				return fn.maxArgs > 0
+			}
+			if fn, ok := bm.fn.AsGoFunc(); ok {
+				if fn.isMethod {
+					return fn.isVariadic || fn.arguments > 1
+				}
+				return fn.isVariadic || fn.arguments > 0
+			}
+			return bm.fn.AcceptsArgs()
 		case kindStruct:
 			return len((*userStruct)(x.pointer).Fields) > 0
 		case kindBuiltinType:
 			fn := (*builtinType)(x.pointer).Constructor
-			return fn.isVariadic || fn.arguments > 0
+			return fn != nil && (fn.isVariadic || fn.arguments > 0)
 		}
 	}
 	return false
@@ -742,6 +760,9 @@ func (x Value) callGuarded(fbr *fiber, args ...Value) (result Value, exc excepti
 			return us.instantiate(args)
 		case kindBuiltinType:
 			bt := (*builtinType)(x.pointer)
+			if bt.Constructor == nil {
+				return Value{}, runtimeErrorf("type '%s' cannot be called as a constructor", bt.Name)
+			}
 			return bt.Constructor.callGuarded(fbr, args...)
 		}
 	}

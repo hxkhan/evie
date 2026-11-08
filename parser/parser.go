@@ -57,12 +57,15 @@ var operators = map[string]ast.Operator{
 var precedence = map[string]int{
 	"||": 0,
 	"&&": 1,
-	"<":  2, ">": 2, "==": 2, "!=": 2, "<=": 2, ">=": 2, "is": 2,
+	"<":  2, ">": 2, "==": 2, "!=": 2, "<=": 2, ">=": 2,
 	"+": 3, "-": 3,
 	"*": 4, "/": 4, "%": 4,
-	".": 5,
-	"(": 6,
 }
+
+const (
+	isPrec    = 2
+	unaryPrec = 5
+)
 
 // Parse parses a script whose source has no name
 func Parse(input []byte) (ast.Node, error) {
@@ -222,7 +225,7 @@ func (ps *parser) handleWords(main token.Token, asExpr bool, precedenceLevel int
 	case "echo":
 		return ast.Echo{Pos: main.Pos, Value: ps.parse(0, true)}
 	case "fn":
-		return ps.parseFn(main, asExpr)
+		return ps.parseFn(main, asExpr, precedenceLevel)
 	case "struct":
 		return ps.parseStruct(main)
 	case "super":
@@ -236,9 +239,10 @@ func (ps *parser) handleWords(main token.Token, asExpr bool, precedenceLevel int
 		}
 		return left
 	case "go":
-		return ast.Go{Pos: main.Pos, Fn: ps.parse(0, true)}
+		call := ps.parse(unaryPrec, true)
+		return ps.parseInfixExpression(ast.Go{Pos: main.Pos.To(call.Where()), Fn: call}, precedenceLevel)
 	case "await":
-		return ps.parseAwait(main)
+		return ps.parseAwait(main, precedenceLevel)
 	case "nil":
 		return ps.parseInfixExpression(ast.Input[struct{}]{Pos: main.Pos}, precedenceLevel)
 	case "true":
@@ -340,31 +344,31 @@ func (ps *parser) parseStringTemplate(main token.Token) (st ast.StringTemplate) 
 	return st
 }
 
-func (ps *parser) parseAwait(main token.Token) ast.Node {
+func (ps *parser) parseAwait(main token.Token, precedenceLevel int) ast.Node {
 	// await.all(x, y, z), await.any(x, y, z), await.race(x, y, z), or await.timeout(t, ms)
 	if !ps.consume(".") {
-		task := ps.parse(0, true)
-		return ast.Await{Pos: main.Pos.To(task.Where()), Task: task}
+		task := ps.parse(unaryPrec, true)
+		return ps.parseInfixExpression(ast.Await{Pos: main.Pos.To(task.Where()), Task: task}, precedenceLevel)
 	}
 
+	var node ast.Node
 	if ps.consumeName("all") {
-		return ast.AwaitAll{Pos: main.Pos, Tasks: ps.parseArgsList()}
-	}
-	if ps.consumeName("any") {
-		return ast.AwaitAny{Pos: main.Pos, Tasks: ps.parseArgsList()}
-	}
-	if ps.consumeName("race") {
-		return ast.AwaitRace{Pos: main.Pos, Tasks: ps.parseArgsList()}
-	}
-	if ps.consumeName("timeout") {
+		node = ast.AwaitAll{Pos: main.Pos.To(ps.last.Pos), Tasks: ps.parseArgsList()}
+	} else if ps.consumeName("any") {
+		node = ast.AwaitAny{Pos: main.Pos.To(ps.last.Pos), Tasks: ps.parseArgsList()}
+	} else if ps.consumeName("race") {
+		node = ast.AwaitRace{Pos: main.Pos.To(ps.last.Pos), Tasks: ps.parseArgsList()}
+	} else if ps.consumeName("timeout") {
 		args := ps.parseArgsList()
 		if len(args) != 2 {
 			ps.fail(main.Pos.To(ps.last.Pos), fmt.Sprintf("await.timeout takes 2 arguments (task, ms) but %d were supplied", len(args)))
 		}
-		return ast.AwaitTimeout{Pos: main.Pos.To(ps.last.Pos), Task: args[0], Timeout: args[1]}
+		node = ast.AwaitTimeout{Pos: main.Pos.To(ps.last.Pos), Task: args[0], Timeout: args[1]}
+	} else {
+		ps.expected("'all', 'any', 'race' or 'timeout' after 'await.'", main, "")
+		return nil
 	}
-	ps.expected("'all', 'any', 'race' or 'timeout' after 'await.'", main, "")
-	return nil
+	return ps.parseInfixExpression(node, precedenceLevel)
 }
 
 func (ps *parser) parseIdent(main token.Token, precedenceLevel int) ast.Node {
@@ -545,7 +549,7 @@ func (ps *parser) parseBlock(open token.Token) ast.Node {
 }
 
 // helper to parse an fn
-func (ps *parser) parseFn(main token.Token, asExpr bool) ast.Node {
+func (ps *parser) parseFn(main token.Token, asExpr bool, precedenceLevel int) ast.Node {
 	fn := ast.Fn{Pos: main.Pos, UsedAsExpr: asExpr}
 	if ps.PeekToken().Type == token.Word {
 		name := ps.name("the function name")
@@ -556,11 +560,14 @@ func (ps *parser) parseFn(main token.Token, asExpr bool) ast.Node {
 
 	if ps.consume("{") {
 		fn.Action = ps.parseBlock(ps.last)
+		if asExpr {
+			return ps.parseInfixExpression(fn, precedenceLevel)
+		}
 	} else if ps.consume("=>") {
 		// an arrow body may also be an assignment, as in `fn reset() => this.n = 0`
 		body := ps.parseNode(0, true)
 		ps.mustBeValue(body, true)
-		fn.Action = ast.Return{Pos: ps.last.Pos, Value: body}
+		fn.Action = ast.Return{Pos: body.Where(), Value: body}
 	} else {
 		ps.expected("'{' or '=>' after the parameters", main, "in this function")
 	}
@@ -796,7 +803,7 @@ func (ps *parser) parseNode(precedenceLevel int, asExpr bool) (node ast.Node) {
 			num := ps.NextToken()
 			node = ast.Input[float64]{Pos: main.Pos.To(num.Pos), Value: ps.parseFloat(num)}
 		} else {
-			operand := ps.parse(4, true)
+			operand := ps.parse(unaryPrec, true)
 			node = ast.Plus{Pos: main.Pos.To(operand.Where()), Value: operand}
 		}
 
@@ -806,13 +813,13 @@ func (ps *parser) parseNode(precedenceLevel int, asExpr bool) (node ast.Node) {
 			num := ps.NextToken()
 			node = ast.Input[float64]{Pos: main.Pos.To(num.Pos), Value: -ps.parseFloat(num)}
 		} else {
-			operand := ps.parse(4, true)
+			operand := ps.parse(unaryPrec, true)
 			node = ast.Neg{Pos: main.Pos.To(operand.Where()), Value: operand}
 		}
 
 	case main.IsSimple("!"):
 		ps.NextToken()
-		operand := ps.parse(4, true)
+		operand := ps.parse(unaryPrec, true)
 		node = ast.Not{Pos: main.Pos.To(operand.Where()), Value: operand}
 
 	case main.IsSimple("`"):
@@ -820,6 +827,9 @@ func (ps *parser) parseNode(precedenceLevel int, asExpr bool) (node ast.Node) {
 	case main.Type == token.Invalid:
 		if strings.HasPrefix(main.Literal, "\"") || strings.HasPrefix(main.Literal, "`") {
 			ps.fail(main.Pos, "this string is never closed")
+		}
+		if main.Literal == "/*" {
+			ps.fail(main.Pos, "this block comment is never closed")
 		}
 		ps.fail(main.Pos, fmt.Sprintf("invalid token '%s'", main.Literal))
 	default:
@@ -892,12 +902,11 @@ func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) ast.N
 
 		// instance check
 		if next.IsWord("is") {
-			currentPrec := precedence["is"]
-			if currentPrec < precedenceLevel {
+			if isPrec < precedenceLevel {
 				break
 			}
 			ps.NextToken() // consume 'is'
-			rhs := ps.parse(currentPrec+1, true)
+			rhs := ps.parse(isPrec+1, true)
 			left = ast.IsInstanceOf{Pos: left.Where().To(rhs.Where()), Lhs: left, Rhs: rhs}
 			continue
 		}
@@ -924,6 +933,9 @@ func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) ast.N
 			continue
 		}
 
+		if next.Type != token.Simple {
+			break
+		}
 		currentPrecedence, ok := precedence[next.Literal]
 		// stop parsing if next token is not an infix operator or precedence is lower
 		if !ok || currentPrecedence < precedenceLevel {

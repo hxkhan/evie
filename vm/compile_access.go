@@ -1,6 +1,8 @@
 package vm
 
 import (
+	"unicode/utf8"
+
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/vm/fields"
 )
@@ -629,7 +631,7 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 			return val, nil
 		}
 
-		// 4. String indexing: "hello"[1] -> "e"
+		// 4. String indexing (UTF-8 runes): "héllo"[1] -> "é"
 		if str, ok := target.AsString(); ok {
 			idxFloat, ok := indexVal.AsFloat64()
 			if !ok {
@@ -640,16 +642,12 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 				return Value{}, errorAt(site, "string index must be an integer, got %v", idxFloat)
 			}
 
-			length := len(str)
-			if idx < 0 {
-				idx = length + idx
-			}
-
-			if idx < 0 || idx >= length {
+			ch, length, ok := runeAt(str, idx)
+			if !ok {
 				return Value{}, errorAt(site, "IndexError: string index %d out of bounds (length %d)", int(idxFloat), length)
 			}
 
-			return BoxString(string(str[idx])), nil
+			return BoxString(ch), nil
 		}
 
 		// 5. Buffer indexing: buf[0] -> byte value as number
@@ -706,6 +704,53 @@ func clampSlice(n, start, end int) (int, int) {
 		start = end
 	}
 	return start, end
+}
+
+// runeAt returns the single-rune substring at rune index idx (supporting negative
+// indices) along with the string's rune length. Pure ASCII strings take an O(1) path.
+func runeAt(s string, idx int) (string, int, bool) {
+	n := utf8.RuneCountInString(s)
+	if idx < 0 {
+		idx = n + idx
+	}
+	if idx < 0 || idx >= n {
+		return "", n, false
+	}
+	if n == len(s) {
+		return s[idx : idx+1], n, true
+	}
+	pos := 0
+	for i, r := range s {
+		if pos == idx {
+			return s[i : i+utf8.RuneLen(r)], n, true
+		}
+		pos++
+	}
+	return "", n, false
+}
+
+// sliceStringRunes slices s by clamped rune indices [start, end) without allocating
+// a []rune slice; pure ASCII strings take an O(1) path.
+func sliceStringRunes(s string, n, start, end int) string {
+	if start >= end {
+		return ""
+	}
+	if n == len(s) {
+		return s[start:end]
+	}
+	byteStart, byteEnd := 0, len(s)
+	pos := 0
+	for i := range s {
+		if pos == start {
+			byteStart = i
+		}
+		if pos == end {
+			byteEnd = i
+			break
+		}
+		pos++
+	}
+	return s[byteStart:byteEnd]
 }
 
 func checkSliceBound(site site, val Value, which string) (int, exception) {
@@ -774,12 +819,12 @@ func (vm *Instance) emitSlice(node ast.Slice) instruction {
 		}
 
 		if str, ok := target.AsString(); ok {
-			n := len(str)
+			n := utf8.RuneCountInString(str)
 			if !hasEnd {
 				end = n
 			}
 			s, e := clampSlice(n, start, end)
-			return BoxString(str[s:e]), nil
+			return BoxString(sliceStringRunes(str, n, s, e)), nil
 		}
 
 		if buf, ok := target.AsBuffer(); ok {
@@ -907,7 +952,7 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 					if float64(idx) != idxFloat {
 						return BoxBool(false), nil
 					}
-					length := len(str)
+					length := utf8.RuneCountInString(str)
 					if idx < 0 {
 						idx = length + idx
 					}

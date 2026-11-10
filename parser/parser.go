@@ -1,7 +1,6 @@
 package parser
 
 import (
-	"errors"
 	"fmt"
 	"runtime"
 	"slices"
@@ -14,7 +13,7 @@ import (
 	"github.com/hxkhan/evie/token"
 )
 
-var errEOS = errors.New("EOS")
+const maxParseDepth = 256
 
 // Error is a syntax error: a report with the offending span and, where it
 // helps, the construct that was left open
@@ -28,8 +27,9 @@ func (e *Error) Error() string {
 
 type parser struct {
 	*lexer.Lexer
-	src  *diag.Source
-	last token.Token
+	src   *diag.Source
+	last  token.Token
+	depth int
 }
 
 var keywords = []string{
@@ -67,6 +67,22 @@ const (
 	unaryPrec = 5
 )
 
+// PeekPackageName scans only the leading tokens of src to read the declared
+// package name without parsing the rest of the file. It returns "" for bare
+// scripts or when the header does not start with a valid `package <name>`.
+func PeekPackageName(src *diag.Source) string {
+	lex := lexer.New(src.Text)
+	first := lex.NextToken()
+	if !first.IsWord("package") {
+		return ""
+	}
+	name := lex.NextToken()
+	if name.Type != token.Word || slices.Contains(keywords, name.Literal) {
+		return ""
+	}
+	return name.Literal
+}
+
 // Parse parses a script whose source has no name
 func Parse(input []byte) (ast.Node, error) {
 	return ParseSource(diag.NewSource("", input))
@@ -75,8 +91,6 @@ func Parse(input []byte) (ast.Node, error) {
 // ParseSource parses a script; errors name the source and show its text
 func ParseSource(src *diag.Source) (node ast.Node, err error) {
 	ps := parser{Lexer: lexer.New(src.Text), src: src}
-	var pack ast.Package
-	var cb ast.Block
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -87,16 +101,6 @@ func ParseSource(src *diag.Source) (node ast.Node, err error) {
 				// a bug in the parser or lexer; report it instead of taking the host down
 				err = fmt.Errorf("internal parser error: %v", e)
 			case error:
-				if e == errEOS {
-					if len(cb.Code) == 0 && pack.Name != "" {
-						node = pack
-					} else if len(cb.Code) > 0 {
-						node = cb
-					} else {
-						err = ps.report(ps.PeekToken().Pos, "the source is empty")
-					}
-					return
-				}
 				err = fmt.Errorf("ParseError: %s", e.Error())
 			default:
 				err = ps.report(ps.last.Pos, fmt.Sprint(r))
@@ -104,16 +108,31 @@ func ParseSource(src *diag.Source) (node ast.Node, err error) {
 		}
 	}()
 
+	for ps.consume(";") {
+	}
+	if ps.PeekToken().IsEOS() {
+		return nil, ps.report(ps.PeekToken().Pos, "the source is empty")
+	}
+
 	if ps.consume("package") {
-		// create package & parse imports
-		pack = ps.parsePackage()
+		pack := ps.parsePackage()
 		for {
+			for ps.consume(";") {
+			}
+			if ps.PeekToken().IsEOS() {
+				return pack, nil
+			}
 			pack.Code = append(pack.Code, ps.parse(0, false))
 		}
 	}
 
-	// no package, just code
+	var cb ast.Block
 	for {
+		for ps.consume(";") {
+		}
+		if ps.PeekToken().IsEOS() {
+			return cb, nil
+		}
 		cb.Code = append(cb.Code, ps.parse(0, false))
 	}
 }
@@ -199,7 +218,9 @@ func (ps *parser) parseStringList(open token.Token) ([]string, []token.Pos) {
 			ps.expected("a package name in quotes", open, "in this import list")
 		}
 		ps.NextToken()
-		imports = append(imports, next.Literal)
+		textPos := next.Pos
+		textPos.Column++ // text starts after the opening quote
+		imports = append(imports, ps.unescape(next.Literal, textPos, ""))
 		positions = append(positions, next.Pos)
 
 		if ps.consume(")") {
@@ -207,6 +228,9 @@ func (ps *parser) parseStringList(open token.Token) ([]string, []token.Pos) {
 		}
 		if !ps.consume(",") {
 			ps.expected("',' or ')'", open, "this '(' opens the import list")
+		}
+		if ps.consume(")") {
+			break
 		}
 	}
 	return imports, positions
@@ -539,7 +563,12 @@ func (ps *parser) parseSwitch(main token.Token) ast.Node {
 // parseBlock parses statements up to the '}' that closes open
 func (ps *parser) parseBlock(open token.Token) ast.Node {
 	block := ast.Block{Pos: open.Pos}
-	for !ps.consume("}") {
+	for {
+		for ps.consume(";") {
+		}
+		if ps.consume("}") {
+			break
+		}
 		if ps.PeekToken().IsEOS() {
 			ps.expected("'}'", open, "this '{' is never closed")
 		}
@@ -631,6 +660,9 @@ func (ps *parser) parseNamesList(main token.Token, what string) ([]string, bool)
 		if !ps.consume(",") {
 			ps.expected("',' or ')'", open, "this '(' opens "+what)
 		}
+		if ps.consume(")") {
+			break
+		}
 	}
 	return args, isVariadic
 }
@@ -645,7 +677,7 @@ func (ps *parser) parseArgsList() []ast.Node {
 	if !ps.PeekToken().IsSimple(")") {
 		for {
 			args = append(args, ps.parse(0, true))
-			if !ps.consume(",") {
+			if !ps.consume(",") || ps.PeekToken().IsSimple(")") {
 				break
 			}
 		}
@@ -681,6 +713,9 @@ func (ps *parser) parseObject(main token.Token) ast.Node {
 		}
 		if !ps.consume(",") {
 			ps.expected("',' or '}'", main, "this '{' opens the object")
+		}
+		if ps.consume("}") {
+			break
 		}
 	}
 
@@ -743,6 +778,15 @@ func (ps *parser) mustBeValue(node ast.Node, assignOK bool) {
 		what = "'break'"
 	case ast.Continue:
 		what = "'continue'"
+	case ast.Echo:
+		if assignOK {
+			return
+		}
+		what = "'echo'"
+	case ast.Conditional:
+		what = "an 'if' statement"
+	case ast.Switch:
+		what = "a 'switch' statement"
 	case ast.While, ast.For:
 		what = "a loop"
 	case ast.StructDefinition:
@@ -757,6 +801,12 @@ func (ps *parser) mustBeValue(node ast.Node, assignOK bool) {
 }
 
 func (ps *parser) parseNode(precedenceLevel int, asExpr bool) (node ast.Node) {
+	ps.depth++
+	if ps.depth > maxParseDepth {
+		ps.fail(ps.PeekToken().Pos, "expression is nested too deeply")
+	}
+	defer func() { ps.depth-- }()
+
 	// handle parentheses explicitly
 	if ps.consume("(") {
 		open := ps.last
@@ -772,11 +822,7 @@ func (ps *parser) parseNode(precedenceLevel int, asExpr bool) (node ast.Node) {
 
 	main := ps.PeekToken()
 	if main.IsEOS() {
-		// the end of the source only ends the program; inside any construct it is an error
-		if asExpr {
-			ps.fail(main.Pos, "unexpected end of source")
-		}
-		panic(errEOS)
+		ps.fail(main.Pos, "unexpected end of source")
 	}
 
 	switch {
@@ -920,7 +966,7 @@ func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) ast.N
 			if !ps.PeekToken().IsSimple(")") {
 				for {
 					args = append(args, ps.parse(0, true))
-					if !ps.consume(",") {
+					if !ps.consume(",") || ps.PeekToken().IsSimple(")") {
 						break
 					}
 				}

@@ -43,14 +43,18 @@ func (pkg *Package) Box() Value {
 	return Value{scalar: kindPackage, pointer: unsafe.Pointer(pkg)}
 }
 
-// Set binds a public constant symbol. Setting an existing symbol replaces its
-// value in place, so compiled code that refers to it sees the new value.
+// Set binds a public read-only symbol on the package. Immutable values such as
+// numbers, strings, functions and types may be folded by the compiler; mutable
+// containers such as objects, arrays and buffers are read dynamically so later
+// mutations are always visible.
 func (pkg *Package) Set(name string, value Value) *Package {
 	index := fields.Get(name)
 	if ref, exists := pkg.globals[index]; exists {
 		*ref.Value = value
+		ref.IsConstant = false
+		pkg.globals[index] = ref
 	} else {
-		pkg.globals[index] = pkgGlobal{Value: &value, IsPublic: true, IsStatic: true, IsConstant: true}
+		pkg.globals[index] = pkgGlobal{Value: &value, IsPublic: true, IsStatic: true, IsConstant: value.isImmutableConstant()}
 	}
 	return pkg
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/hxkhan/evie/vm/fields"
 )
@@ -92,7 +93,7 @@ var typeString = newBuiltinType("string", NewFunc("string", 1, func(c Call) (Val
 	return BoxString(arg.String()), nil
 }), methodTable(
 	newMethod("len", 0, func(c Call) (Value, error) {
-		return BoxNumber(float64(len(c.This().mustString()))), nil
+		return BoxNumber(float64(utf8.RuneCountInString(c.This().mustString()))), nil
 	}),
 	newMethod("trim", 0, func(c Call) (Value, error) {
 		return BoxString(strings.TrimSpace(c.This().mustString())), nil
@@ -138,11 +139,12 @@ var typeString = newBuiltinType("string", NewFunc("string", 1, func(c Call) (Val
 	}),
 	newVariadicMethod("slice", 1, func(c Call) (Value, error) {
 		str := c.This().mustString()
-		s, e, err := sliceArgs(c, len(str))
+		n := utf8.RuneCountInString(str)
+		s, e, err := sliceArgs(c, n)
 		if err != nil {
 			return Value{}, err
 		}
-		return BoxString(str[s:e]), nil
+		return BoxString(sliceStringRunes(str, n, s, e)), nil
 	}),
 ))
 

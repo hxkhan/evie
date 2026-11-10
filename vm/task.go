@@ -14,14 +14,19 @@ const (
 	taskFailed
 )
 
+type taskWaiter struct {
+	fn func(*Task)
+}
+
 // Task represents an asynchronous unit of execution with memoized state.
 type Task struct {
-	mu     sync.Mutex
-	done   chan struct{}
-	status taskStatus
-	result Value
-	err    exception
-	stop   *stopper // the run the task belongs to; nil for host tasks
+	mu      sync.Mutex
+	done    chan struct{}
+	status  taskStatus
+	result  Value
+	err     exception
+	stop    *stopper // the run the task belongs to; nil for host tasks
+	waiters []*taskWaiter
 }
 
 // newTaskInstance creates a new pending Task.
@@ -32,26 +37,67 @@ func newTaskInstance() *Task {
 	}
 }
 
+// onSettle calls fn as soon as the task settles (immediately if already settled)
+// and returns a cancel function that unregisters the waiter without leaking.
+// fn must not block.
+func (t *Task) onSettle(fn func(*Task)) func() {
+	t.mu.Lock()
+	if t.status != taskPending {
+		t.mu.Unlock()
+		fn(t)
+		return func() {}
+	}
+	w := &taskWaiter{fn: fn}
+	t.waiters = append(t.waiters, w)
+	t.mu.Unlock()
+
+	return func() {
+		t.mu.Lock()
+		for i, cur := range t.waiters {
+			if cur == w {
+				last := len(t.waiters) - 1
+				t.waiters[i] = t.waiters[last]
+				t.waiters[last] = nil
+				t.waiters = t.waiters[:last]
+				break
+			}
+		}
+		t.mu.Unlock()
+	}
+}
+
 // resolve marks the task as completed with a successful result.
 func (t *Task) resolve(res Value) {
 	t.mu.Lock()
+	var waiters []*taskWaiter
 	if t.status == taskPending {
 		t.result = res
 		t.status = taskCompleted
+		waiters = t.waiters
+		t.waiters = nil
 		close(t.done)
 	}
 	t.mu.Unlock()
+	for _, w := range waiters {
+		w.fn(t)
+	}
 }
 
 // reject marks the task as failed with an exception.
 func (t *Task) reject(err exception) {
 	t.mu.Lock()
+	var waiters []*taskWaiter
 	if t.status == taskPending {
 		t.err = err
 		t.status = taskFailed
+		waiters = t.waiters
+		t.waiters = nil
 		close(t.done)
 	}
 	t.mu.Unlock()
+	for _, w := range waiters {
+		w.fn(t)
+	}
 }
 
 // finish resolves or rejects the task depending on whether err is non-nil.

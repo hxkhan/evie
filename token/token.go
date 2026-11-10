@@ -44,7 +44,7 @@ func (p Pos) String() string {
 }
 
 const (
-	flag Type = iota // special: used for signaling things like eos
+	EOS Type = iota // end of source
 
 	Simple
 	Word
@@ -60,12 +60,11 @@ type Token struct {
 	Pos
 }
 
-// Checks if the token is signaling end-of-source
+// IsEOS reports whether the token signals end-of-source
 func (t Token) IsEOS() bool {
-	return t.Type == flag
+	return t.Type == EOS
 }
 
-// helper
 func (t Token) IsSimple(lit string) bool {
 	return t.Type == Simple && t.Literal == lit
 }
@@ -74,35 +73,10 @@ func (t Token) IsWord(lit string) bool {
 	return t.Type == Word && t.Literal == lit
 }
 
-func (t Token) IsAnyWord() bool {
-	return t.Type == Word
-}
-
-func (t Token) IsOneOfKeywords(lit ...string) bool {
-	for _, v := range lit {
-		if v == t.Literal {
-			return true
-		}
-	}
-	return false
-}
-
-func (t Token) IsOneOfSimples(lit ...string) bool {
-	if t.Type != Simple {
-		return false
-	}
-	for _, v := range lit {
-		if v == t.Literal {
-			return true
-		}
-	}
-	return false
-}
-
 // Describe names the token the way an error message should
 func (t Token) Describe() string {
 	switch t.Type {
-	case flag:
+	case EOS:
 		return "end of source"
 	case String:
 		return fmt.Sprintf("string %q", t.Literal)
@@ -120,8 +94,8 @@ func (t Token) String() string {
 
 func (t Type) String() string {
 	switch t {
-	case flag:
-		return "flag"
+	case EOS:
+		return "eos"
 	case Simple:
 		return "simple"
 	case Word:
@@ -133,5 +107,5 @@ func (t Type) String() string {
 	case Invalid:
 		return "invalid"
 	}
-	panic("func (Type) String() -> Unknown Type!")
+	return fmt.Sprintf("unknown(%d)", t)
 }

@@ -62,17 +62,19 @@ func (st *stops) newStopper(parent context.Context) *stopper {
 
 // newTaskStopper derives a child stopper for a spawned task. It stops when
 // parent stops or when the task itself is cancelled, and holds one use of
-// parent's scoped root until the task's fiber detaches.
+// parent until this task and any child tasks it spawns finish.
 func (st *stops) newTaskStopper(parent *stopper) *stopper {
 	parent.hold()
 	ctx, cancel := context.WithCancelCause(parent.ctx)
-	return &stopper{
+	s := &stopper{
 		ctx:    ctx,
 		cancel: cancel,
 		parent: parent,
 		root:   parent.root,
 		stops:  st,
 	}
+	s.users.Store(1)
+	return s
 }
 
 // scope makes a stopper for a run bound to ctx. The caller is its first user
@@ -92,28 +94,33 @@ func (st *stops) scope(ctx context.Context) *stopper {
 	return s
 }
 
-// hold records one more user of a scoped stopper
+// hold records one more user of a task stopper or scoped run stopper
 func (s *stopper) hold() {
-	if s.root != nil {
-		s.root.users.Add(1)
+	if s.parent != nil || s.root == s {
+		s.users.Add(1)
 	}
 }
 
-// drop gives up one use of a stopper; a task stopper detaches from its parent
-// context, and the last user of a scoped run stopper releases it
+// drop gives up one use of a stopper. A task stopper only detaches from its
+// parent context once the task and every child task it spawned have finished,
+// so a parent returning normally never cancels a surviving child task.
 func (s *stopper) drop() {
-	if s.parent != nil {
-		s.cancel(context.Canceled)
-	}
-	r := s.root
-	if r == nil || r.users.Add(-1) != 0 {
+	if s.parent == nil && s.root != s {
 		return
 	}
-	r.stops.mu.Lock()
-	delete(r.stops.scoped, r)
-	r.stops.mu.Unlock()
-	r.end() // finishing normally is not a reason for others to look
-	r.cancel(context.Canceled)
+	if s.users.Add(-1) != 0 {
+		return
+	}
+	if s.parent != nil {
+		s.cancel(context.Canceled)
+		s.parent.drop()
+		return
+	}
+	s.stops.mu.Lock()
+	delete(s.stops.scoped, s)
+	s.stops.mu.Unlock()
+	s.end() // finishing normally is not a reason for others to look
+	s.cancel(context.Canceled)
 }
 
 // stopsWith reports whether s stops whenever other stops

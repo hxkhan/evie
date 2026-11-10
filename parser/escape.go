@@ -25,7 +25,7 @@ func (ps *parser) unescape(text string, at token.Pos, extra string) string {
 			continue
 		}
 		if i+1 == len(text) {
-			ps.badEscape(text, i, at, "a backslash ends the string")
+			ps.badEscape(text, i, 1, at, extra, "a backslash ends the string")
 		}
 		next := text[i+1]
 		switch next {
@@ -41,8 +41,8 @@ func (ps *parser) unescape(text string, at token.Pos, extra string) string {
 			out.WriteByte(next)
 		default:
 			if strings.IndexByte(extra, next) < 0 {
-				r, _ := utf8.DecodeRuneInString(text[i+1:])
-				ps.badEscape(text, i, at, "unknown escape '\\"+string(r)+"'")
+				r, size := utf8.DecodeRuneInString(text[i+1:])
+				ps.badEscape(text, i, 1+size, at, extra, "unknown escape '\\"+string(r)+"'")
 			}
 			out.WriteByte(next)
 		}
@@ -52,18 +52,22 @@ func (ps *parser) unescape(text string, at token.Pos, extra string) string {
 }
 
 // badEscape stops parsing at the escape that starts at byte offset i of text
-func (ps *parser) badEscape(text string, i int, at token.Pos, msg string) {
+func (ps *parser) badEscape(text string, i, length int, at token.Pos, extra, msg string) {
 	pos := at
 	before := text[:i]
 	if nl := strings.LastIndexByte(before, '\n'); nl >= 0 {
 		pos.Line += strings.Count(before, "\n")
-		pos.Column = 1 + utf8.RuneCountInString(before[nl+1:])
+		pos.Column = 1 + len(before[nl+1:])
 	} else {
-		pos.Column += utf8.RuneCountInString(before)
+		pos.Column += len(before)
 	}
-	pos.Length = 2
+	pos.Length = length
 	err := ps.report(pos, msg)
 	err.Label = "not a valid escape"
-	err.Hint = `the escapes are \n \t \r \0 \\ and \"; write \\ for a backslash`
+	if extra != "" {
+		err.Hint = `the escapes are \n \t \r \0 \\ \" \` + "`" + ` \{ and \}; write \\ for a backslash`
+	} else {
+		err.Hint = `the escapes are \n \t \r \0 \\ and \"; write \\ for a backslash`
+	}
 	panic(err)
 }

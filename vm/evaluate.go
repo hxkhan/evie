@@ -45,15 +45,18 @@ func (vm *Instance) evaluate(node ast.Node) operand {
 
 	case ast.FieldAccess:
 		if lhs, ok := vm.evaluate(node.Lhs).(Value); ok {
-			// a package's var can change after this compiles, so only its
-			// constants fold; everything else is read when it runs
+			// only fold member reads on packages (public constants) and builtin types;
+			// never freeze fields of mutable containers like objects or struct instances
 			if pkg, ok := lhs.AsPackage(); ok {
-				if global, exists := pkg.globals[fields.Get(node.Rhs)]; !exists || !global.IsConstant {
+				if global, exists := pkg.globals[fields.Get(node.Rhs)]; !exists || !global.IsPublic || !global.IsConstant {
 					return nil
 				}
+				return *pkg.globals[fields.Get(node.Rhs)].Value
 			}
-			if v, exists := lhs.getField(fieldKeyOf(node.Rhs)); exists {
-				return v
+			if _, ok := lhs.asBuiltinType(); ok {
+				if v, exists := lhs.getField(fieldKeyOf(node.Rhs)); exists {
+					return v
+				}
 			}
 		}
 

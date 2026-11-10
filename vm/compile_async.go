@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"math"
 	"time"
 
 	"github.com/hxkhan/evie/ast"
@@ -106,7 +107,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 
 		if fn, isGoFunc := value.AsGoFunc(); isGoFunc {
 			if exc := fn.accepts(len(arguments)); exc != nil {
-				return Value{}, exc
+				return Value{}, exc.at(site)
 			}
 			params, exc := evalArgs(fbr, nil)
 			if exc != nil {
@@ -122,7 +123,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					this = &m.this
 				}
 				if exc := ufn.accepts(len(arguments) + boolToInt(this != nil)); exc != nil {
-					return Value{}, exc
+					return Value{}, exc.at(site)
 				}
 				params, exc := evalArgs(fbr, this)
 				if exc != nil {
@@ -137,7 +138,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 					this = &m.this
 				}
 				if exc := fn.accepts(len(arguments) + boolToInt(this != nil)); exc != nil {
-					return Value{}, exc
+					return Value{}, exc.at(site)
 				}
 				params, exc := evalArgs(fbr, this)
 				if exc != nil {
@@ -246,16 +247,22 @@ type outcome struct {
 }
 
 // settle waits for the first task to settle, or for a successful one when
-// successOnly is set, giving up the instance runner while it waits
+// successOnly is set, giving up the instance runner while it waits. Waiters
+// register directly on each task so no watcher goroutines are spawned or leaked.
 func settle(fbr *fiber, tasks []*Task, successOnly bool) (outcome, bool) {
 	outcomes := make(chan outcome, len(tasks))
-	for _, t := range tasks {
-		go func(task *Task) {
-			<-task.Done()
+	cancels := make([]func(), len(tasks))
+	for i, t := range tasks {
+		cancels[i] = t.onSettle(func(task *Task) {
 			res, err := task.outcome()
 			outcomes <- outcome{res: res, err: err}
-		}(t)
+		})
 	}
+	defer func() {
+		for _, cancel := range cancels {
+			cancel()
+		}
+	}()
 
 	if fbr.running {
 		fbr.unlock()
@@ -401,6 +408,9 @@ func (vm *Instance) emitAwaitTimeout(node ast.AwaitTimeout) instruction {
 		if !ok {
 			return Value{}, errorAt(site, "await.timeout: duration must be a number, got %s", durVal.TypeOf())
 		}
+		if math.IsNaN(ms) {
+			return Value{}, errorAt(site, "await.timeout: duration must not be NaN")
+		}
 
 		task, isTask := v.AsTask()
 		if !isTask {
@@ -418,6 +428,14 @@ func (vm *Instance) emitAwaitTimeout(node ast.AwaitTimeout) instruction {
 		if ms <= 0 {
 			task.Cancel()
 			return Value{}, errorAt(site, "await.timeout: timed out after %vms", ms)
+		}
+
+		if math.IsInf(ms, 1) || ms*float64(time.Millisecond) >= float64(math.MaxInt64) {
+			res, err := task.await(fbr)
+			if err != nil {
+				return res, err.at(site)
+			}
+			return res, nil
 		}
 
 		timer := time.NewTimer(time.Duration(ms * float64(time.Millisecond)))

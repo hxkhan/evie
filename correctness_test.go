@@ -1,9 +1,15 @@
 package evie_test
 
 import (
+	"context"
+	"errors"
 	"math"
+	"os"
+	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hxkhan/evie"
 	"github.com/hxkhan/evie/vm"
@@ -440,3 +446,199 @@ func TestParserOperatorAndPrecedenceFixes(t *testing.T) {
 		t.Fatalf("expected [24, 6, 9, 21, 10], got %s", val.String())
 	}
 }
+
+func TestStringUTF8RuneSemantics(t *testing.T) {
+	code := `package main imports("strings")
+	fn main() {
+		s := "héllo😀"
+		if s.len() != 6 || strings.len(s) != 6 {
+			throw error("rune length mismatch")
+		}
+		if s[0] != "h" || s[1] != "é" || s[5] != "😀" || s[-1] != "😀" || s[-5] != "é" {
+			throw error("rune indexing mismatch")
+		}
+		if s[1:5] != "éllo" || s[-2:] != "o😀" || s.slice(1, -1) != "éllo" || s.slice(1) != "éllo😀" {
+			throw error("rune slicing mismatch")
+		}
+		if !s[5]? || s[6]? || !s[-6]? || s[-7]? {
+			throw error("rune existence mismatch")
+		}
+		return true
+	}`
+	val, err := runCode(code)
+	if err != nil {
+		t.Fatalf("UTF-8 string test failed: %v", err)
+	}
+	if b, ok := val.AsBool(); !ok || !b {
+		t.Fatalf("expected true, got %v", val)
+	}
+}
+
+func TestHostMutableObjectNotFrozenAtCompileTime(t *testing.T) {
+	state := vm.NewPackage("state")
+	state.Set("cfg", vm.BoxObject(map[string]vm.Value{
+		"count": vm.BoxNumber(0),
+	}))
+	eng := evie.New(evie.Options{Packages: []*vm.Package{state}})
+	_, err := eng.Eval(`package main imports("state")
+	fn run() {
+		before := state.cfg.count
+		state.cfg.count = 42
+		after := state.cfg.count
+		return [before, after]
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	val, err := eng.Call("main.run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if val.String() != "[0, 42]" {
+		t.Fatalf("expected [0, 42], got %s", val.String())
+	}
+}
+
+func TestChildTaskSurvivesParentNormalExit(t *testing.T) {
+	code := `package main imports("time")
+	fn child() {
+		time.sleep(25)
+		return 99
+	}
+	fn parent() {
+		return go child()
+	}
+	fn main() {
+		t := go parent()
+		c := await t
+		return await c
+	}`
+	val, err := runCode(code)
+	if err != nil {
+		t.Fatalf("child task failed after parent exited normally: %v", err)
+	}
+	if n, _ := val.AsFloat64(); n != 99 {
+		t.Fatalf("expected 99, got %v", val)
+	}
+
+	// But a context deadline on the run still stops a surviving child task
+	eng := evie.New()
+	_, err = eng.Eval(`package main imports("time")
+	fn slowChild() {
+		time.sleep(60000)
+		return 1
+	}
+	fn parent() {
+		return go slowChild()
+	}
+	fn run() {
+		c := await go parent()
+		return await c
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	_, err = eng.CallContext(ctx, "main.run")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected DeadlineExceeded, got %v", err)
+	}
+}
+
+func TestAwaitRaceAndAnyDoNotLeakGoroutines(t *testing.T) {
+	eng := evie.New()
+	_, err := eng.Eval(`package main
+	fn fast(n) => n
+	fn raceMany() {
+		var sum := 0
+		var i := 0
+		while i < 200 {
+			sum += await.race(task(), go fast(1))
+			sum += await.any(task(), go fast(1))
+			i += 1
+		}
+		return sum
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	goruntime.GC()
+	before := goruntime.NumGoroutine()
+	val, err := eng.Call("main.raceMany")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := val.AsFloat64(); n != 400 {
+		t.Fatalf("expected 400, got %v", val)
+	}
+	eng.Close()
+	goruntime.GC()
+	after := goruntime.NumGoroutine()
+	if after > before+20 {
+		t.Fatalf("goroutine leak detected in await.race/any: before=%d after=%d", before, after)
+	}
+}
+
+func TestAwaitTimeoutSpecialDurations(t *testing.T) {
+	if _, err := runCode(`package main imports("math")
+	fn main() => await.timeout(go fn() { return 1 }(), math.nan)`); err == nil || !strings.Contains(err.Error(), "NaN") {
+		t.Fatalf("expected NaN error, got %v", err)
+	}
+
+	val, err := runCode(`package main imports("math", "time")
+	fn slow() { time.sleep(10); return 7 }
+	fn main() => await.timeout(go slow(), math.inf)`)
+	if err != nil {
+		t.Fatalf("await.timeout with +Inf failed: %v", err)
+	}
+	if n, _ := val.AsFloat64(); n != 7 {
+		t.Fatalf("expected 7, got %v", val)
+	}
+}
+
+func TestSemicolonsTrailingCommasAndAnonymousPackageDecls(t *testing.T) {
+	val, err := runCode(`package main imports("math",)
+	fn add(a, b,) {
+		x := a; y := b;
+		o := { first: x, second: y, };
+		return o.first + o.second
+	}
+	fn main() { return add(10, math.floor(5.9),) }`)
+	if err != nil {
+		t.Fatalf("semicolons/trailing commas failed: %v", err)
+	}
+	if n, _ := val.AsFloat64(); n != 15 {
+		t.Fatalf("expected 15, got %v", val)
+	}
+
+	for _, bad := range []string{
+		`package main
+		fn () {}`,
+		`package main
+		struct (x) {}`,
+	} {
+		if _, err := evie.Eval(bad); err == nil {
+			t.Errorf("expected compile error for unnamed top-level declaration: %s", bad)
+		}
+	}
+}
+
+func TestRunProjectIgnoresBrokenUnimportedSibling(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.ev"), []byte("package main\nfn main() => 123\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "broken.ev"), []byte("package unused\nfn bad( { @@@\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	val, err := evie.RunProject(dir)
+	if err != nil {
+		t.Fatalf("RunProject should ignore unimported broken sibling file, got: %v", err)
+	}
+	if n, _ := val.AsFloat64(); n != 123 {
+		t.Fatalf("expected 123, got %v", val)
+	}
+}
+

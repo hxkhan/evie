@@ -54,6 +54,11 @@ func TestParseErrors(t *testing.T) {
 		"x := await t1 + await t2":                                    "",
 		"x := await.all(t1, t2)[0]":                                   "",
 		"x := fn(n) { return n }(1)":                                  "",
+		"x := 1; y := 2; return x + y":                                "",
+		"fn main() { x := if true { 1 } }":                            "expected a value, found an 'if' statement",
+		"fn main() { x := switch 1 { case 1: 2 } }":                   "expected a value, found a 'switch' statement",
+		"fn main() { x := echo 1 }":                                   "expected a value, found 'echo'",
+		strings.Repeat("(", 300) + "1" + strings.Repeat(")", 300):     "nested too deeply",
 	}
 	for src, want := range cases {
 		node, err := parser.Parse([]byte(src))

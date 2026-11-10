@@ -279,6 +279,9 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc exception) {
 		vm.cp.src = it.src
 		node := it.node
 		if fn, isFn := node.(ast.Fn); isFn {
+			if fn.Name == "" {
+				panic(vm.compileErrorAt(fn, "cannot declare an fn statement with no name"))
+			}
 			index := fields.Get(fn.Name)
 			if _, exists := this.globals[index]; exists {
 				panic(vm.compileErrorAt(fn, "'%s' is declared twice in this package", fn.Name))
@@ -292,6 +295,9 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc exception) {
 		}
 
 		if str, isStruct := node.(ast.StructDefinition); isStruct {
+			if str.Name == "" {
+				panic(vm.compileErrorAt(str, "cannot declare a struct with no name"))
+			}
 			index := fields.Get(str.Name)
 			if _, exists := this.globals[index]; exists {
 				panic(vm.compileErrorAt(str, "'%s' is declared twice in this package", str.Name))

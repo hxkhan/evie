@@ -148,6 +148,19 @@ func (x Value) IsNil() bool {
 	return x.pointer == nil
 }
 
+// isImmutableConstant reports whether a value can safely be folded into
+// compiled code as a constant without freezing mutable state
+func (x Value) isImmutableConstant() bool {
+	if isKnown(x.pointer) {
+		return true
+	}
+	switch x.scalar {
+	case kindString, kindUserFn, kindGoFunc, kindStruct, kindBuiltinType, kindPackage:
+		return true
+	}
+	return false
+}
+
 func (x Value) AsFloat64() (f float64, ok bool) {
 	return math.Float64frombits(x.scalar), x.pointer == f64Type
 }

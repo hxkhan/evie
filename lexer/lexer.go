@@ -56,8 +56,8 @@ func (lex *Lexer) atSpan(typ token.Type, lit string, start, startLine, startCol,
 	return token.Token{Type: typ, Literal: lit, Pos: token.Pos{Line: startLine, Column: startCol, Length: length}}
 }
 
-func (lex *Lexer) flag(lit string) token.Token {
-	return token.Token{Type: token.Type(0), Literal: lit, Pos: token.Pos{Line: lex.line, Column: lex.cursor - lex.lineStart + 1, Length: 1}}
+func (lex *Lexer) eos() token.Token {
+	return token.Token{Type: token.EOS, Literal: "end of source", Pos: token.Pos{Line: lex.line, Column: lex.cursor - lex.lineStart + 1, Length: 1}}
 }
 
 func (lex *Lexer) composeInto(dst *[]token.Token) {
@@ -69,7 +69,7 @@ START:
 
 	switch current {
 	case iEOS:
-		*dst = append(*dst, lex.flag("end of source"))
+		*dst = append(*dst, lex.eos())
 		return
 	case ' ', '\t', '\r':
 		goto START

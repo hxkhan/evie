@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/parser"
 	"github.com/hxkhan/evie/vm"
@@ -201,19 +200,6 @@ func readSource(path string) (*diag.Source, error) {
 	return diag.NewSource(display(path), data), nil
 }
 
-// packageName parses a source far enough to tell the package it declares;
-// a bare script declares none
-func packageName(src *diag.Source) (string, error) {
-	node, err := parser.ParseSource(src)
-	if err != nil {
-		return "", err
-	}
-	if pkg, ok := node.(ast.Package); ok {
-		return pkg.Name, nil
-	}
-	return "", nil
-}
-
 // evalPackage compiles sources as one package and records them as loaded. A
 // package imported while another loads stops with the importer's context.
 func (e *Engine) evalPackage(paths []string, sources []*diag.Source) (*vm.Package, error) {
@@ -253,12 +239,7 @@ func (e *Engine) loadFilePackage(filePath string) (*vm.Package, error) {
 	if err != nil {
 		return nil, err
 	}
-	switch name, err := packageName(src); {
-	case err != nil:
-		return nil, err
-	case name == "":
-		return nil, fmt.Errorf("%s does not declare a package", src.Name)
-	case name == "main":
+	if parser.PeekPackageName(src) == "main" {
 		return nil, fmt.Errorf("%s declares package main, which cannot be imported", src.Name)
 	}
 
@@ -353,11 +334,7 @@ func (e *Engine) RunFileContext(ctx context.Context, filePath string) (vm.Value,
 	if err != nil {
 		return vm.Value{}, err
 	}
-	name, err := packageName(src)
-	if err != nil {
-		return vm.Value{}, err
-	}
-	if name == "" {
+	if parser.PeekPackageName(src) == "" {
 		// a bare script runs as it is and its value is the result
 		result, err := e.EvalSourceContext(ctx, src)
 		if err != nil {
@@ -406,11 +383,7 @@ func (e *Engine) RunProjectContext(ctx context.Context, dirPath string) (vm.Valu
 		if err != nil {
 			return vm.Value{}, err
 		}
-		name, err := packageName(src)
-		if err != nil {
-			return vm.Value{}, err
-		}
-		if name == "main" {
+		if parser.PeekPackageName(src) == "main" {
 			paths, sources = append(paths, file), append(sources, src)
 		}
 	}

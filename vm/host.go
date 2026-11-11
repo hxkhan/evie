@@ -62,7 +62,7 @@ func (t *HostType) Name() string {
 }
 
 // Method registers a method; arity counts the arguments after the receiver,
-// which the native reads with Host(0)
+// which the native reads with HostArg[T](c, 0)
 func (t *HostType) Method(name string, arity int, fn NativeFn) *GoFunc {
 	gf := newMethod(name, arity, fn)
 	t.typ.Fields[fields.Get(name)] = BoxGoFunc(gf)
@@ -148,7 +148,10 @@ func (hv *hostValue) equals(other *hostValue) bool {
 	if hv.typ.Equals != nil {
 		return hv.typ.Equals(hv.val, other.val)
 	}
-	if hv.typ.goType.Comparable() {
+	if hv.val == nil || other.val == nil {
+		return hv.val == other.val
+	}
+	if reflect.TypeOf(hv.val).Comparable() && reflect.TypeOf(other.val).Comparable() {
 		return hv.val == other.val
 	}
 	return hv == other

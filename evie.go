@@ -8,6 +8,8 @@ package evie
 
 import (
 	"errors"
+	goio "io"
+	"path/filepath"
 
 	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/std/fs"
@@ -33,11 +35,14 @@ var stdlib = map[string]func() *vm.Package{
 // relative imports resolved against the entry file, and no host packages.
 type Options struct {
 	NoStdlib bool                                   // do not offer the standard library packages
+	Stdlib   []string                               // when non-empty, only allow these standard library packages (e.g. "math", "strings", "json")
 	Packages []*vm.Package                          // host packages, importable by their names
 	Resolve  func(path string) (*vm.Package, error) // consulted for an import before the filesystem
 	Root     string                                 // directory that relative imports resolve against; the entry file's directory when empty
 	Prelude  *vm.Package                            // symbols visible to every script without an import
 	Args     []string                               // arguments passed to main when it accepts parameters
+	Stdin    goio.Reader                            // standard input for the io package; defaults to os.Stdin
+	Stdout   goio.Writer                            // standard output for the io package; defaults to os.Stdout
 
 	Debug Debug // switches for working on Evie itself
 }
@@ -60,19 +65,39 @@ func New(opts ...Options) *Engine {
 		opt = opts[0]
 	}
 
+	root := opt.Root
+	if root != "" {
+		if abs, err := filepath.Abs(root); err == nil {
+			root = abs
+		}
+	}
+
+	var stdAllow map[string]bool
+	if len(opt.Stdlib) > 0 {
+		stdAllow = make(map[string]bool, len(opt.Stdlib))
+		for _, name := range opt.Stdlib {
+			stdAllow[name] = true
+		}
+	}
+
 	e := &Engine{
 		opts:         opt,
-		root:         opt.Root,
+		root:         root,
+		stdAllow:     stdAllow,
 		packages:     make(map[string]*vm.Package, len(opt.Packages)),
 		filePackages: make(map[string]*vm.Package),
 		dirPackages:  make(map[string]*vm.Package),
 		loading:      make(map[string]bool),
 	}
 	for _, pkg := range opt.Packages {
-		e.packages[pkg.Name()] = pkg
+		if pkg == nil {
+			continue
+		}
+		// clone the package wrapper so per-engine hints never mutate the caller's Package
+		e.packages[pkg.Name()] = pkg.Clone()
 	}
 
-	e.Instance = vm.New(vm.Options{
+	e.vm = vm.New(vm.Options{
 		Resolver:        e.resolve,
 		Prelude:         opt.Prelude,
 		LogCaptures:     opt.Debug.LogCaptures,

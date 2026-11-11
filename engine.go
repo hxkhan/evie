@@ -6,26 +6,28 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/parser"
+	"github.com/hxkhan/evie/std/io"
 	"github.com/hxkhan/evie/vm"
 )
 
 // Engine is a VM instance together with everything needed to load programs:
-// host packages, the standard library and files found through imports. The
-// embedded Instance provides Call, Lookup, SetStatic and the lower-level API.
+// host packages, the standard library and files found through imports.
 //
 // An engine runs one program. Packages are identified by the file or folder
 // they come from, and each package name can be loaded once.
 type Engine struct {
-	*vm.Instance
+	vm *vm.Instance
 
 	opts         Options
 	root         string
-	packages     map[string]*vm.Package // host packages by name
+	stdAllow     map[string]bool        // when non-nil, restricts stdlib imports to these names
+	packages     map[string]*vm.Package // host packages by name (cloned per engine)
 	dirStack     []string
 	filePackages map[string]*vm.Package
 	dirPackages  map[string]*vm.Package
@@ -38,35 +40,68 @@ type Engine struct {
 // errRanAlready is returned when an engine is asked to run a second program
 var errRanAlready = errors.New("this engine already ran a program; create a new engine for each program")
 
-// LoadedFiles returns every file that has been evaluated, in order
+// LoadedFiles returns a copy of every file path that has been evaluated, in order
 func (e *Engine) LoadedFiles() []string {
-	return e.loadedFiles
+	return slices.Clone(e.loadedFiles)
+}
+
+// Call looks up a callable by path (such as "main.add"), boxes the Go arguments
+// with BoxAny and invokes it on a borrowed fiber.
+func (e *Engine) Call(path string, args ...any) (vm.Value, error) {
+	return e.vm.Call(path, args...)
+}
+
+// CallContext is Call bound to ctx: when ctx is done, the call and any tasks it
+// starts stop with ctx's cause.
+func (e *Engine) CallContext(ctx context.Context, path string, args ...any) (vm.Value, error) {
+	return e.vm.CallContext(ctx, path, args...)
+}
+
+// Lookup resolves a symbol from a loaded package ("pkg.sym") or main/prelude ("sym").
+func (e *Engine) Lookup(path string) (vm.Value, bool) {
+	return e.vm.Lookup(path)
+}
+
+// SetStatic binds a symbol in the engine's prelude, visible to every package without an import.
+func (e *Engine) SetStatic(name string, val vm.Value) {
+	e.vm.SetStatic(name, val)
+}
+
+// Interrupt stops all code currently running or waiting in this engine.
+func (e *Engine) Interrupt() {
+	e.vm.Interrupt()
 }
 
 // Eval parses and runs a script. A script that declares a package is loaded
 // as that package and nil is returned; a bare script returns its result.
 func (e *Engine) Eval(script string) (vm.Value, error) {
-	return e.EvalSource(diag.NewSource("", []byte(script)))
+	return e.vm.EvalSource(diag.NewSource("", []byte(script)))
 }
 
 // EvalContext is Eval bound to ctx: when ctx is done, the script stops with an
 // error whose cause is ctx's cause, such as context.DeadlineExceeded
 func (e *Engine) EvalContext(ctx context.Context, script string) (vm.Value, error) {
-	return e.EvalSourceContext(ctx, diag.NewSource("", []byte(script)))
+	return e.vm.EvalSourceContext(ctx, diag.NewSource("", []byte(script)))
 }
 
 // Load compiles a source that declares a package and returns the package;
 // name is what errors call the source. Loading a package name a second time
 // is an error.
 func (e *Engine) Load(name string, src []byte) (*vm.Package, error) {
-	return e.EvalPackage(diag.NewSource(name, src))
+	return e.vm.EvalPackage(diag.NewSource(name, src))
+}
+
+// LoadContext is Load bound to ctx: when ctx is done, package initializers
+// stop with ctx's cause.
+func (e *Engine) LoadContext(ctx context.Context, name string, src []byte) (*vm.Package, error) {
+	return e.vm.EvalPackageContext(ctx, diag.NewSource(name, src))
 }
 
 // display names a file the way errors should show it: relative to the working
 // directory when it is below it
 func display(path string) string {
 	if wd, err := os.Getwd(); err == nil {
-		if rel, err := filepath.Rel(wd, path); err == nil && !strings.HasPrefix(rel, "..") {
+		if rel, err := filepath.Rel(wd, path); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return filepath.ToSlash(rel)
 		}
 	}
@@ -75,7 +110,7 @@ func display(path string) string {
 
 // Close waits for every task of the engine to finish
 func (e *Engine) Close() {
-	e.WaitForNoActivity()
+	e.vm.WaitForNoActivity()
 }
 
 // resolve finds a package for an import path. A name such as "io" is looked
@@ -86,15 +121,20 @@ func (e *Engine) resolve(importPath string) (*vm.Package, error) {
 	if isPathImport(importPath) {
 		return e.resolveFromFilesystem(importPath)
 	}
-	if pkg := e.Package(importPath); pkg != nil {
+	if pkg := e.vm.Package(importPath); pkg != nil {
 		return pkg, nil
 	}
 	if pkg, ok := e.packages[importPath]; ok {
 		e.noteShadowed(importPath, pkg, "host's")
 		return pkg, nil
 	}
-	if constructor, ok := stdlib[importPath]; ok && !e.opts.NoStdlib {
-		pkg := constructor()
+	if constructor, ok := stdlib[importPath]; ok && !e.opts.NoStdlib && (e.stdAllow == nil || e.stdAllow[importPath]) {
+		var pkg *vm.Package
+		if importPath == "io" && (e.opts.Stdin != nil || e.opts.Stdout != nil) {
+			pkg = io.ConstructWith(e.opts.Stdin, e.opts.Stdout)
+		} else {
+			pkg = constructor()
+		}
 		e.noteShadowed(importPath, pkg, "standard")
 		return pkg, nil
 	}
@@ -203,7 +243,7 @@ func readSource(path string) (*diag.Source, error) {
 // evalPackage compiles sources as one package and records them as loaded. A
 // package imported while another loads stops with the importer's context.
 func (e *Engine) evalPackage(paths []string, sources []*diag.Source) (*vm.Package, error) {
-	pkg, err := e.EvalPackage(sources...)
+	pkg, err := e.vm.EvalPackage(sources...)
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +253,7 @@ func (e *Engine) evalPackage(paths []string, sources []*diag.Source) (*vm.Packag
 
 // evalMain is evalPackage for the program's main package, bound to ctx
 func (e *Engine) evalMain(ctx context.Context, paths []string, sources []*diag.Source) error {
-	if _, err := e.EvalPackageContext(ctx, sources...); err != nil {
+	if _, err := e.vm.EvalPackageContext(ctx, sources...); err != nil {
 		return err
 	}
 	e.loadedFiles = append(e.loadedFiles, paths...)
@@ -336,7 +376,10 @@ func (e *Engine) RunFileContext(ctx context.Context, filePath string) (vm.Value,
 	}
 	if parser.PeekPackageName(src) == "" {
 		// a bare script runs as it is and its value is the result
-		result, err := e.EvalSourceContext(ctx, src)
+		result, err := e.vm.EvalSourceContext(ctx, src)
+		if ctx.Err() == nil {
+			e.Close()
+		}
 		if err != nil {
 			return vm.Value{}, err
 		}
@@ -411,7 +454,9 @@ func (e *Engine) runMain(ctx context.Context) (vm.Value, error) {
 		}
 	}
 	res, err := e.CallContext(ctx, "main.main", args...)
-	e.Close()
+	if ctx.Err() == nil {
+		e.Close()
+	}
 	return res, err
 }
 

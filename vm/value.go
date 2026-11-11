@@ -112,6 +112,9 @@ func BoxArray(arr *Array) Value {
 
 // BoxObject boxes an evie object
 func BoxObject(obj map[string]Value) Value {
+	if obj == nil {
+		obj = map[string]Value{}
+	}
 	return Value{scalar: kindObject, pointer: unsafe.Pointer(&obj)}
 }
 

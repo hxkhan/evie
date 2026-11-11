@@ -133,7 +133,7 @@ func (t *Task) outcome() (Value, exception) {
 func (t *Task) outcomeFor(fbr *fiber) (Value, exception) {
 	res, err := t.outcome()
 	if err != nil && err.fatal && (fbr == nil || !fbr.stop.done()) {
-		err = &Error{Report: err.Report, Code: err.Code, Cause: err.Cause}
+		err = &Error{Report: err.Report, code: err.code, Cause: err.Cause}
 	}
 	return res, err
 }
@@ -203,11 +203,17 @@ func (t *Task) Result() (Value, error) {
 }
 
 // Async runs fn on its own goroutine and returns a task scripts can await,
-// for natives whose work takes a while. An error fn returns is what awaiting
-// the task throws.
+// for natives whose work takes a while. An error or panic from fn becomes what
+// awaiting the task throws. Prefer Call.Async inside a native so the task is
+// tied to the engine's lifecycle and cancellation context.
 func Async(fn func() (Value, error)) Value {
 	task := newTaskInstance()
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				task.reject(recovered(r))
+			}
+		}()
 		res, err := fn()
 		task.finish(res, toException(err))
 	}()

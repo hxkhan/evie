@@ -12,7 +12,7 @@ import (
 
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/diag"
-	"github.com/hxkhan/evie/ds"
+	"github.com/hxkhan/evie/internal/ds"
 	"github.com/hxkhan/evie/parser"
 	"github.com/hxkhan/evie/vm/fields"
 )
@@ -72,9 +72,11 @@ type Options struct {
 }
 
 func New(opts Options) (vm *Instance) {
-	prelude := opts.Prelude
-	if prelude == nil {
+	var prelude *Package
+	if opts.Prelude == nil {
 		prelude = NewPackage("prelude")
+	} else {
+		prelude = opts.Prelude.Clone()
 	}
 	for name, value := range builtins {
 		if !prelude.Has(name) {

@@ -2,7 +2,7 @@ package vm
 
 import (
 	"github.com/hxkhan/evie/ast"
-	"github.com/hxkhan/evie/ds"
+	"github.com/hxkhan/evie/internal/ds"
 )
 
 func (vm *Instance) emitReturn(node ast.Return) instruction {

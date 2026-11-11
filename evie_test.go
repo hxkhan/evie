@@ -59,7 +59,7 @@ func runCode(code string) (resVal vm.Value, retErr error) {
 	}
 
 	res, exc := fn.Call()
-	evm.WaitForNoActivity()
+	evm.Close()
 	if exc != nil {
 		return res, exc
 	}

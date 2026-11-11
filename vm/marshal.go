@@ -3,6 +3,7 @@ package vm
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"unsafe"
@@ -12,6 +13,10 @@ import (
 
 // BoxAny converts any Go value into an Evie Value.
 func BoxAny(v any) (Value, error) {
+	return boxAny(v, nil)
+}
+
+func boxAny(v any, seen map[uintptr]bool) (Value, error) {
 	if v == nil {
 		return Value{}, nil
 	}
@@ -57,15 +62,32 @@ func BoxAny(v any) (Value, error) {
 	case []Value:
 		return BoxArray(NewArray(val...)), nil
 	case *Array:
+		if val == nil {
+			return Value{}, nil
+		}
 		return BoxArray(val), nil
 	case Array:
 		return BoxArray(&val), nil
 	case map[string]Value:
 		return BoxObject(val), nil
 	case map[string]any:
+		if val == nil {
+			return BoxObject(nil), nil
+		}
+		ptr := reflect.ValueOf(val).Pointer()
+		if len(val) > 0 && ptr != 0 {
+			if seen[ptr] {
+				return Value{}, fmt.Errorf("cannot box cyclic map")
+			}
+			if seen == nil {
+				seen = make(map[uintptr]bool)
+			}
+			seen[ptr] = true
+			defer delete(seen, ptr)
+		}
 		obj := make(map[string]Value, len(val))
 		for k, item := range val {
-			boxed, err := BoxAny(item)
+			boxed, err := boxAny(item, seen)
 			if err != nil {
 				return Value{}, err
 			}
@@ -73,9 +95,20 @@ func BoxAny(v any) (Value, error) {
 		}
 		return BoxObject(obj), nil
 	case []any:
+		ptr := reflect.ValueOf(val).Pointer()
+		if len(val) > 0 && ptr != 0 {
+			if seen[ptr] {
+				return Value{}, fmt.Errorf("cannot box cyclic slice")
+			}
+			if seen == nil {
+				seen = make(map[uintptr]bool)
+			}
+			seen[ptr] = true
+			defer delete(seen, ptr)
+		}
 		items := make([]Value, len(val))
 		for i, item := range val {
-			boxed, err := BoxAny(item)
+			boxed, err := boxAny(item, seen)
 			if err != nil {
 				return Value{}, err
 			}
@@ -101,18 +134,33 @@ func BoxAny(v any) (Value, error) {
 		}
 		return BoxArray(NewArray(items...)), nil
 	case *GoFunc:
+		if val == nil {
+			return Value{}, nil
+		}
 		return BoxGoFunc(val), nil
 	case GoFunc:
 		return BoxGoFunc(&val), nil
 	case NativeFn:
+		if val == nil {
+			return Value{}, nil
+		}
 		return BoxGoFunc(NewVariadic("native", 0, val)), nil
 	case *userFn:
-		return boxUserFn(*val), nil
+		if val == nil {
+			return Value{}, nil
+		}
+		return boxUserFnPtr(val), nil
 	case userFn:
 		return boxUserFn(val), nil
 	case *Task:
+		if val == nil {
+			return Value{}, nil
+		}
 		return boxTask(val), nil
 	case *Error:
+		if val == nil {
+			return Value{}, nil
+		}
 		return boxError(val), nil
 	case error:
 		return boxError(customError("%s", val.Error())), nil
@@ -129,12 +177,35 @@ func BoxAny(v any) (Value, error) {
 		if rv.IsNil() {
 			return Value{}, nil
 		}
-		return BoxAny(rv.Elem().Interface())
+		ptr := rv.Pointer()
+		if ptr != 0 {
+			if seen[ptr] {
+				return Value{}, fmt.Errorf("cannot box cyclic pointer of type %T", v)
+			}
+			if seen == nil {
+				seen = make(map[uintptr]bool)
+			}
+			seen[ptr] = true
+			defer delete(seen, ptr)
+		}
+		return boxAny(rv.Elem().Interface(), seen)
 
 	case reflect.Slice, reflect.Array:
+		if rv.Kind() == reflect.Slice && rv.Len() > 0 {
+			if ptr := rv.Pointer(); ptr != 0 {
+				if seen[ptr] {
+					return Value{}, fmt.Errorf("cannot box cyclic slice of type %T", v)
+				}
+				if seen == nil {
+					seen = make(map[uintptr]bool)
+				}
+				seen[ptr] = true
+				defer delete(seen, ptr)
+			}
+		}
 		items := make([]Value, rv.Len())
 		for i := 0; i < rv.Len(); i++ {
-			b, err := BoxAny(rv.Index(i).Interface())
+			b, err := boxAny(rv.Index(i).Interface(), seen)
 			if err != nil {
 				return Value{}, err
 			}
@@ -143,11 +214,26 @@ func BoxAny(v any) (Value, error) {
 		return BoxArray(NewArray(items...)), nil
 
 	case reflect.Map:
+		if rv.IsNil() {
+			return BoxObject(nil), nil
+		}
+		if rv.Len() > 0 {
+			if ptr := rv.Pointer(); ptr != 0 {
+				if seen[ptr] {
+					return Value{}, fmt.Errorf("cannot box cyclic map of type %T", v)
+				}
+				if seen == nil {
+					seen = make(map[uintptr]bool)
+				}
+				seen[ptr] = true
+				defer delete(seen, ptr)
+			}
+		}
 		obj := make(map[string]Value, rv.Len())
 		iter := rv.MapRange()
 		for iter.Next() {
 			keyStr := fmt.Sprint(iter.Key().Interface())
-			valBoxed, err := BoxAny(iter.Value().Interface())
+			valBoxed, err := boxAny(iter.Value().Interface(), seen)
 			if err != nil {
 				return Value{}, err
 			}
@@ -164,14 +250,17 @@ func BoxAny(v any) (Value, error) {
 				continue
 			}
 			name := f.Name
-			if tag := f.Tag.Get("json"); tag != "" && tag != "-" {
+			if tag := f.Tag.Get("json"); tag != "" {
+				if tag == "-" {
+					continue
+				}
 				parts := strings.Split(tag, ",")
 				if parts[0] != "" {
 					name = parts[0]
 				}
 			}
 			fieldVal := rv.Field(i).Interface()
-			boxed, err := BoxAny(fieldVal)
+			boxed, err := boxAny(fieldVal, seen)
 			if err != nil {
 				return Value{}, err
 			}
@@ -180,6 +269,9 @@ func BoxAny(v any) (Value, error) {
 		return BoxObject(obj), nil
 
 	case reflect.Func:
+		if rv.IsNil() {
+			return Value{}, nil
+		}
 		return BoxGoFunc(Reflect(v)), nil
 
 	default:
@@ -187,15 +279,30 @@ func BoxAny(v any) (Value, error) {
 	}
 }
 
+// isNilError safely checks whether a reflect.Value implementing error is nil
+func isNilError(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Interface, reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan:
+		return v.IsNil()
+	}
+	return false
+}
+
 // Reflect wraps any Go function as a native through reflection, converting
 // each argument to the parameter type and boxing the results. It is the slow
 // but universal path; the typed wrappers in wrap.go avoid reflection.
 func Reflect(fn any) *GoFunc {
+	if fn == nil {
+		panic("Reflect: nil is not a function")
+	}
 	fnVal := reflect.ValueOf(fn)
-	fnType := fnVal.Type()
-	if fnType.Kind() != reflect.Func {
+	if !fnVal.IsValid() || fnVal.Kind() != reflect.Func {
 		panic(fmt.Sprintf("Reflect: %T is not a function", fn))
 	}
+	if fnVal.IsNil() {
+		panic(fmt.Sprintf("Reflect: nil function of type %T", fn))
+	}
+	fnType := fnVal.Type()
 	numIn := fnType.NumIn()
 	isVariadic := fnType.IsVariadic()
 	fixedCount := numIn
@@ -218,20 +325,21 @@ func Reflect(fn any) *GoFunc {
 			out = fnVal.Call(inArgs)
 		}
 
-		switch {
-		case len(out) == 0:
+		if len(out) == 0 {
 			return Value{}, nil
-		case len(out) == 1 && out[0].Type().Implements(errType):
-			if !out[0].IsNil() {
-				return Value{}, out[0].Interface().(error)
+		}
+		// if the last return value implements error, treat it as an error return
+		if out[len(out)-1].Type().Implements(errType) {
+			errVal := out[len(out)-1]
+			if !isNilError(errVal) {
+				return Value{}, errVal.Interface().(error)
 			}
-			return Value{}, nil
-		case len(out) == 1:
-			return BoxAny(out[0].Interface())
-		case len(out) == 2 && out[1].Type().Implements(errType):
-			if !out[1].IsNil() {
-				return Value{}, out[1].Interface().(error)
+			out = out[:len(out)-1]
+			if len(out) == 0 {
+				return Value{}, nil
 			}
+		}
+		if len(out) == 1 {
 			return BoxAny(out[0].Interface())
 		}
 
@@ -250,7 +358,7 @@ func Reflect(fn any) *GoFunc {
 }
 
 func marshalReflectArgs(c Call, fnType reflect.Type, numIn, fixedCount int, isVariadic bool) ([]reflect.Value, error) {
-	if c.fbr.lock() {
+	if c.fbr.vm != nil && c.fbr.lock() {
 		defer c.fbr.unlock()
 	}
 	inArgs := make([]reflect.Value, numIn)
@@ -286,12 +394,30 @@ func marshalReflectArgs(c Call, fnType reflect.Type, numIn, fixedCount int, isVa
 	return inArgs, nil
 }
 
+// convertNamed converts v to targetType when targetType is a defined/named type
+// with the same underlying kind (e.g. time.Duration or type ID int64).
+func convertNamed(v any, targetType reflect.Type) any {
+	rv := reflect.ValueOf(v)
+	if rv.Type() != targetType && rv.Type().ConvertibleTo(targetType) {
+		return rv.Convert(targetType).Interface()
+	}
+	return v
+}
+
 func unmarshalToType(val Value, targetType reflect.Type) (any, error) {
 	if targetType == reflect.TypeOf(Value{}) {
 		return val, nil
 	}
 
 	if hv, _, ok := val.AsHost(); ok {
+		if hv == nil {
+			switch targetType.Kind() {
+			case reflect.Pointer, reflect.Slice, reflect.Map, reflect.Interface:
+				return nil, nil
+			default:
+				return nil, fmt.Errorf("cannot pass nil %s as %v", val.TypeOf(), targetType)
+			}
+		}
 		if reflect.TypeOf(hv).AssignableTo(targetType) {
 			return hv, nil
 		}
@@ -308,77 +434,127 @@ func unmarshalToType(val Value, targetType reflect.Type) (any, error) {
 	}
 
 	if targetType.Kind() == reflect.Interface {
-		return val.ToGo(), nil
+		goVal := val.ToGo()
+		if targetType.NumMethod() == 0 {
+			return goVal, nil
+		}
+		if goVal != nil && reflect.TypeOf(goVal).AssignableTo(targetType) {
+			return goVal, nil
+		}
+		return nil, fmt.Errorf("cannot pass %s as %v", val.TypeOf(), targetType)
 	}
 
 	switch targetType.Kind() {
 	case reflect.Bool:
-		if b, ok := val.AsBool(); ok {
-			return b, nil
+		var b bool
+		if bv, ok := val.AsBool(); ok {
+			b = bv
+		} else {
+			b = val.IsTruthy()
 		}
-		return val.IsTruthy(), nil
+		return convertNamed(b, targetType), nil
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		if n, ok := val.AsFloat64(); ok {
-			v := int64(n)
-			switch targetType.Kind() {
-			case reflect.Int:
-				return int(v), nil
-			case reflect.Int8:
-				return int8(v), nil
-			case reflect.Int16:
-				return int16(v), nil
-			case reflect.Int32:
-				return int32(v), nil
-			case reflect.Int64:
-				return v, nil
-			}
+		n, ok := val.AsFloat64()
+		if !ok {
+			return nil, fmt.Errorf("expected number for %v, got %s", targetType, val.TypeOf())
 		}
-		return nil, fmt.Errorf("expected number for %v, got %s", targetType, val.TypeOf())
+		if math.IsNaN(n) || math.IsInf(n, 0) || n != math.Trunc(n) {
+			return nil, fmt.Errorf("expected integer for %v, got %v", targetType, n)
+		}
+		var minV, maxExcl float64
+		switch targetType.Kind() {
+		case reflect.Int:
+			minV, maxExcl = float64(math.MinInt), -float64(math.MinInt)
+		case reflect.Int8:
+			minV, maxExcl = math.MinInt8, math.MaxInt8+1
+		case reflect.Int16:
+			minV, maxExcl = math.MinInt16, math.MaxInt16+1
+		case reflect.Int32:
+			minV, maxExcl = math.MinInt32, math.MaxInt32+1
+		case reflect.Int64:
+			minV, maxExcl = float64(math.MinInt64), -float64(math.MinInt64)
+		}
+		if n < minV || n >= maxExcl {
+			return nil, fmt.Errorf("value %v out of range for %v", n, targetType)
+		}
+		v := int64(n)
+		switch targetType.Kind() {
+		case reflect.Int:
+			return convertNamed(int(v), targetType), nil
+		case reflect.Int8:
+			return convertNamed(int8(v), targetType), nil
+		case reflect.Int16:
+			return convertNamed(int16(v), targetType), nil
+		case reflect.Int32:
+			return convertNamed(int32(v), targetType), nil
+		default:
+			return convertNamed(v, targetType), nil
+		}
 
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		if n, ok := val.AsFloat64(); ok {
-			v := uint64(n)
-			switch targetType.Kind() {
-			case reflect.Uint:
-				return uint(v), nil
-			case reflect.Uint8:
-				return uint8(v), nil
-			case reflect.Uint16:
-				return uint16(v), nil
-			case reflect.Uint32:
-				return uint32(v), nil
-			case reflect.Uint64:
-				return v, nil
-			}
+		n, ok := val.AsFloat64()
+		if !ok {
+			return nil, fmt.Errorf("expected number for %v, got %s", targetType, val.TypeOf())
 		}
-		return nil, fmt.Errorf("expected number for %v, got %s", targetType, val.TypeOf())
+		if math.IsNaN(n) || math.IsInf(n, 0) || n != math.Trunc(n) || n < 0 {
+			return nil, fmt.Errorf("expected non-negative integer for %v, got %v", targetType, n)
+		}
+		var maxExcl float64
+		switch targetType.Kind() {
+		case reflect.Uint:
+			maxExcl = float64(math.MaxUint) + 1
+		case reflect.Uint8:
+			maxExcl = math.MaxUint8 + 1
+		case reflect.Uint16:
+			maxExcl = math.MaxUint16 + 1
+		case reflect.Uint32:
+			maxExcl = math.MaxUint32 + 1
+		case reflect.Uint64:
+			maxExcl = float64(math.MaxUint64)
+		}
+		if n >= maxExcl {
+			return nil, fmt.Errorf("value %v out of range for %v", n, targetType)
+		}
+		v := uint64(n)
+		switch targetType.Kind() {
+		case reflect.Uint:
+			return convertNamed(uint(v), targetType), nil
+		case reflect.Uint8:
+			return convertNamed(uint8(v), targetType), nil
+		case reflect.Uint16:
+			return convertNamed(uint16(v), targetType), nil
+		case reflect.Uint32:
+			return convertNamed(uint32(v), targetType), nil
+		default:
+			return convertNamed(v, targetType), nil
+		}
 
 	case reflect.Float32:
 		if n, ok := val.AsFloat64(); ok {
-			return float32(n), nil
+			return convertNamed(float32(n), targetType), nil
 		}
 		return nil, fmt.Errorf("expected number for %v, got %s", targetType, val.TypeOf())
 
 	case reflect.Float64:
 		if n, ok := val.AsFloat64(); ok {
-			return n, nil
+			return convertNamed(n, targetType), nil
 		}
 		return nil, fmt.Errorf("expected number for %v, got %s", targetType, val.TypeOf())
 
 	case reflect.String:
 		if s, ok := val.AsString(); ok {
-			return s, nil
+			return convertNamed(s, targetType), nil
 		}
-		return val.String(), nil
+		return convertNamed(val.String(), targetType), nil
 
 	case reflect.Slice:
 		if targetType.Elem().Kind() == reflect.Uint8 {
 			if buf, ok := val.AsBuffer(); ok {
-				return buf, nil
+				return convertNamed(buf, targetType), nil
 			}
 			if s, ok := val.AsString(); ok {
-				return []byte(s), nil
+				return convertNamed([]byte(s), targetType), nil
 			}
 		}
 		// general slice
@@ -537,8 +713,8 @@ func (v Value) toGo(seen map[unsafe.Pointer]any) any {
 	if task, ok := v.AsTask(); ok {
 		return task
 	}
-	if fn, ok := v.asUserFn(); ok {
-		return fn
+	if _, ok := v.asUserFn(); ok {
+		return v
 	}
 	if gf, ok := v.AsGoFunc(); ok {
 		return gf

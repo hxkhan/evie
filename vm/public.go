@@ -30,6 +30,21 @@ func NewPackage(name string) *Package {
 	return &Package{name: name, globals: map[fields.ID]pkgGlobal{}}
 }
 
+// Clone returns an independent copy of the package's namespace so an engine can
+// attach per-engine hints or prelude builtins without mutating a package shared
+// with the caller or other engines.
+func (pkg *Package) Clone() *Package {
+	cp := &Package{
+		name:    pkg.name,
+		globals: make(map[fields.ID]pkgGlobal, len(pkg.globals)),
+		origin:  pkg.origin,
+	}
+	for id, g := range pkg.globals {
+		cp.globals[id] = g
+	}
+	return cp
+}
+
 func (pkg *Package) Name() string {
 	return pkg.name
 }

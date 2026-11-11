@@ -15,11 +15,10 @@ type bindings map[string]Binding
 type Scope struct {
 	blocks []bindings // each block-scope gets its own bindings table
 	index  int        // current free index in this whole scope
-	tmp    int        // the biggest value that index has ever gotten
 }
 
 func (sc *Scope) Capacity() int {
-	return max(sc.index, sc.tmp)
+	return sc.index
 }
 
 func (sc *Scope) OpenBlock() {
@@ -28,19 +27,6 @@ func (sc *Scope) OpenBlock() {
 
 func (sc *Scope) CloseBlock() {
 	sc.blocks = sc.blocks[:len(sc.blocks)-1]
-	// NOTE: Future optimisation -> we can decrement the index if nothing in the block escapes
-}
-
-func (sc *Scope) ReuseBlock() {
-	top := sc.blocks[len(sc.blocks)-1]
-	// save current index
-	// the alternative block might require less capacity
-	// in that case, we want to accomodate for the biggest
-	sc.tmp = max(sc.tmp, sc.index)
-	sc.index -= len(top)
-	for k := range top {
-		delete(top, k)
-	}
 }
 
 // Names lists every binding visible in the scope
@@ -76,20 +62,18 @@ func (sc *Scope) Reach(name string) (binding Binding, success bool) {
 }
 
 func (sc Scope) String() string {
-	s := strings.Builder{}
+	var s strings.Builder
 	s.WriteByte('{')
-
+	first := true
 	for _, lookup := range sc.blocks {
-		n := 0
 		for name, index := range lookup {
-			n++
-			s.WriteString(fmt.Sprintf("%v: %v", name, index))
-			if n != len(lookup) {
+			if !first {
 				s.WriteString(", ")
 			}
+			first = false
+			fmt.Fprintf(&s, "%v: %v", name, index)
 		}
 	}
-
 	s.WriteByte('}')
 	return s.String()
 }

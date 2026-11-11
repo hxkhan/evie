@@ -59,6 +59,43 @@ func (c Call) Context() context.Context {
 	return c.fbr.stop.ctx
 }
 
+// Async runs fn on its own goroutine tied to the calling instance's lifecycle
+// and cancellation context, returning a Task scripts can await. Engine.Close
+// waits for the task, task.cancel() or Interrupt() cancels ctx, and panics
+// become task errors rather than crashing the host.
+func (c Call) Async(fn func(ctx context.Context) (Value, error)) Value {
+	task := newTaskInstance()
+	if c.fbr.vm == nil {
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					task.reject(recovered(r))
+				}
+			}()
+			res, err := fn(c.Context())
+			task.finish(res, toException(err))
+		}()
+		return boxTask(task)
+	}
+	stop := c.fbr.vm.rt.newTaskStopper(c.fbr.stop)
+	task.stop = stop
+	c.fbr.vm.rt.wg.Go(func() {
+		defer stop.drop()
+		defer func() {
+			if r := recover(); r != nil {
+				task.reject(recovered(r))
+			}
+		}()
+		res, err := fn(stop.ctx)
+		if stop.done() && err == nil {
+			task.reject(stop.failure())
+			return
+		}
+		task.finish(res, toException(err))
+	})
+	return boxTask(task)
+}
+
 // Call invokes an evie callable on the same fiber, as a callback
 func (c Call) Call(fn Value, args ...Value) (Value, error) {
 	if c.fbr.vm == nil {
@@ -107,6 +144,19 @@ func (c Call) Int(i int) (int, error) {
 		return 0, c.typeError(i, "an integer")
 	}
 	return int(f), nil
+}
+
+// Int64 returns argument i as a 64-bit integer; a number with a fraction, NaN,
+// infinity or a value outside int64's range is an error
+func (c Call) Int64(i int) (int64, error) {
+	f, ok := c.Arg(i).AsFloat64()
+	if !ok {
+		return 0, c.typeError(i, "an integer")
+	}
+	if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) || f < math.MinInt64 || f >= -float64(math.MinInt64) {
+		return 0, c.typeError(i, "an integer")
+	}
+	return int64(f), nil
 }
 
 // String returns argument i as a string

@@ -29,7 +29,7 @@ func argOf[T any]() argConv[T] {
 	case int:
 		return func(c Call, i int) (T, error) { n, err := c.Int(i); return same[T](n), err }
 	case int64:
-		return func(c Call, i int) (T, error) { n, err := c.Int(i); return same[T](int64(n)), err }
+		return func(c Call, i int) (T, error) { n, err := c.Int64(i); return same[T](n), err }
 	case string:
 		return func(c Call, i int) (T, error) { s, err := c.String(i); return same[T](s), err }
 	case bool:
@@ -43,7 +43,7 @@ func argOf[T any]() argConv[T] {
 	}
 	if _, isAny := any(&zero).(*any); isAny {
 		return func(c Call, i int) (T, error) {
-			if c.fbr.lock() {
+			if c.fbr.vm != nil && c.fbr.lock() {
 				defer c.fbr.unlock()
 			}
 			return same[T](c.Arg(i).ToGo()), nil
@@ -209,9 +209,10 @@ func Func3E[A, B, C, R any](f func(A, B, C) (R, error)) *GoFunc {
 	})
 }
 
-// Native binds an already built native under a name
+// Native binds an already built native under a name without mutating fn in place
 func (pkg *Package) Native(name string, fn *GoFunc) *GoFunc {
-	fn.Name = name
-	pkg.Set(name, BoxGoFunc(fn))
-	return fn
+	cp := *fn
+	cp.Name = name
+	pkg.Set(name, BoxGoFunc(&cp))
+	return &cp
 }

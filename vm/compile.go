@@ -8,7 +8,7 @@ import (
 
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/diag"
-	"github.com/hxkhan/evie/ds"
+	"github.com/hxkhan/evie/internal/ds"
 	"github.com/hxkhan/evie/token"
 	"github.com/hxkhan/evie/vm/fields"
 )

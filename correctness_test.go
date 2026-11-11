@@ -1,8 +1,10 @@
 package evie_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	goio "io"
 	"math"
 	"os"
 	"path/filepath"
@@ -641,4 +643,210 @@ func TestRunProjectIgnoresBrokenUnimportedSibling(t *testing.T) {
 		t.Fatalf("expected 123, got %v", val)
 	}
 }
+
+type testCustomErr struct{ msg string }
+
+func (e testCustomErr) Error() string { return e.msg }
+
+func TestMarshalingAndReflectionSafety(t *testing.T) {
+	// BoxObject(nil) must not panic on write
+	eng := evie.New()
+	eng.SetStatic("empty", vm.BoxObject(nil))
+	val, err := eng.Eval(`empty.k = 7
+	return empty.k`)
+	if err != nil || val.String() != "7" {
+		t.Fatalf("BoxObject(nil) write failed: %v, %v", val, err)
+	}
+
+	// BoxAny cycle detection
+	cyclicMap := map[string]any{}
+	cyclicMap["self"] = cyclicMap
+	if _, err := vm.BoxAny(cyclicMap); err == nil || !strings.Contains(err.Error(), "cyclic") {
+		t.Fatalf("expected cyclic map error, got %v", err)
+	}
+	cyclicSlice := make([]any, 1)
+	cyclicSlice[0] = cyclicSlice
+	if _, err := vm.BoxAny(cyclicSlice); err == nil || !strings.Contains(err.Error(), "cyclic") {
+		t.Fatalf("expected cyclic slice error, got %v", err)
+	}
+
+	// BoxAny respects json:"-"
+	type secretStruct struct {
+		Public string `json:"pub"`
+		Hidden string `json:"-"`
+	}
+	boxed, err := vm.BoxAny(secretStruct{Public: "ok", Hidden: "nope"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := boxed.Field("Hidden"); exists {
+		t.Fatal(`json:"-" field must not be boxed`)
+	}
+	if pub, ok := boxed.Field("pub"); !ok || pub.String() != "ok" {
+		t.Fatalf("expected pub=ok, got %v, %v", pub, ok)
+	}
+
+	// Reflect with named types, non-empty interface rejection, concrete error struct, and 3-return error
+	type userID int64
+	pkg := vm.NewPackage("ref")
+	pkg.Native("asDur", vm.Reflect(func(d time.Duration) int64 { return int64(d) }))
+	pkg.Native("asID", vm.Reflect(func(id userID) int64 { return int64(id) }))
+	pkg.Native("asUint", vm.Reflect(func(u uint8) int { return int(u) }))
+	pkg.Native("needReader", vm.Reflect(func(r goio.Reader) int { return 1 }))
+	pkg.Native("concreteErr", vm.Reflect(func() testCustomErr { return testCustomErr{msg: "concrete boom"} }))
+	pkg.Native("pairErr", vm.Reflect(func(fail bool) (int, string, error) {
+		if fail {
+			return 0, "", errors.New("triple fail")
+		}
+		return 1, "two", nil
+	}))
+
+	eng2 := evie.New(evie.Options{Packages: []*vm.Package{pkg}})
+	_, err = eng2.Eval(`package main imports("ref")
+	fn okCases() => [ref.asDur(500), ref.asID(42), ref.asUint(200), ref.pairErr(false)]
+	fn badUint() => ref.asUint(-1)
+	fn badUintRange() => ref.asUint(300)
+	fn badReader() => ref.needReader("not a reader")
+	fn badConcreteErr() => ref.concreteErr()
+	fn badPairErr() => ref.pairErr(true)
+	fn myFn(x) => x + 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := eng2.Call("main.okCases")
+	if err != nil || res.String() != `[500, 42, 200, [1, "two"]]` {
+		t.Fatalf("okCases = %v, %v", res, err)
+	}
+	for _, fn := range []string{"main.badUint", "main.badUintRange", "main.badReader", "main.badConcreteErr", "main.badPairErr"} {
+		if _, err := eng2.Call(fn); err == nil {
+			t.Errorf("%s: expected error, got nil", fn)
+		}
+	}
+
+	// Value.ToGo on script function returns a public vm.Value, not unexported *userFn
+	fnVal, ok := eng2.Lookup("main.myFn")
+	if !ok {
+		t.Fatal("main.myFn not found")
+	}
+	goFn, ok := fnVal.ToGo().(vm.Value)
+	if !ok {
+		t.Fatalf("expected ToGo() on userFn to return vm.Value, got %T", fnVal.ToGo())
+	}
+	out, err := goFn.Call(vm.BoxNumber(9))
+	if err != nil || out.String() != "10" {
+		t.Fatalf("calling ToGo() vm.Value failed: %v, %v", out, err)
+	}
+
+	// Package.Native must not mutate the original *GoFunc.Name
+	shared := vm.Func1(func(x int) int { return x })
+	p1 := vm.NewPackage("p1")
+	p2 := vm.NewPackage("p2")
+	f1 := p1.Native("alpha", shared)
+	f2 := p2.Native("beta", shared)
+	if f1.Name != "alpha" || f2.Name != "beta" || shared.Name != "native" {
+		t.Fatalf("Package.Native mutated shared GoFunc names: f1=%q f2=%q shared=%q", f1.Name, f2.Name, shared.Name)
+	}
+}
+
+func TestAsyncPanicRecoveryAndCallAsync(t *testing.T) {
+	// vm.Async panic must become a catchable task error
+	panicTask := vm.Async(func() (vm.Value, error) {
+		panic("async boom")
+	})
+	eng := evie.New()
+	eng.SetStatic("pt", panicTask)
+	val, err := eng.Eval(`e := catch(await pt)
+	return e is error`)
+	if err != nil || val.String() != "true" {
+		t.Fatalf("expected caught panic error from vm.Async, got %v, %v", val, err)
+	}
+
+	// Call.Async cancels on task.cancel()
+	cancelled := make(chan struct{}, 1)
+	asyncPkg := vm.NewPackage("async")
+	asyncPkg.Func("waitCancel", 0, func(c vm.Call) (vm.Value, error) {
+		return c.Async(func(ctx context.Context) (vm.Value, error) {
+			<-ctx.Done()
+			cancelled <- struct{}{}
+			return vm.Value{}, context.Cause(ctx)
+		}), nil
+	})
+	eng2 := evie.New(evie.Options{Packages: []*vm.Package{asyncPkg}})
+	_, err = eng2.Eval(`package main imports("async")
+	fn main() {
+		t := async.waitCancel()
+		t.cancel()
+		e := catch(await t)
+		return e is error
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := eng2.Call("main.main")
+	if err != nil || res.String() != "true" {
+		t.Fatalf("Call.Async cancel failed: %v, %v", res, err)
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("Call.Async context was not cancelled by task.cancel()")
+	}
+	eng2.Close()
+}
+
+func TestPerEngineIsolationIOAndStdlibSandbox(t *testing.T) {
+	// Shared Prelude must not be mutated with builtins
+	prelude := vm.NewPackage("prelude")
+	prelude.Set("ans", vm.BoxNumber(42))
+	_ = evie.New(evie.Options{Prelude: prelude, Packages: []*vm.Package{nil}})
+	if prelude.Has("string") || prelude.Has("array") {
+		t.Fatal("evie.New mutated caller-provided Prelude with builtins")
+	}
+
+	// Per-engine Stdin/Stdout redirection and EOF -> nil
+	var out bytes.Buffer
+	in := strings.NewReader("Alice\nlast line")
+	eng := evie.New(evie.Options{
+		Stdin:  in,
+		Stdout: &out,
+	})
+	val, err := eng.Eval(`package main imports("io")
+	fn run() {
+		a := io.prompt("Name: ")
+		b := io.readln()
+		c := io.readln()
+		io.println("hi", a, b)
+		return [a, b, c == nil]
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = val
+	res, err := eng.Call("main.run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.String() != `["Alice", "last line", true]` {
+		t.Fatalf("unexpected io result: %s", res.String())
+	}
+	if out.String() != "Name: hi Alice last line\n" {
+		t.Fatalf("unexpected redirected stdout: %q", out.String())
+	}
+
+	// Options.Stdlib allowlist blocks fs/io while allowing math/strings
+	sandboxed := evie.New(evie.Options{Stdlib: []string{"math", "strings"}})
+	if _, err := sandboxed.Eval(`package main imports("math", "strings")
+	fn ok() => strings.upper("evie") + string(math.floor(2.9))`); err != nil {
+		t.Fatalf("allowed stdlib failed: %v", err)
+	}
+	if v, err := sandboxed.Call("main.ok"); err != nil || v.String() != "EVIE2" {
+		t.Fatalf("sandboxed call = %v, %v", v, err)
+	}
+
+	sandboxed2 := evie.New(evie.Options{Stdlib: []string{"math"}})
+	if _, err := sandboxed2.Eval(`package main imports("fs")`); err == nil {
+		t.Fatal("expected fs import to be blocked by Options.Stdlib allowlist")
+	}
+}
+
 

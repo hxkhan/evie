@@ -18,17 +18,17 @@ type fieldsID = fields.ID
 // back from a call that failed.
 type Error struct {
 	diag.Report
-	Code  int
 	Cause error
 
+	code  int  // distinguishes internal control-flow signals
 	fatal bool // the run was stopped; catch lets it pass
 }
 
 type exception = *Error
 
-var signalReturn = &Error{Report: diag.Report{Message: "return"}, Code: 0}
-var signalContinue = &Error{Report: diag.Report{Message: "continue"}, Code: 1}
-var signalBreak = &Error{Report: diag.Report{Message: "break"}, Code: 2}
+var signalReturn = &Error{Report: diag.Report{Message: "return"}, code: 0}
+var signalContinue = &Error{Report: diag.Report{Message: "continue"}, code: 1}
+var signalBreak = &Error{Report: diag.Report{Message: "break"}, code: 2}
 
 func (e *Error) Error() string {
 	return e.Report.Error()

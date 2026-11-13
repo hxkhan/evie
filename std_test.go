@@ -189,4 +189,67 @@ fn main() {
 	if err != nil || slept.String() != "true" {
 		t.Fatalf("time.sleep then time.clock: %v %v", slept, err)
 	}
+
+	stdCase(t, `time.parse("2026-01-02", "2006-01-02")`, "1767312000000")
+	stdFails(t, `time.sleep("x")`, "sleep: argument 1 must be a number")
+	stdFails(t, `time.wait(math.nan)`, "NaN")
+	stdFails(t, `time.format(0, "2006", "extra")`, "1 or 2 arguments")
+	stdFails(t, `time.format(math.nan)`, "finite")
+}
+
+func TestStdJSON(t *testing.T) {
+	code := `package main imports("json")
+	struct Point(x, y) {}
+	fn main() {
+		raw := json.encode({ a: [1, true, nil, "hi"], p: Point(3, 4) })
+		decoded := json.decode(raw)
+		return [raw, decoded.p.x, decoded.p.y, decoded.p.has("__struct")]
+	}`
+	val, err := runCode(code)
+	if err != nil {
+		t.Fatalf("json round-trip failed: %v", err)
+	}
+	want := `["{"a":[1,true,null,"hi"],"p":{"x":3,"y":4}}", 3, 4, false]`
+	if val.String() != want {
+		t.Fatalf("got %s, want %s", val.String(), want)
+	}
+
+	for _, bad := range []string{
+		`json.encode(fn() => 1)`,
+		`json.encode(task())`,
+		`json.encode(json)`,
+		`json.encode(error("e"))`,
+		`json.encode(buffer("hi"))`,
+		`json.encode(math.nan)`,
+		`json.encode(math.inf)`,
+		`a := []; a.push(a); json.encode(a)`,
+		`o := {}; o.self = o; json.encode(o)`,
+	} {
+		script := "package main imports(\"json\", \"math\")\nfn main() {\n\t" + bad + "\n}"
+		if _, err := runCode(script); err == nil {
+			t.Errorf("%s: expected json.encode error, got nil", bad)
+		}
+	}
+}
+
+func TestStdHardeningGuards(t *testing.T) {
+	stdCase(t, `math.isInf(math.inf) && math.isInf(-math.inf) && !math.isInf(1)`, "true")
+	stdCase(t, "strings.trimStart(\"\u00a0hi\")", "hi")
+	stdCase(t, "strings.trimEnd(\"hi\u00a0\")", "hi")
+	stdCase(t, `strings.lines("\n").len()`, "1")
+	stdCase(t, `strings.lines("").len()`, "0")
+
+	// Wide randomInt must not overflow/panic
+	val, err := runCode(`package main imports("math")
+	fn main() {
+		n := math.randomInt(-9000000000000000000, 9000000000000000000)
+		return n is number
+	}`)
+	if err != nil || val.String() != "true" {
+		t.Fatalf("wide randomInt failed: %v, %v", val, err)
+	}
+
+	stdFails(t, `math.clamp(5, 10, 0)`, "lower bound exceeds")
+	stdFails(t, `strings.repeat("a", 100000000)`, "maximum string size")
+	stdFails(t, `strings.padStart("a", 100000000, "x")`, "maximum string size")
 }

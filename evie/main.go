@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"regexp"
 	"runtime"
 	"runtime/debug"
 	"sort"
@@ -54,9 +53,16 @@ func main() {
 		return
 	}
 
+	hasCode := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "e" {
+			hasCode = true
+		}
+	})
+
 	var scriptArgs []string
 	switch {
-	case *code != "":
+	case hasCode:
 		scriptArgs = flag.Args()
 	case flag.NArg() >= 1:
 		scriptArgs = flag.Args()[1:]
@@ -78,7 +84,7 @@ func main() {
 	var res vm.Value
 	var err error
 
-	if *code != "" {
+	if hasCode {
 		res, err = runInline(eng, *code, scriptArgs)
 	} else {
 		target := flag.Arg(0)
@@ -102,23 +108,32 @@ func main() {
 	}
 }
 
-// standard lists the standard packages -e imports when the code names them
-var standard = []string{"fs", "io", "json", "math", "strings", "time"}
-
-var packageUse = regexp.MustCompile(`\b(` + strings.Join(standard, "|") + `)\.`)
+// standard lists the standard packages -e imports when the code references them
+var standard = map[string]bool{
+	"fs":      true,
+	"io":      true,
+	"json":    true,
+	"math":    true,
+	"strings": true,
+	"time":    true,
+}
 
 // runInline runs code from the command line. A program that declares its own
 // package runs as written; anything else becomes the body of main, returning
 // its value when it is a single expression.
 func runInline(eng *evie.Engine, code string, scriptArgs []string) (vm.Value, error) {
-	if strings.HasPrefix(strings.TrimSpace(code), "package ") {
+	if parser.PeekPackageName(diag.NewSource("-e", []byte(code))) != "" {
 		return runSource(eng, code, scriptArgs)
 	}
 
-	used := map[string]bool{}
-	for _, m := range packageUse.FindAllStringSubmatch(code, -1) {
-		used[m[1]] = true
+	// parse the code alone first, on the line it will have inside main, so a
+	// syntax error points into it rather than at the wrapper
+	node, err := parser.ParseSource(diag.NewSource("-e", []byte("\n"+code)))
+	if err != nil {
+		return vm.Value{}, err
 	}
+
+	used := collectStdImports(node)
 	imports := make([]string, 0, len(used))
 	for name := range used {
 		imports = append(imports, fmt.Sprintf("%q", name))
@@ -133,16 +148,163 @@ func runInline(eng *evie.Engine, code string, scriptArgs []string) (vm.Value, er
 	}
 	header += " fn main() {\n"
 
-	// parse the code alone first, on the line it will have inside main, so a
-	// syntax error points into it rather than at the wrapper
-	node, err := parser.ParseSource(diag.NewSource("-e", []byte("\n"+code)))
-	if err != nil {
-		return vm.Value{}, err
-	}
 	if block, ok := node.(ast.Block); ok && len(block.Code) == 1 && isExpression(block.Code[0]) {
 		return runSource(eng, header+"return "+code+"\n}", scriptArgs)
 	}
 	return runSource(eng, header+code+"\n}", scriptArgs)
+}
+
+// collectStdImports walks the parsed AST to find standard library packages
+// referenced as `pkg.member`, ignoring strings, comments, field names and
+// locally shadowed bindings.
+func collectStdImports(root ast.Node) map[string]bool {
+	used := map[string]bool{}
+	declared := map[string]bool{}
+
+	var collectDecls func(n ast.Node)
+	collectDecls = func(n ast.Node) {
+		switch n := n.(type) {
+		case ast.Block:
+			for _, s := range n.Code {
+				collectDecls(s)
+			}
+		case ast.Decl:
+			declared[n.Name] = true
+		case ast.Fn:
+			if n.Name != "" {
+				declared[n.Name] = true
+			}
+		case ast.StructDefinition:
+			if n.Name != "" {
+				declared[n.Name] = true
+			}
+		case ast.For:
+			if n.IndexVar != "" {
+				declared[n.IndexVar] = true
+			}
+			if n.ItemVar != "" {
+				declared[n.ItemVar] = true
+			}
+		}
+	}
+	collectDecls(root)
+
+	var walk func(n ast.Node)
+	walk = func(n ast.Node) {
+		if n == nil {
+			return
+		}
+		switch n := n.(type) {
+		case ast.Block:
+			for _, s := range n.Code {
+				walk(s)
+			}
+		case ast.FieldAccess:
+			if id, ok := n.Lhs.(ast.Ident); ok && standard[id.Name] && !declared[id.Name] {
+				used[id.Name] = true
+				return
+			}
+			walk(n.Lhs)
+		case ast.Decl:
+			walk(n.Value)
+		case ast.Assign:
+			walk(n.Lhs)
+			walk(n.Value)
+		case ast.BinOp:
+			walk(n.Lhs)
+			walk(n.Rhs)
+		case ast.MutableBinOp:
+			walk(n.Lhs)
+			walk(n.Rhs)
+		case ast.Plus:
+			walk(n.Value)
+		case ast.Neg:
+			walk(n.Value)
+		case ast.Not:
+			walk(n.Value)
+		case ast.IsInstanceOf:
+			walk(n.Lhs)
+			walk(n.Rhs)
+		case ast.Exists:
+			walk(n.Value)
+		case ast.Subscript:
+			walk(n.Lhs)
+			walk(n.Key)
+		case ast.Slice:
+			walk(n.Lhs)
+			walk(n.Start)
+			walk(n.End)
+		case ast.ArrayLiteral:
+			for _, el := range n.Elements {
+				walk(el)
+			}
+		case ast.Object:
+			for _, f := range n.Fields {
+				walk(f.Value)
+			}
+		case ast.StringTemplate:
+			for _, a := range n.Args {
+				walk(a)
+			}
+		case ast.Call:
+			walk(n.Fn)
+			for _, a := range n.Args {
+				walk(a)
+			}
+		case ast.Fn:
+			walk(n.Action)
+		case ast.StructDefinition:
+			walk(n.Action)
+		case ast.Conditional:
+			walk(n.Condition)
+			walk(n.Action)
+			walk(n.Otherwise)
+		case ast.While:
+			walk(n.Condition)
+			walk(n.Action)
+		case ast.For:
+			walk(n.Collection)
+			walk(n.Action)
+		case ast.Switch:
+			walk(n.Value)
+			for _, c := range n.Cases {
+				for _, v := range c.Values {
+					walk(v)
+				}
+				walk(c.Action)
+			}
+			walk(n.Default)
+		case ast.Return:
+			walk(n.Value)
+		case ast.Throw:
+			walk(n.Value)
+		case ast.Catch:
+			walk(n.Action)
+		case ast.Echo:
+			walk(n.Value)
+		case ast.Go:
+			walk(n.Fn)
+		case ast.Await:
+			walk(n.Task)
+		case ast.AwaitAll:
+			for _, t := range n.Tasks {
+				walk(t)
+			}
+		case ast.AwaitAny:
+			for _, t := range n.Tasks {
+				walk(t)
+			}
+		case ast.AwaitRace:
+			for _, t := range n.Tasks {
+				walk(t)
+			}
+		case ast.AwaitTimeout:
+			walk(n.Task)
+			walk(n.Timeout)
+		}
+	}
+	walk(root)
+	return used
 }
 
 // isExpression reports whether a parsed top-level node has a value to print
@@ -161,18 +323,19 @@ func runSource(eng *evie.Engine, src string, scriptArgs []string) (vm.Value, err
 	if _, err := eng.Load("-e", []byte(src)); err != nil {
 		return vm.Value{}, err
 	}
-	main, ok := eng.Lookup("main.main")
-	if !ok || !main.IsCallable() {
-		return vm.Value{}, errors.New("-e: the program has no main function")
+	mainFn, ok := eng.Lookup("main.main")
+	if !ok || !mainFn.IsCallable() {
+		eng.Close()
+		return vm.Value{}, nil
 	}
-	var args []vm.Value
-	if len(scriptArgs) > 0 && main.AcceptsArgs() {
-		args = make([]vm.Value, len(scriptArgs))
+	var args []any
+	if len(scriptArgs) > 0 && mainFn.AcceptsArgs() {
+		args = make([]any, len(scriptArgs))
 		for i, arg := range scriptArgs {
-			args[i] = vm.BoxString(arg)
+			args[i] = arg
 		}
 	}
-	res, err := main.Call(args...)
+	res, err := eng.Call("main.main", args...)
 	eng.Close()
 	return res, err
 }
@@ -222,7 +385,7 @@ func stopOnInterrupt(eng *evie.Engine) {
 // script stopped by Ctrl+C, as shells expect
 func report(err error) {
 	info, statErr := os.Stderr.Stat()
-	colors := statErr == nil && info.Mode()&os.ModeCharDevice != 0 && os.Getenv("NO_COLOR") == ""
+	colors := statErr == nil && info.Mode()&os.ModeCharDevice != 0 && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
 	fmt.Fprint(os.Stderr, evie.Format(err, colors))
 	if errors.Is(err, vm.ErrInterrupted) {
 		os.Exit(130)

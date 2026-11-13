@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -193,6 +194,25 @@ func (e *Engine) resolveFromFilesystem(importPath string) (*vm.Package, error) {
 	return nil, fmt.Errorf("not found; looked for %s", strings.Join(tried, " and "))
 }
 
+// canonicalKey normalizes a path for cache and cycle-detection maps so symlinks
+// and Windows case differences refer to the same package.
+func canonicalKey(absPath string) string {
+	key := absPath
+	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+		key = resolved
+	}
+	if goruntime.GOOS == "windows" {
+		key = strings.ToLower(key)
+	}
+	return key
+}
+
+func isDotRelative(path string) bool {
+	return path == "." || path == ".." ||
+		strings.HasPrefix(path, "./") || strings.HasPrefix(path, "../") ||
+		strings.HasPrefix(path, `.\`) || strings.HasPrefix(path, `..\`)
+}
+
 func (e *Engine) candidates(importPath, currentDir string) []string {
 	var candidates []string
 
@@ -205,27 +225,34 @@ func (e *Engine) candidates(importPath, currentDir string) []string {
 	}
 
 	clean := filepath.Clean(importPath)
-	if currentDir != "" {
-		candidates = append(candidates, filepath.Join(currentDir, clean+".ev"), filepath.Join(currentDir, clean))
+	add := func(dir string) {
+		if strings.HasSuffix(clean, ".ev") {
+			candidates = append(candidates, filepath.Join(dir, clean))
+		} else {
+			candidates = append(candidates, filepath.Join(dir, clean+".ev"), filepath.Join(dir, clean))
+		}
 	}
-	if e.root != "" && e.root != currentDir {
-		candidates = append(candidates, filepath.Join(e.root, clean+".ev"), filepath.Join(e.root, clean))
+	if currentDir != "" {
+		add(currentDir)
+	}
+	if !isDotRelative(importPath) && e.root != "" && e.root != currentDir {
+		add(e.root)
 	}
 	return candidates
 }
 
 // enter marks a file or directory as being loaded, for cycle detection and
 // relative resolution; the returned function undoes it
-func (e *Engine) enter(path string, dir string) (func(), error) {
-	if e.loading[path] {
-		cycle := append(e.cycleTrace, path)
+func (e *Engine) enter(key, label, dir string) (func(), error) {
+	if e.loading[key] {
+		cycle := append(e.cycleTrace, label)
 		return nil, fmt.Errorf("cyclic import detected: %s", strings.Join(cycle, " -> "))
 	}
-	e.loading[path] = true
-	e.cycleTrace = append(e.cycleTrace, path)
+	e.loading[key] = true
+	e.cycleTrace = append(e.cycleTrace, label)
 	e.dirStack = append(e.dirStack, dir)
 	return func() {
-		delete(e.loading, path)
+		delete(e.loading, key)
 		e.cycleTrace = e.cycleTrace[:len(e.cycleTrace)-1]
 		e.dirStack = e.dirStack[:len(e.dirStack)-1]
 	}, nil
@@ -265,11 +292,12 @@ func (e *Engine) loadFilePackage(filePath string) (*vm.Package, error) {
 	if err != nil {
 		return nil, err
 	}
-	if pkg, exists := e.filePackages[absPath]; exists {
+	key := canonicalKey(absPath)
+	if pkg, exists := e.filePackages[key]; exists {
 		return pkg, nil
 	}
 
-	leave, err := e.enter(absPath, filepath.Dir(absPath))
+	leave, err := e.enter(key, absPath, filepath.Dir(absPath))
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +315,7 @@ func (e *Engine) loadFilePackage(filePath string) (*vm.Package, error) {
 	if err != nil {
 		return nil, err
 	}
-	e.filePackages[absPath] = pkg
+	e.filePackages[key] = pkg
 	return pkg, nil
 }
 
@@ -296,11 +324,12 @@ func (e *Engine) loadDirectoryPackage(dirPath string) (*vm.Package, error) {
 	if err != nil {
 		return nil, err
 	}
-	if pkg, exists := e.dirPackages[absDir]; exists {
+	dirKey := canonicalKey(absDir)
+	if pkg, exists := e.dirPackages[dirKey]; exists {
 		return pkg, nil
 	}
 
-	leave, err := e.enter(absDir, absDir)
+	leave, err := e.enter(dirKey, absDir, absDir)
 	if err != nil {
 		return nil, err
 	}
@@ -313,18 +342,36 @@ func (e *Engine) loadDirectoryPackage(dirPath string) (*vm.Package, error) {
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no .ev files in %s", display(absDir))
 	}
+
+	fileKeys := make([]string, len(files))
 	sources := make([]*diag.Source, len(files))
 	for i, file := range files {
+		fileKeys[i] = canonicalKey(file)
+		if e.loading[fileKeys[i]] {
+			cycle := append(e.cycleTrace, file)
+			return nil, fmt.Errorf("cyclic import detected: %s", strings.Join(cycle, " -> "))
+		}
 		if sources[i], err = readSource(file); err != nil {
 			return nil, err
 		}
+		if parser.PeekPackageName(sources[i]) == "main" {
+			return nil, fmt.Errorf("%s declares package main, which cannot be imported", sources[i].Name)
+		}
 	}
+	for _, fk := range fileKeys {
+		e.loading[fk] = true
+	}
+	defer func() {
+		for _, fk := range fileKeys {
+			delete(e.loading, fk)
+		}
+	}()
 
 	pkg, err := e.evalPackage(files, sources)
 	if err != nil {
 		return nil, err
 	}
-	e.dirPackages[absDir] = pkg
+	e.dirPackages[dirKey] = pkg
 	return pkg, nil
 }
 
@@ -367,8 +414,11 @@ func (e *Engine) RunFileContext(ctx context.Context, filePath string) (vm.Value,
 	if e.root == "" {
 		e.root = filepath.Dir(absPath)
 	}
-	e.dirStack = append(e.dirStack, filepath.Dir(absPath))
-	defer func() { e.dirStack = e.dirStack[:len(e.dirStack)-1] }()
+	leave, err := e.enter(canonicalKey(absPath), absPath, filepath.Dir(absPath))
+	if err != nil {
+		return vm.Value{}, err
+	}
+	defer leave()
 
 	src, err := readSource(absPath)
 	if err != nil {

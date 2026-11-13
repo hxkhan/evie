@@ -8,10 +8,15 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/hxkhan/evie/vm"
 )
+
+// maxAllocBytes caps single-call string expansion in repeat/padStart/padEnd to
+// prevent untrusted scripts from triggering an out-of-memory crash.
+const maxAllocBytes = 64 << 20
 
 // Construct builds the strings package
 func Construct() *vm.Package {
@@ -20,10 +25,10 @@ func Construct() *vm.Package {
 	pkg.Native("split", vm.Func2(func(s, sep string) *vm.Array { return boxAll(strings.Split(s, sep)) }))
 	pkg.Native("fields", vm.Func1(func(s string) *vm.Array { return boxAll(strings.Fields(s)) }))
 	pkg.Native("lines", vm.Func1(func(s string) *vm.Array {
-		s = strings.TrimSuffix(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
 		if s == "" {
 			return vm.NewArray()
 		}
+		s = strings.TrimSuffix(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
 		return boxAll(strings.Split(s, "\n"))
 	}))
 
@@ -40,6 +45,9 @@ func Construct() *vm.Package {
 		if n < 0 {
 			return "", errors.New("repeat: the count must not be negative")
 		}
+		if len(s) > 0 && n > maxAllocBytes/len(s) {
+			return "", fmt.Errorf("repeat: result exceeds maximum string size (%d bytes)", maxAllocBytes)
+		}
 		return strings.Repeat(s, n), nil
 	}))
 	pkg.Native("reverse", vm.Func1(func(s string) string {
@@ -53,12 +61,24 @@ func Construct() *vm.Package {
 	pkg.Native("upper", vm.Func1(strings.ToUpper))
 	pkg.Native("lower", vm.Func1(strings.ToLower))
 	pkg.Native("trim", vm.Func1(strings.TrimSpace))
-	pkg.Native("trimStart", vm.Func1(func(s string) string { return strings.TrimLeft(s, " \t\r\n") }))
-	pkg.Native("trimEnd", vm.Func1(func(s string) string { return strings.TrimRight(s, " \t\r\n") }))
+	pkg.Native("trimStart", vm.Func1(func(s string) string { return strings.TrimLeftFunc(s, unicode.IsSpace) }))
+	pkg.Native("trimEnd", vm.Func1(func(s string) string { return strings.TrimRightFunc(s, unicode.IsSpace) }))
 	pkg.Native("trimPrefix", vm.Func2(strings.TrimPrefix))
 	pkg.Native("trimSuffix", vm.Func2(strings.TrimSuffix))
-	pkg.Native("padStart", vm.Func3(func(s string, width int, pad string) string { return padding(s, width, pad) + s }))
-	pkg.Native("padEnd", vm.Func3(func(s string, width int, pad string) string { return s + padding(s, width, pad) }))
+	pkg.Native("padStart", vm.Func3E(func(s string, width int, pad string) (string, error) {
+		p, err := padding(s, width, pad)
+		if err != nil {
+			return "", err
+		}
+		return p + s, nil
+	}))
+	pkg.Native("padEnd", vm.Func3E(func(s string, width int, pad string) (string, error) {
+		p, err := padding(s, width, pad)
+		if err != nil {
+			return "", err
+		}
+		return s + p, nil
+	}))
 
 	pkg.Native("chars", vm.Func1(func(s string) *vm.Array {
 		chars := make([]vm.Value, 0, len(s))
@@ -132,15 +152,18 @@ func runeIndex(s string, byteIndex int) int {
 }
 
 // padding is the run of pad characters that widens s to width characters
-func padding(s string, width int, pad string) string {
+func padding(s string, width int, pad string) (string, error) {
 	missing := width - utf8.RuneCountInString(s)
 	if missing <= 0 || pad == "" {
-		return ""
+		return "", nil
+	}
+	if missing > maxAllocBytes/utf8.UTFMax {
+		return "", fmt.Errorf("pad: target width %d exceeds maximum string size", width)
 	}
 	padRunes := []rune(pad)
 	out := make([]rune, missing)
 	for i := range out {
 		out[i] = padRunes[i%len(padRunes)]
 	}
-	return string(out)
+	return string(out), nil
 }

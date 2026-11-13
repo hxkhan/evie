@@ -728,6 +728,165 @@ func (v Value) toGo(seen map[unsafe.Pointer]any) any {
 	return v
 }
 
+// MarshalJSON implements json.Marshaler for Evie values. It encodes nil, bool,
+// finite numbers, strings, arrays, objects and struct instances (without
+// synthetic metadata keys) and rejects cycles, NaN/Inf, and non-JSON values
+// such as functions, tasks, packages, errors and buffers.
+func (v Value) MarshalJSON() ([]byte, error) {
+	var b strings.Builder
+	if err := v.writeJSON(&b, nil); err != nil {
+		return nil, err
+	}
+	return []byte(b.String()), nil
+}
+
+func (v Value) writeJSON(b *strings.Builder, seen map[unsafe.Pointer]bool) error {
+	switch v.pointer {
+	case nil:
+		b.WriteString("null")
+		return nil
+	case boolType:
+		if v.scalar == 0 {
+			b.WriteString("false")
+		} else {
+			b.WriteString("true")
+		}
+		return nil
+	case f64Type:
+		f := math.Float64frombits(v.scalar)
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return fmt.Errorf("cannot encode non-finite number (%v) as JSON", f)
+		}
+		data, err := json.Marshal(f)
+		if err != nil {
+			return err
+		}
+		b.Write(data)
+		return nil
+	}
+
+	switch v.scalar {
+	case kindString:
+		data, err := json.Marshal(*(*string)(v.pointer))
+		if err != nil {
+			return err
+		}
+		b.Write(data)
+		return nil
+
+	case kindArray:
+		arr := (*Array)(v.pointer)
+		ptr := unsafe.Pointer(arr)
+		if seen[ptr] {
+			return fmt.Errorf("cannot encode cyclic array as JSON")
+		}
+		if seen == nil {
+			seen = make(map[unsafe.Pointer]bool)
+		}
+		seen[ptr] = true
+		defer delete(seen, ptr)
+
+		b.WriteByte('[')
+		for i, elem := range arr.Data {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			if err := elem.writeJSON(b, seen); err != nil {
+				return err
+			}
+		}
+		b.WriteByte(']')
+		return nil
+
+	case kindObject:
+		obj := *(*map[string]Value)(v.pointer)
+		ptr := *(*unsafe.Pointer)(v.pointer)
+		if ptr != nil {
+			if seen[ptr] {
+				return fmt.Errorf("cannot encode cyclic object as JSON")
+			}
+			if seen == nil {
+				seen = make(map[unsafe.Pointer]bool)
+			}
+			seen[ptr] = true
+			defer delete(seen, ptr)
+		}
+		b.WriteByte('{')
+		for i, k := range sortedKeys(obj) {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			keyJSON, err := json.Marshal(k)
+			if err != nil {
+				return err
+			}
+			b.Write(keyJSON)
+			b.WriteByte(':')
+			if err := obj[k].writeJSON(b, seen); err != nil {
+				return err
+			}
+		}
+		b.WriteByte('}')
+		return nil
+
+	case kindStructInstance:
+		inst := (*structInstance)(v.pointer)
+		ptr := unsafe.Pointer(inst)
+		if seen[ptr] {
+			return fmt.Errorf("cannot encode cyclic struct '%s' as JSON", inst.InstanceOf.Name)
+		}
+		if seen == nil {
+			seen = make(map[unsafe.Pointer]bool)
+		}
+		seen[ptr] = true
+		defer delete(seen, ptr)
+
+		b.WriteByte('{')
+		first := true
+		writeEntry := func(name string, val Value) error {
+			if !first {
+				b.WriteByte(',')
+			}
+			first = false
+			keyJSON, err := json.Marshal(name)
+			if err != nil {
+				return err
+			}
+			b.Write(keyJSON)
+			b.WriteByte(':')
+			return val.writeJSON(b, seen)
+		}
+		if inst.InstanceOf != nil {
+			for i, fid := range inst.InstanceOf.Fields {
+				if i < len(inst.Fields) {
+					if err := writeEntry(fields.Lookup(fid), inst.Fields[i]); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		for _, name := range sortedKeys(inst.Dynamic) {
+			if err := writeEntry(name, inst.Dynamic[name]); err != nil {
+				return err
+			}
+		}
+		b.WriteByte('}')
+		return nil
+
+	case kindHost:
+		if m, ok := v.host().val.(json.Marshaler); ok {
+			data, err := m.MarshalJSON()
+			if err != nil {
+				return err
+			}
+			b.Write(data)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("cannot encode value of type %s as JSON", v.TypeOf())
+}
+
 // Unmarshal decodes the Evie Value into a Go target pointer.
 func (v Value) Unmarshal(target any) error {
 	data, err := json.Marshal(v.ToGo())

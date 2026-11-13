@@ -849,4 +849,79 @@ func TestPerEngineIsolationIOAndStdlibSandbox(t *testing.T) {
 	}
 }
 
+func TestLoaderHardening(t *testing.T) {
+	// 1. Explicit ./import in subfolder must NOT fall back to project root
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "util.ev"), []byte("package util\nfn v() => 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "child.ev"), []byte("package child imports(\"./util\")\nfn v() => util.v()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.ev"), []byte("package main imports(\"./sub/child\")\nfn main() => child.v()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := evie.RunProject(dir); err == nil {
+		t.Fatal("expected ./util inside sub/ to fail rather than falling back to root/util.ev")
+	}
+
+	// 2. Importing a directory declaring package main must be rejected
+	dir2 := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir2, "badpkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir2, "badpkg", "a.ev"), []byte("package main\nfn x() => 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir2, "entry.ev"), []byte("package app imports(\"./badpkg\")\nfn main() => 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := evie.RunFile(filepath.Join(dir2, "entry.ev")); err == nil || !strings.Contains(err.Error(), "cannot be imported") {
+		t.Fatalf("expected package main directory import error, got %v", err)
+	}
+
+	// 3. Importing ./util.ev works and does not probe util.ev.ev on missing
+	dir3 := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir3, "main.ev"), []byte("package main imports(\"./missing.ev\")\nfn main() => 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := evie.RunFile(filepath.Join(dir3, "main.ev")); err == nil || strings.Contains(err.Error(), ".ev.ev") {
+		t.Fatalf("unexpected error for ./missing.ev: %v", err)
+	}
+
+	// 4. Pre-cancelled context stops fs.writeFile before writing to disk
+	target := filepath.Join(t.TempDir(), "should_not_exist.txt")
+	eng := evie.New()
+	_, err := eng.Eval(`package main imports("fs")
+	fn write(p) { fs.writeFile(p, "data") }`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := eng.CallContext(ctx, "main.write", target); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if _, statErr := os.Stat(target); !os.IsNotExist(statErr) {
+		t.Fatalf("fs.writeFile wrote file despite cancelled context")
+	}
+
+	// 5. time.wait(+Inf) blocks until cancelled rather than returning immediately
+	eng2 := evie.New()
+	_, err = eng2.Eval(`package main imports("math", "time")
+	fn forever() { time.wait(math.inf) }`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel2()
+	if _, err := eng2.CallContext(ctx2, "main.forever"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected DeadlineExceeded on time.wait(+Inf), got %v", err)
+	}
+}
+
+
 

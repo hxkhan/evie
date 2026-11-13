@@ -4,10 +4,10 @@
 package fs
 
 import (
-	"errors"
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 
 	"github.com/hxkhan/evie/vm"
 )
@@ -15,24 +15,54 @@ import (
 // Construct builds the fs package
 func Construct() *vm.Package {
 	pkg := vm.NewPackage("fs")
-	blocking := func(name string, fn *vm.GoFunc) {
-		pkg.Native(name, fn).Blocking = true
+	blocking := func(name string, arity int, fn vm.NativeFn) {
+		pkg.Func(name, arity, func(c vm.Call) (vm.Value, error) {
+			if err := c.Context().Err(); err != nil {
+				return vm.Value{}, context.Cause(c.Context())
+			}
+			return fn(c)
+		}).Blocking = true
 	}
 
-	blocking("readFile", vm.Func1E(os.ReadFile))
-	blocking("readText", vm.Func1E(func(name string) (string, error) {
+	blocking("readFile", 1, func(c vm.Call) (vm.Value, error) {
+		name, err := c.String(0)
+		if err != nil {
+			return vm.Value{}, err
+		}
 		data, err := os.ReadFile(name)
-		return string(data), err
-	}))
-	blocking("writeFile", vm.Func2E(func(name string, content vm.Value) (vm.Value, error) {
-		data, err := bytesOf(content)
+		if err != nil {
+			return vm.Value{}, err
+		}
+		return vm.BoxBuffer(data), nil
+	})
+	blocking("readText", 1, func(c vm.Call) (vm.Value, error) {
+		name, err := c.String(0)
+		if err != nil {
+			return vm.Value{}, err
+		}
+		data, err := os.ReadFile(name)
+		if err != nil {
+			return vm.Value{}, err
+		}
+		return vm.BoxString(string(data)), nil
+	})
+	blocking("writeFile", 2, func(c vm.Call) (vm.Value, error) {
+		name, err := c.String(0)
+		if err != nil {
+			return vm.Value{}, err
+		}
+		data, err := bytesOf("writeFile", c.Arg(1))
 		if err != nil {
 			return vm.Value{}, err
 		}
 		return vm.Value{}, os.WriteFile(name, data, 0o644)
-	}))
-	blocking("appendFile", vm.Func2E(func(name string, content vm.Value) (vm.Value, error) {
-		data, err := bytesOf(content)
+	})
+	blocking("appendFile", 2, func(c vm.Call) (vm.Value, error) {
+		name, err := c.String(0)
+		if err != nil {
+			return vm.Value{}, err
+		}
+		data, err := bytesOf("appendFile", c.Arg(1))
 		if err != nil {
 			return vm.Value{}, err
 		}
@@ -45,40 +75,63 @@ func Construct() *vm.Package {
 			return vm.Value{}, err
 		}
 		return vm.Value{}, f.Close()
-	}))
-	blocking("exists", vm.Func1(func(name string) bool {
-		_, err := os.Stat(name)
-		return err == nil
-	}))
-	blocking("isDir", vm.Func1(func(name string) bool {
+	})
+	blocking("exists", 1, func(c vm.Call) (vm.Value, error) {
+		name, err := c.String(0)
+		if err != nil {
+			return vm.Value{}, err
+		}
+		_, err = os.Stat(name)
+		return vm.BoxBool(err == nil), nil
+	})
+	blocking("isDir", 1, func(c vm.Call) (vm.Value, error) {
+		name, err := c.String(0)
+		if err != nil {
+			return vm.Value{}, err
+		}
 		info, err := os.Stat(name)
-		return err == nil && info.IsDir()
-	}))
-	blocking("list", vm.Func1E(func(dir string) (*vm.Array, error) {
+		return vm.BoxBool(err == nil && info.IsDir()), nil
+	})
+	blocking("list", 1, func(c vm.Call) (vm.Value, error) {
+		dir, err := c.String(0)
+		if err != nil {
+			return vm.Value{}, err
+		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			return nil, err
+			return vm.Value{}, err
 		}
-		names := make([]string, len(entries))
+		values := make([]vm.Value, len(entries))
 		for i, entry := range entries {
-			names[i] = entry.Name()
+			values[i] = vm.BoxString(entry.Name())
 		}
-		sort.Strings(names)
-		values := make([]vm.Value, len(names))
-		for i, name := range names {
-			values[i] = vm.BoxString(name)
+		return vm.BoxArray(vm.NewArray(values...)), nil
+	})
+	blocking("mkdir", 1, func(c vm.Call) (vm.Value, error) {
+		dir, err := c.String(0)
+		if err != nil {
+			return vm.Value{}, err
 		}
-		return vm.NewArray(values...), nil
-	}))
-	blocking("mkdir", vm.Func1E(func(dir string) (vm.Value, error) {
 		return vm.Value{}, os.MkdirAll(dir, 0o755)
-	}))
-	blocking("remove", vm.Func1E(func(name string) (vm.Value, error) {
+	})
+	blocking("remove", 1, func(c vm.Call) (vm.Value, error) {
+		name, err := c.String(0)
+		if err != nil {
+			return vm.Value{}, err
+		}
 		return vm.Value{}, os.RemoveAll(name)
-	}))
-	blocking("rename", vm.Func2E(func(from, to string) (vm.Value, error) {
+	})
+	blocking("rename", 2, func(c vm.Call) (vm.Value, error) {
+		from, err := c.String(0)
+		if err != nil {
+			return vm.Value{}, err
+		}
+		to, err := c.String(1)
+		if err != nil {
+			return vm.Value{}, err
+		}
 		return vm.Value{}, os.Rename(from, to)
-	}))
+	})
 
 	// path helpers touch no files and do not block
 	pkg.Variadic("join", 1, func(c vm.Call) (vm.Value, error) {
@@ -92,19 +145,19 @@ func Construct() *vm.Package {
 		}
 		return vm.BoxString(filepath.ToSlash(filepath.Join(parts...))), nil
 	})
-	pkg.Native("base", vm.Func1(filepath.Base))
-	pkg.Native("dir", vm.Func1(func(name string) string { return filepath.ToSlash(filepath.Dir(name)) }))
-	pkg.Native("ext", vm.Func1(filepath.Ext))
+	pkg.Native("base", vm.Func1(func(name string) string { return filepath.Base(filepath.FromSlash(name)) }))
+	pkg.Native("dir", vm.Func1(func(name string) string { return filepath.ToSlash(filepath.Dir(filepath.FromSlash(name))) }))
+	pkg.Native("ext", vm.Func1(func(name string) string { return filepath.Ext(filepath.FromSlash(name)) }))
 	return pkg
 }
 
 // bytesOf accepts a string or a buffer as file content
-func bytesOf(content vm.Value) ([]byte, error) {
+func bytesOf(fn string, content vm.Value) ([]byte, error) {
 	if s, ok := content.AsString(); ok {
 		return []byte(s), nil
 	}
 	if b, ok := content.AsBuffer(); ok {
 		return b, nil
 	}
-	return nil, errors.New("expected a string or a buffer, got " + content.TypeOf())
+	return nil, fmt.Errorf("%s: argument 2 must be a string or a buffer, got %s", fn, content.TypeOf())
 }

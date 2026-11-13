@@ -21,7 +21,7 @@ func Construct() *vm.Package {
 		return vm.BoxAny(decoded)
 	})
 	pkg.Func("encode", 1, func(c vm.Call) (vm.Value, error) {
-		data, err := json.Marshal(c.Arg(0).ToGo())
+		data, err := c.Arg(0).MarshalJSON()
 		if err != nil {
 			return vm.Value{}, err
 		}

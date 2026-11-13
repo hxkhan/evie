@@ -60,18 +60,28 @@ func Construct() *vm.Package {
 	pkg.Native("atan2", vm.Func2(math.Atan2))
 	pkg.Native("hypot", vm.Func2(math.Hypot))
 	pkg.Native("isNaN", vm.Func1(math.IsNaN))
+	pkg.Native("isInf", vm.Func1(func(x float64) bool { return math.IsInf(x, 0) }))
 	pkg.Native("isFinite", vm.Func1(func(x float64) bool { return !math.IsInf(x, 0) && !math.IsNaN(x) }))
-	pkg.Native("clamp", vm.Func3(func(x, lo, hi float64) float64 { return math.Min(math.Max(x, lo), hi) }))
+	pkg.Native("clamp", vm.Func3E(func(x, lo, hi float64) (float64, error) {
+		if lo > hi {
+			return 0, errors.New("clamp: the lower bound exceeds the upper bound")
+		}
+		return math.Min(math.Max(x, lo), hi), nil
+	}))
 
-	pkg.Variadic("min", 1, extreme(math.Min))
-	pkg.Variadic("max", 1, extreme(math.Max))
+	pkg.Variadic("min", 1, extreme("min", math.Min))
+	pkg.Variadic("max", 1, extreme("max", math.Max))
 
 	pkg.Native("random", vm.Func0(rand.Float64))
 	pkg.Native("randomInt", vm.Func2E(func(lo, hi int) (int, error) {
 		if hi < lo {
 			return 0, errors.New("randomInt: the upper bound is below the lower bound")
 		}
-		return lo + rand.IntN(hi-lo+1), nil
+		span := uint64(hi) - uint64(lo)
+		if span == math.MaxUint64 {
+			return int(rand.Uint64()), nil
+		}
+		return int(uint64(lo) + rand.Uint64N(span+1)), nil
 	}))
 	return pkg
 }
@@ -79,13 +89,13 @@ func Construct() *vm.Package {
 // extreme folds its numeric arguments, or the numbers of a single array
 // argument, with pick. It reads the arguments in place; Call.Args would copy
 // them on every call.
-func extreme(pick func(a, b float64) float64) vm.NativeFn {
+func extreme(name string, pick func(a, b float64) float64) vm.NativeFn {
 	return func(c vm.Call) (vm.Value, error) {
 		n, at := c.Len(), c.Arg
 		if n == 1 {
 			if arr, ok := c.Arg(0).AsArray(); ok {
 				if len(arr.Data) == 0 {
-					return vm.Value{}, errors.New("cannot take the extreme of an empty array")
+					return vm.Value{}, fmt.Errorf("%s: cannot take %s of an empty array", name, name)
 				}
 				n, at = len(arr.Data), func(i int) vm.Value { return arr.Data[i] }
 			}
@@ -95,7 +105,7 @@ func extreme(pick func(a, b float64) float64) vm.NativeFn {
 			arg := at(i)
 			x, ok := arg.AsFloat64()
 			if !ok {
-				return vm.Value{}, fmt.Errorf("expected numbers, got %s at position %d", arg.TypeOf(), i+1)
+				return vm.Value{}, fmt.Errorf("%s: expected numbers, got %s at position %d", name, arg.TypeOf(), i+1)
 			}
 			if i == 0 {
 				best = x

@@ -112,7 +112,7 @@ func TestFunctionsInObjectFieldsAreNotMethods(t *testing.T) {
 		"fn main() { o := { f: fn(a, b) => a + b }\n return o.f(1, 2) }":                        "3",
 		"fn main() { o := { s: string }\n return o.s(42) }":                                     "42",
 		"fn main() { o := { k: {}.keys }\n return o.k().len() }":                                "0",
-		"struct P(n) { fn get() => this.n }\nfn main() { o := { g: P(5).get }\n return o.g() }": "5",
+		"class P(n) { fn get() => this.n }\nfn main() { o := { g: P(5).get }\n return o.g() }":  "5",
 	}
 	for code, want := range cases {
 		val, err := runCode("package main\n" + code)
@@ -229,16 +229,16 @@ func TestInstancesRunInParallel(t *testing.T) {
 }
 
 // calling through a local receiver: fields holding callables, methods through
-// inheritance, and a call site that sees several struct types in turn
+// inheritance, and a call site that sees several class types in turn
 func TestMemberCalls(t *testing.T) {
 	code := `package main
-	struct Animal(name) {
+	class Animal(name) {
 		fn speak() => this.name + " makes a sound"
 	}
-	struct Dog(name, trick) : Animal {
+	class Dog(name, trick) : Animal {
 		fn speak() => this.name + " barks"
 	}
-	struct Holder(cb) {}
+	class Holder(cb) {}
 	fn main() {
 		animals := [Animal("Generic"), Dog("Rex", fn(x) => x * 2), Animal("Other"), Dog("Fido", fn(x) => x + 1)]
 		var out := ""
@@ -268,18 +268,18 @@ func TestMemberCalls(t *testing.T) {
 // arguments, same errors
 func TestMemberCallsOnComputedReceivers(t *testing.T) {
 	prelude := `package main imports("io")
-	struct Box(v) {
+	class Box(v) {
 		fn get() => this.v
 		fn add(a, b) => this.v + a + b
 	}
-	struct Other(v) {
+	class Other(v) {
 		fn get() => this.v * 100
 	}
-	struct Wrap(get) {
+	class Wrap(get) {
 		fn get() => "method"
 	}
-	struct Plain(v) {}
-	struct Holder(b) {
+	class Plain(v) {}
+	class Holder(b) {
 		fn viaField() => this.b.get()
 	}
 	var log := []
@@ -328,7 +328,7 @@ func TestMemberCallsOnComputedReceivers(t *testing.T) {
 // a field can be assigned through any receiver, not only a named variable
 func TestFieldAssignmentOnComputedReceivers(t *testing.T) {
 	prelude := `package main
-	struct P(v, child) {
+	class P(v, child) {
 		fn setChild(x) {
 			this.child.v = x
 		}
@@ -451,10 +451,10 @@ func TestCompoundAssignmentTargets(t *testing.T) {
 func TestMemberCallsDoNotAllocate(t *testing.T) {
 	eng := evie.New()
 	_, err := eng.Load("alloc.ev", []byte(`package main imports("math")
-	struct Box(v) {
+	class Box(v) {
 		fn get() => this.v
 	}
-	struct Holder(b) {
+	class Holder(b) {
 		fn viaField() => this.b.get()
 	}
 	h := Holder(Box(1))
@@ -650,7 +650,7 @@ func TestHostTypes(t *testing.T) {
 }
 
 // top-level bindings are initialized in source order and may call functions
-// and build any value; functions, structs and constants with constant
+// and build any value; functions, classes and constants with constant
 // initializers are hoisted
 func TestPackageInitializers(t *testing.T) {
 	code := `package main imports("io")
@@ -663,7 +663,7 @@ func TestPackageInitializers(t *testing.T) {
 	log += "init;"
 
 	fn computeLimits(n) => [n, n * 2]
-	struct Point(x, y) { fn sum() => this.x + this.y }
+	class Point(x, y) { fn sum() => this.x + this.y }
 
 	fn main() {
 		config.debug = true
@@ -831,22 +831,22 @@ func TestBreakAndContinueValidation(t *testing.T) {
 	}
 }
 
-// local structs, struct body validation, postfix '?', unary '+', and block value consistency
+// local classes, class body validation, postfix '?', unary '+', and block value consistency
 func TestCompilerAndGrammarEdgeCases(t *testing.T) {
-	// 1. Local struct declaration with inheritance and methods
-	localStructCode := `package main
+	// 1. Local class declaration with inheritance and methods
+	localClassCode := `package main
 	fn main() {
-		struct Base(x) {
+		class Base(x) {
 			fn getX() => this.x
 		}
-		struct Sub(x, y) : Base {
+		class Sub(x, y) : Base {
 			fn sum() => this.getX() + this.y
 		}
 		s := Sub(10, 32)
 		return [s.sum(), s is Sub, s is Base]
 	}`
-	if val := run(t, localStructCode); val.String() != "[42, true, true]" {
-		t.Fatalf("local struct: got %s", val)
+	if val := run(t, localClassCode); val.String() != "[42, true, true]" {
+		t.Fatalf("local class: got %s", val)
 	}
 
 	// 2. Existence check on string and buffer indices
@@ -866,11 +866,11 @@ func TestCompilerAndGrammarEdgeCases(t *testing.T) {
 		t.Fatalf("expected unary '+' type error, got %v", err)
 	}
 
-	// 4. Compile errors on invalid '?' target and non-method in struct body
+	// 4. Compile errors on invalid '?' target and non-method in class body
 	for src, want := range map[string]string{
-		"package main\nfn main() { x := 1\n return x? }":             "'?' can only check a field or index access",
-		"package main\nstruct Bad() { x := 1 }\nfn main() {}":        "only methods ('fn') are allowed inside a struct body",
-		"package main\nstruct Dup() { fn f() {}\n fn f() {} }":       "method 'f' is declared twice on Dup",
+		"package main\nfn main() { x := 1\n return x? }":       "'?' can only check a field or index access",
+		"package main\nclass Bad() { x := 1 }\nfn main() {}":  "only methods ('fn') are allowed inside a class body",
+		"package main\nclass Dup() { fn f() {}\n fn f() {} }": "method 'f' is declared twice on Dup",
 	} {
 		_, err := runCode(src)
 		if err == nil || !strings.Contains(err.Error(), want) {
@@ -901,10 +901,10 @@ func TestCompilerAndGrammarEdgeCases(t *testing.T) {
 	}
 }
 
-// cyclic arrays, objects and struct instances format and convert to Go without overflowing the stack
+// cyclic arrays, objects and class instances format and convert to Go without overflowing the stack
 func TestCyclicValuesAndMainArgs(t *testing.T) {
 	cyclicCode := `package main
-	struct Node(val, next) {}
+	class Node(val, next) {}
 	fn main() {
 		a := [1, 2]
 		a.push(a)
@@ -1142,15 +1142,15 @@ func TestBufferMutationAndConstruction(t *testing.T) {
 }
 
 // super invokes overridden methods up a multi-level inheritance chain and inside closures
-func TestStructSuperCalls(t *testing.T) {
+func TestClassSuperCalls(t *testing.T) {
 	val := run(t, `package main
-	struct Animal(name) {
+	class Animal(name) {
 		fn speak() => this.name + " makes a sound"
 	}
-	struct Dog(name, breed) : Animal {
+	class Dog(name, breed) : Animal {
 		fn speak() => super.speak() + " (woof from " + this.breed + ")"
 	}
-	struct GuideDog(name, breed, owner) : Dog {
+	class GuideDog(name, breed, owner) : Dog {
 		fn speak() => super.speak() + " for " + this.owner
 		fn deferredSpeak() {
 			fn inner() => super.speak()
@@ -1168,10 +1168,10 @@ func TestStructSuperCalls(t *testing.T) {
 	}
 
 	for src, wantErr := range map[string]string{
-		"package main\nfn main() => super.foo()":                            "'super' can only be used inside a struct method",
-		"package main\nstruct A() { fn f() => super.f() }\nfn main() {}":    "struct 'A' has no parent struct",
-		"package main\nfn main() { x := super }":                            "expected '.' and a method name after 'super'",
-		"package main\nstruct A() {}\nstruct B() : A { fn f() { super.g = 1 } }": "cannot assign to 'super.g'",
+		"package main\nfn main() => super.foo()":                               "'super' can only be used inside a class method",
+		"package main\nclass A() { fn f() => super.f() }\nfn main() {}":       "class 'A' has no parent class",
+		"package main\nfn main() { x := super }":                              "expected '.' and a method name after 'super'",
+		"package main\nclass A() {}\nclass B() : A { fn f() { super.g = 1 } }": "cannot assign to 'super.g'",
 	} {
 		if _, err := runCode(src); err == nil || !strings.Contains(err.Error(), wantErr) {
 			t.Errorf("%q: want error containing %q, got %v", src, wantErr, err)

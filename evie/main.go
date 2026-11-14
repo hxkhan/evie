@@ -174,7 +174,7 @@ func collectStdImports(root ast.Node) map[string]bool {
 			if n.Name != "" {
 				declared[n.Name] = true
 			}
-		case ast.StructDefinition:
+		case ast.ClassDefinition:
 			if n.Name != "" {
 				declared[n.Name] = true
 			}
@@ -253,7 +253,7 @@ func collectStdImports(root ast.Node) map[string]bool {
 			}
 		case ast.Fn:
 			walk(n.Action)
-		case ast.StructDefinition:
+		case ast.ClassDefinition:
 			walk(n.Action)
 		case ast.Conditional:
 			walk(n.Condition)
@@ -311,7 +311,7 @@ func collectStdImports(root ast.Node) map[string]bool {
 func isExpression(node ast.Node) bool {
 	switch node := node.(type) {
 	case ast.Decl, ast.Assign, ast.MutableBinOp, ast.Return, ast.Throw, ast.Block, ast.Echo,
-		ast.Conditional, ast.While, ast.For, ast.Switch, ast.Break, ast.Continue, ast.StructDefinition:
+		ast.Conditional, ast.While, ast.For, ast.Switch, ast.Break, ast.Continue, ast.ClassDefinition:
 		return false
 	case ast.Fn:
 		return node.UsedAsExpr

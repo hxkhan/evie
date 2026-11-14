@@ -1,6 +1,6 @@
 package main
 
-struct person(name, age) {
+class person(name, age) {
     fn greet(prefix) {
         return prefix + ", I am " + this.name
     }

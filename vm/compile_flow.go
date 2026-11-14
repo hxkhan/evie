@@ -473,7 +473,7 @@ func (vm *Instance) emitBlock(node ast.Block) instruction {
 
 		// generic statement extraction for statements that evaluate to Value{}
 		switch n := node.(type) {
-		case ast.Decl, ast.Assign, ast.MutableBinOp, ast.Conditional, ast.While, ast.For, ast.Switch, ast.Echo, ast.Break, ast.Continue, ast.Throw, ast.Block, ast.StructDefinition:
+		case ast.Decl, ast.Assign, ast.MutableBinOp, ast.Conditional, ast.While, ast.For, ast.Switch, ast.Echo, ast.Break, ast.Continue, ast.Throw, ast.Block, ast.ClassDefinition:
 			return vm.compile(node)
 		case ast.Fn:
 			if !n.UsedAsExpr {

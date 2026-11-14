@@ -158,8 +158,8 @@ func (e *Error) hinted(hint string) *Error {
 // array", "a Point", "nil"
 func article(v Value) string {
 	t := v.TypeOf()
-	if usi, ok := v.asStructInstance(); ok {
-		t = usi.InstanceOf.Name
+	if ci, ok := v.asClassInstance(); ok {
+		t = ci.InstanceOf.Name
 	}
 	if t == "nil" || len(t) == 0 {
 		return t

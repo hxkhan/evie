@@ -94,12 +94,12 @@ func assignField(fbr *fiber, site site, obj Value, name string, index fields.ID,
 		return Value{}, nil
 	}
 
-	if usi, ok := obj.asStructInstance(); ok {
+	if ci, ok := obj.asClassInstance(); ok {
 		v, exc := value(fbr)
 		if exc != nil {
 			return v, exc
 		}
-		usi.SetField(index, v)
+		ci.SetField(index, v)
 		return Value{}, nil
 	}
 
@@ -164,22 +164,22 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 			value := vm.compile(node.Value)
 			index := fields.Get(fa.Rhs)
 
-			if lhs.index == 0 && !lhs.isCaptured && vm.cp.closures.Len() > 0 && vm.cp.closures.Last(0).ustruct != nil {
-				ustruct := vm.cp.closures.Last(0).ustruct
-				if slot, ok := ustruct.FieldOffsets[index]; ok {
+			if lhs.index == 0 && !lhs.isCaptured && vm.cp.closures.Len() > 0 && vm.cp.closures.Last(0).uclass != nil {
+				uclass := vm.cp.closures.Last(0).uclass
+				if slot, ok := uclass.FieldOffsets[index]; ok {
 					return func(fbr *fiber) (Value, exception) {
 						v, err := value(fbr)
 						if err != nil {
 							return v, err
 						}
 						thisVal := fbr.stack[fbr.base]
-						if thisVal.scalar == kindStructInstance && !isKnown(thisVal.pointer) {
-							usi := (*structInstance)(thisVal.pointer)
-							if usi.InstanceOf == ustruct && slot < len(usi.Fields) {
-								usi.Fields[slot] = v
+						if thisVal.scalar == kindClassInstance && !isKnown(thisVal.pointer) {
+							ci := (*classInstance)(thisVal.pointer)
+							if ci.InstanceOf == uclass && slot < len(ci.Fields) {
+								ci.Fields[slot] = v
 								return Value{}, nil
 							}
-							usi.SetField(index, v)
+							ci.SetField(index, v)
 							return Value{}, nil
 						}
 						return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, thisVal.TypeOf())
@@ -200,7 +200,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 					return Value{}, nil
 				}
 
-				if obj, ok := lhs.asStructInstance(); ok {
+				if obj, ok := lhs.asClassInstance(); ok {
 					value, err := value(fbr)
 					if err != nil {
 						return value, err
@@ -271,7 +271,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 					return Value{}, nil
 				}
 
-				if obj, ok := lhs.asStructInstance(); ok {
+				if obj, ok := lhs.asClassInstance(); ok {
 					value, err := value(fbr)
 					if err != nil {
 						return value, err
@@ -299,7 +299,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 		}
 	}
 
-	// handle subscript assignments: arr[i] = val, obj[key] = val, structInstance[key] = val
+	// handle subscript assignments: arr[i] = val, obj[key] = val, classInstance[key] = val
 	if sub, isSubscript := node.Lhs.(ast.Subscript); isSubscript {
 		targetCompiled := vm.compile(sub.Lhs)
 		keyCompiled := vm.compile(sub.Key)
@@ -355,14 +355,14 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 				return Value{}, nil
 			}
 
-			// 3. Struct instance field assignment: structInst[key] = newVal
-			if si, ok := target.asStructInstance(); ok {
+			// 3. Class instance field assignment: classInst[key] = newVal
+			if ci, ok := target.asClassInstance(); ok {
 				keyStr, ok := keyVal.AsString()
 				if !ok {
-					return Value{}, errorAt(site, "struct field key must be a string, got '%s'", keyVal.TypeOf())
+					return Value{}, errorAt(site, "class field key must be a string, got '%s'", keyVal.TypeOf())
 				}
 
-				si.setFieldByName(keyStr, newVal)
+				ci.setFieldByName(keyStr, newVal)
 				return Value{}, nil
 			}
 
@@ -398,37 +398,37 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 	panic(vm.compileErrorAt(node, "cannot assign to '%v'", node.Lhs))
 }
 
-func (vm *Instance) resolveSuper(node ast.Node) (ustruct *userStruct, structLocal local, dynamicStruct bool, thisLocal local) {
+func (vm *Instance) resolveSuper(node ast.Node) (uclass *userClass, classLocal local, dynamicClass bool, thisLocal local) {
 	for scroll := range vm.cp.closures.Len() {
-		if s := vm.cp.closures.Last(scroll).ustruct; s != nil {
-			ustruct = s
+		if c := vm.cp.closures.Last(scroll).uclass; c != nil {
+			uclass = c
 			break
 		}
 	}
-	if ustruct == nil {
-		panic(vm.compileErrorAt(node, "'super' can only be used inside a struct method"))
+	if uclass == nil {
+		panic(vm.compileErrorAt(node, "'super' can only be used inside a class method"))
 	}
-	if !ustruct.hasParent {
-		panic(vm.compileErrorAt(node, "struct '%s' has no parent struct", ustruct.Name))
+	if !uclass.hasParent {
+		panic(vm.compileErrorAt(node, "class '%s' has no parent class", uclass.Name))
 	}
 	thisBinding, err := vm.cp.reach("this")
 	if err != nil {
-		panic(vm.compileErrorAt(node, "'super' can only be used inside a struct method"))
+		panic(vm.compileErrorAt(node, "'super' can only be used inside a class method"))
 	}
-	if ustruct.declClosure != nil {
+	if uclass.declClosure != nil {
 		for scroll := range vm.cp.closures.Len() {
-			if vm.cp.closures.Last(scroll) == ustruct.declClosure {
+			if vm.cp.closures.Last(scroll) == uclass.declClosure {
 				if scroll == 0 {
-					structLocal = local{index: int16(ustruct.declIndex), isCaptured: false, isStatic: true}
+					classLocal = local{index: int16(uclass.declIndex), isCaptured: false, isStatic: true}
 				} else {
-					structLocal = local{index: int16(vm.cp.addToCaptured(scroll, ustruct.declIndex)), isCaptured: true, isStatic: true}
+					classLocal = local{index: int16(vm.cp.addToCaptured(scroll, uclass.declIndex)), isCaptured: true, isStatic: true}
 				}
-				dynamicStruct = true
+				dynamicClass = true
 				break
 			}
 		}
 	}
-	return ustruct, structLocal, dynamicStruct, thisBinding.(local)
+	return uclass, classLocal, dynamicClass, thisBinding.(local)
 }
 
 func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
@@ -437,17 +437,17 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 	index := key.id
 
 	if ident, ok := node.Lhs.(ast.Ident); ok && ident.Name == "super" {
-		ustruct, structLocal, dynamicStruct, thisLocal := vm.resolveSuper(ident)
+		uclass, classLocal, dynamicClass, thisLocal := vm.resolveSuper(ident)
 		return func(fbr *fiber) (Value, exception) {
-			parent := ustruct.Parent
-			if dynamicStruct {
-				if us, ok := fbr.get(structLocal).asUserStruct(); ok {
-					parent = us.Parent
+			parent := uclass.Parent
+			if dynamicClass {
+				if uc, ok := fbr.get(classLocal).asUserClass(); ok {
+					parent = uc.Parent
 				}
 			}
 			fn := parent.lookupMethod(index)
 			if fn == nil {
-				return Value{}, errorAt(site, "no method '%s' on parent struct '%s'", node.Rhs, parent.Name)
+				return Value{}, errorAt(site, "no method '%s' on parent class '%s'", node.Rhs, parent.Name)
 			}
 			thisVal := *fbr.get(thisLocal)
 			return boxMethod(boundMethod{this: thisVal, fn: boxUserFnPtr(fn)}), nil
@@ -458,18 +458,18 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 	if lhs := vm.evaluate(node.Lhs); lhs != nil {
 		switch lhs := lhs.(type) {
 		case local:
-			if lhs.index == 0 && !lhs.isCaptured && vm.cp.closures.Len() > 0 && vm.cp.closures.Last(0).ustruct != nil {
-				ustruct := vm.cp.closures.Last(0).ustruct
-				if slot, ok := ustruct.FieldOffsets[index]; ok {
+			if lhs.index == 0 && !lhs.isCaptured && vm.cp.closures.Len() > 0 && vm.cp.closures.Last(0).uclass != nil {
+				uclass := vm.cp.closures.Last(0).uclass
+				if slot, ok := uclass.FieldOffsets[index]; ok {
 					return func(fbr *fiber) (Value, exception) {
 						thisVal := fbr.stack[fbr.base]
-						if thisVal.scalar == kindStructInstance && !isKnown(thisVal.pointer) {
-							usi := (*structInstance)(thisVal.pointer)
-							if usi.InstanceOf == ustruct && slot < len(usi.Fields) {
-								val := usi.Fields[slot]
+						if thisVal.scalar == kindClassInstance && !isKnown(thisVal.pointer) {
+							ci := (*classInstance)(thisVal.pointer)
+							if ci.InstanceOf == uclass && slot < len(ci.Fields) {
+								val := ci.Fields[slot]
 								return val, nil
 							}
-							if val, exists := usi.GetField(index); exists {
+							if val, exists := ci.GetField(index); exists {
 								return val, nil
 							}
 						}
@@ -481,20 +481,20 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 				}
 			}
 
-			var cachedStruct *userStruct
+			var cachedClass *userClass
 			var cachedSlot int = -1
 			return func(fbr *fiber) (Value, exception) {
 				v := fbr.get(lhs)
-				if v.scalar == kindStructInstance && !isKnown(v.pointer) {
-					usi := (*structInstance)(v.pointer)
-					if usi.InstanceOf == cachedStruct && cachedSlot >= 0 && cachedSlot < len(usi.Fields) {
-						val := usi.Fields[cachedSlot]
+				if v.scalar == kindClassInstance && !isKnown(v.pointer) {
+					ci := (*classInstance)(v.pointer)
+					if ci.InstanceOf == cachedClass && cachedSlot >= 0 && cachedSlot < len(ci.Fields) {
+						val := ci.Fields[cachedSlot]
 						return val, nil
 					}
-					if slot, ok := usi.InstanceOf.FieldOffsets[index]; ok {
-						cachedStruct = usi.InstanceOf
+					if slot, ok := ci.InstanceOf.FieldOffsets[index]; ok {
+						cachedClass = ci.InstanceOf
 						cachedSlot = slot
-						val := usi.Fields[slot]
+						val := ci.Fields[slot]
 						return val, nil
 					}
 				}
@@ -535,7 +535,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 
 	// generic compilation
 	lhs := vm.compile(node.Lhs)
-	var cachedStruct *userStruct
+	var cachedClass *userClass
 	var cachedSlot int = -1
 	return func(fbr *fiber) (Value, exception) {
 		lhs, exc := lhs(fbr)
@@ -543,16 +543,16 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 			return lhs, exc
 		}
 
-		if lhs.scalar == kindStructInstance && !isKnown(lhs.pointer) {
-			usi := (*structInstance)(lhs.pointer)
-			if usi.InstanceOf == cachedStruct && cachedSlot >= 0 && cachedSlot < len(usi.Fields) {
-				val := usi.Fields[cachedSlot]
+		if lhs.scalar == kindClassInstance && !isKnown(lhs.pointer) {
+			ci := (*classInstance)(lhs.pointer)
+			if ci.InstanceOf == cachedClass && cachedSlot >= 0 && cachedSlot < len(ci.Fields) {
+				val := ci.Fields[cachedSlot]
 				return val, nil
 			}
-			if slot, ok := usi.InstanceOf.FieldOffsets[index]; ok {
-				cachedStruct = usi.InstanceOf
+			if slot, ok := ci.InstanceOf.FieldOffsets[index]; ok {
+				cachedClass = ci.InstanceOf
 				cachedSlot = slot
-				val := usi.Fields[slot]
+				val := ci.Fields[slot]
 				return val, nil
 			}
 		}
@@ -617,16 +617,16 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 			return val, nil
 		}
 
-		// 3. Struct instance field access: structInstance["field"]
-		if si, ok := target.asStructInstance(); ok {
+		// 3. Class instance field access: classInstance["field"]
+		if ci, ok := target.asClassInstance(); ok {
 			keyStr, ok := indexVal.AsString()
 			if !ok {
-				return Value{}, errorAt(site, "struct field key must be a string, got '%s'", indexVal.TypeOf())
+				return Value{}, errorAt(site, "class field key must be a string, got '%s'", indexVal.TypeOf())
 			}
 
-			val, exists := si.getFieldByName(keyStr)
+			val, exists := ci.getFieldByName(keyStr)
 			if !exists {
-				return Value{}, errorAt(site, "undefined field '%s' in struct", keyStr)
+				return Value{}, errorAt(site, "undefined field '%s' in class", keyStr)
 			}
 			return val, nil
 		}
@@ -903,7 +903,7 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 				return BoxBool(exists), nil
 			}
 
-			if obj, ok := lhs.asStructInstance(); ok {
+			if obj, ok := lhs.asClassInstance(); ok {
 				return BoxBool(obj.HasField(index)), nil
 			}
 
@@ -974,9 +974,9 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 				}
 				return BoxBool(false), nil
 			}
-			if si, ok := lhs.asStructInstance(); ok {
+			if ci, ok := lhs.asClassInstance(); ok {
 				if keyStr, ok := k.AsString(); ok {
-					return BoxBool(si.hasFieldByName(keyStr)), nil
+					return BoxBool(ci.hasFieldByName(keyStr)), nil
 				}
 				return BoxBool(false), nil
 			}
@@ -1034,12 +1034,12 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 			return value, exc
 		}
 
-		if usi, ok := obj.asStructInstance(); ok {
-			exists, exc := usi.UpdateField(index, func(current Value) (Value, exception) {
+		if ci, ok := obj.asClassInstance(); ok {
+			exists, exc := ci.UpdateField(index, func(current Value) (Value, exception) {
 				return apply(fbr, current, value)
 			})
 			if !exists {
-				return Value{}, errorAt(site, "undefined field '%s' on %s", fa.Rhs, usi.InstanceOf.Name)
+				return Value{}, errorAt(site, "undefined field '%s' on %s", fa.Rhs, ci.InstanceOf.Name)
 			}
 			return Value{}, exc
 		}
@@ -1144,15 +1144,15 @@ func (vm *Instance) emitCompoundSubscriptAssign(node ast.MutableBinOp, sub ast.S
 			return Value{}, nil
 		}
 
-		if usi, ok := obj.asStructInstance(); ok {
+		if ci, ok := obj.asClassInstance(); ok {
 			if !isString {
-				return Value{}, errorAt(site, "struct field key must be a string, got '%s'", keyVal.TypeOf())
+				return Value{}, errorAt(site, "class field key must be a string, got '%s'", keyVal.TypeOf())
 			}
-			exists, exc := usi.updateFieldByName(keyStr, func(current Value) (Value, exception) {
+			exists, exc := ci.updateFieldByName(keyStr, func(current Value) (Value, exception) {
 				return apply(fbr, current, value)
 			})
 			if !exists {
-				return Value{}, errorAt(site, "undefined field '%s' on %s", keyStr, usi.InstanceOf.Name)
+				return Value{}, errorAt(site, "undefined field '%s' on %s", keyStr, ci.InstanceOf.Name)
 			}
 			return Value{}, exc
 		}

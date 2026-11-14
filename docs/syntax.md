@@ -20,8 +20,8 @@ fn main() {
 ```
 
 - Standard library packages (`io`, `fs`, `math`, `strings`, `time`, `json`, see [section 12](#12-standard-library)) can be imported directly, as can packages the host registers and `.ev` files by relative path (`imports("./util")`).
-- Every top-level function, struct and binding of a package is visible to importers under the package name (`io.println`, `time.wait`). There is no private marker; keep internal helpers in a package that is not imported. An importer always sees a package's `var` bindings as they are now and can assign them (`util.count = 0`); assigning one of its constants is a compile error.
-- Functions, structs and constants whose initializer is itself constant (`SECONDS := 60`, `MILLIS := SECONDS * 1000`) are hoisted, so they can be used before their declaration. Every other top-level binding is initialized in source order when the package loads; its initializer can call functions and build any value, and a binding read before its line has run is `nil`:
+- Every top-level function, class and binding of a package is visible to importers under the package name (`io.println`, `time.wait`). There is no private marker; keep internal helpers in a package that is not imported. An importer always sees a package's `var` bindings as they are now and can assign them (`util.count = 0`); assigning one of its constants is a compile error.
+- Functions, classes and constants whose initializer is itself constant (`SECONDS := 60`, `MILLIS := SECONDS * 1000`) are hoisted, so they can be used before their declaration. Every other top-level binding is initialized in source order when the package loads; its initializer can call functions and build any value, and a binding read before its line has run is `nil`:
 
 ```go
 package main imports("io")
@@ -101,16 +101,26 @@ Evie is dynamically typed with a lightweight set of built-in types:
 | `number` | 64-bit IEEE-754 floating point | `42`, `3.14`, `-0.5` |
 | `bool` | Boolean | `true`, `false` |
 | `string` | UTF-8 string | `"hello"`, `` `hi {name}` `` |
-| `buffer` | Raw byte slice | `fs.readFile("data.bin")` |
+| `buffer` | Raw mutable byte slice | `buffer("hi")`, `fs.readFile("data.bin")` |
 | `array` | Dynamic ordered collection | `[1, 2, "three"]` |
 | `object` | Key-value associative map | `{ name: "Alice", age: 30 }` |
 | `nil` | Represents absence of value | `nil` |
 | `function` | First-class callable / closure | `fn(x) => x * 2` |
-| `struct` | User-defined struct instance | `Person("Bob", 25)` |
-| `task` | Asynchronous concurrent task | `go fn() { ... }` |
+| `class` | User-defined class instance | `Person("Bob", 25)` |
+| `task` | Asynchronous concurrent task | `go fetchData()` |
 | `error` | Runtime or user exception | `error("failed")` |
 
-### String Templates (Interpolation)
+### Strings & Templates (Interpolation)
+Strings are UTF-8 and operate on Unicode characters (runes) for indexing, slicing, iteration, and `.len()`:
+
+```go
+word := "café"
+word.len()      // 4
+word[3]         // "é"
+word[-1]        // "é"
+word[1:4]       // "afé"
+```
+
 Backtick strings support inline expression interpolation using `{...}`:
 
 ```go
@@ -129,14 +139,19 @@ io.println(`braces: \{literal\}, value: {1 + 1}, 100%`)
 ```
 
 ### Arrays
-Arrays are zero-indexed, dynamic lists supporting negative indexing and element assignment:
+Arrays are zero-indexed, dynamic lists supporting negative indexing, slicing, and element assignment:
 
 ```go
-fruits := ["apple", "banana", "cherry"]
+fruits := ["apple", "banana", "cherry", "date"]
 
 // Indexing
 first := fruits[0]    // "apple"
-last := fruits[-1]    // "cherry" (negative indexing from end)
+last := fruits[-1]    // "date" (negative indexing from end)
+
+// Slicing (also works on strings and buffers)
+mid := fruits[1:3]    // ["banana", "cherry"]
+head := fruits[:2]    // ["apple", "banana"]
+tail := fruits[-2:]   // ["cherry", "date"]
 
 // Subscript Mutation
 var list := [10, 20, 30]
@@ -186,7 +201,7 @@ x /= 2   // 13
 x %= 4   // 1
 ```
 
-Compound assignment also works on object fields, struct fields and subscripts. The target and key are evaluated once, and updates to array elements and struct fields happen under that value's lock, so concurrent `this.count += 1` calls never lose updates:
+Compound assignment also works on object fields, class fields and subscripts. The target and key are evaluated once. Because only one fiber of an instance runs Evie code at a time, `this.count += 1` across concurrent tasks never loses updates:
 ```go
 var stats := { hits: 0 }
 stats.hits += 1
@@ -196,7 +211,7 @@ var scores := [10, 20, 30]
 scores[0] += 5
 scores[-1] -= 1
 
-struct Counter(count) {
+class Counter(count) {
     fn inc() {
         this.count += 1
     }
@@ -234,7 +249,7 @@ true is bool           // true
 t is task              // true
 err is error           // true
 buf is buffer          // true
-p is Person            // true (struct instance check)
+p is Person            // true (class instance check)
 dog is Animal          // true (polymorphic inheritance check)
 ```
 
@@ -411,17 +426,17 @@ case 1:
 
 ---
 
-## 7. Structs & Object-Oriented Programming
+## 7. Classes & Object-Oriented Programming
 
-Evie supports object-oriented programming with structs, encapsulated methods, explicit `this`, dynamic fields, first-class bound methods, and single inheritance.
+Evie supports object-oriented programming with classes, encapsulated methods, explicit `this`, dynamic fields, first-class bound methods, and single inheritance.
 
-### Struct Definition & Instantiation
-Structs are declared with `struct Name(field1, field2, ...) { ... }`.
+### Class Definition & Instantiation
+Classes are declared with `class Name(field1, field2, ...) { ... }`.
 The body braces `{ ... }` are **mandatory** (even if empty). Constructor arguments passed during instantiation must match the number of declared fields.
 
 ```go
-struct Person(name, age) {
-    // Methods are declared directly inside the struct body
+class Person(name, age) {
+    // Methods are declared directly inside the class body
     fn greet(prefix) {
         return prefix + ", I am " + this.name
     }
@@ -429,7 +444,7 @@ struct Person(name, age) {
     // Arrow syntax works for short methods
     fn isAdult() => this.age >= 18
 
-    // Mutating struct fields via this
+    // Mutating instance fields via this
     fn haveBirthday() {
         this.age = this.age + 1
     }
@@ -449,7 +464,7 @@ io.println(p.age)            // 23
 ```
 
 ### Methods, `this`, & Bound Methods
-- **The `this` Keyword**: Inside any struct method, `this` is an implicit receiver parameter referring to the instance.
+- **The `this` Keyword**: Inside any class method, `this` is an implicit receiver parameter referring to the instance.
 - **Method Calls on `this`**: Methods can invoke other methods on the same instance using `this.otherMethod()`.
 - **First-Class Bound Methods**: Accessing a method without calling it extracts a bound method holding the instance reference:
 
@@ -461,7 +476,7 @@ io.println(sayHi("Hi")) // "Hi, I am Alice"
 ```
 
 ### Dynamic Fields
-Struct instances are extensible. You can assign optional dynamic fields at runtime:
+Class instances are extensible. You can assign optional dynamic fields at runtime:
 
 ```go
 p := Person("John", 22)
@@ -471,10 +486,10 @@ io.println(p.email)          // "john03@gmail.com"
 ```
 
 ### Classical Single Inheritance
-Structs support single inheritance using `:` followed by the parent struct name (`struct Dog(...) : Animal { ... }`). Subclasses inherit parent methods, can override methods, and can add their own subclass-specific methods:
+Classes support single inheritance using `:` followed by the parent class name (`class Dog(...) : Animal { ... }`). Subclasses inherit parent methods, can override methods, and can add their own subclass-specific methods:
 
 ```go
-struct Animal(name) {
+class Animal(name) {
     fn speak() {
         return this.name + " makes a generic animal sound"
     }
@@ -485,7 +500,7 @@ struct Animal(name) {
 }
 
 // Dog inherits from Animal
-struct Dog(name, breed) : Animal {
+class Dog(name, breed) : Animal {
     // Method override
     fn speak() {
         return this.name + " barks: Woof! Woof!"
@@ -498,7 +513,7 @@ struct Dog(name, breed) : Animal {
 }
 
 // Cat inherits from Animal
-struct Cat(name) : Animal {
+class Cat(name) : Animal {
     // Method override
     fn speak() {
         return this.name + " purrs: Meow"
@@ -525,8 +540,21 @@ io.println(c.describe()) // "Animal named Luna"
 io.println(d.fetch("ball")) // "Rex fetched the ball"
 ```
 
+### Calling Parent Methods (`super`)
+Inside a subclass method, use `super.method(...)` to call the parent class's implementation on the current `this` receiver, or `super.method` to extract a bound method:
+
+```go
+class LoudDog(name, breed) : Dog {
+    fn speak() {
+        return super.speak() + "!!!"
+    }
+}
+
+io.println(LoudDog("Max", "Husky").speak()) // "Max barks: Woof! Woof!!!!"
+```
+
 ### Polymorphic Type Checking (`is` Operator)
-Subclasses satisfy both their own struct type and all ancestor struct types:
+Subclasses satisfy both their own class type and all ancestor class types:
 
 ```go
 d := Dog("Rex", "German Shepherd")
@@ -538,8 +566,8 @@ c is Animal  // true
 !(c is Dog)  // true
 ```
 
-### Structs and Concurrency
-Struct instances need no locking. Fibers of an instance never run at the same time, so a method like `fn inc() { this.count = this.count + 1 }` called from several tasks always counts every call.
+### Classes and Concurrency
+Class instances need no locking. Fibers of an instance never run at the same time, so a method like `fn inc() { this.count = this.count + 1 }` called from several tasks always counts every call.
 
 ---
 
@@ -550,14 +578,14 @@ Struct instances need no locking. Fibers of an instance never run at the same ti
 arr := [1, 2, 3]
 
 arr.len()                 // 3
-arr.push(4)               // [1, 2, 3, 4]
+arr.push(4)               // mutates arr -> [1, 2, 3, 4] (alias: arr.append(4))
 arr.pop()                 // returns 4, arr is now [1, 2, 3]
-arr.slice(1, 3)           // [2, 3] (supports negative indices)
+arr.slice(1, 3)           // [2, 3] (supports negative indices; end is optional)
 arr.contains(2)           // true
 ["a", "b"].join("-")      // "a-b" (elements must be strings)
-arr.reverse()             // [3, 2, 1]
-arr.map(fn(x) => x * 10)  // [30, 20, 10]
-arr.filter(fn(x) => x > 1)// [3, 2]
+arr.reverse()             // returns new array [3, 2, 1] (does not mutate arr)
+arr.map(fn(x) => x * 10)  // [10, 20, 30]
+arr.filter(fn(x) => x > 1)// [2, 3]
 ```
 
 ### Object Methods
@@ -565,19 +593,40 @@ arr.filter(fn(x) => x > 1)// [3, 2]
 obj := { name: "John", age: 25 }
 
 obj.keys()                // ["age", "name"] (sorted alphabetically)
-obj.values()              // [25, "John"]
+obj.values()              // [25, "John"] (in sorted key order)
 obj.len()                 // 2
-obj.has("name")           // true
-obj.remove("age")         // returns 25, removes key
+obj.has("name")           // true (alias: obj.contains("name"), or obj.name?)
+obj.remove("age")         // returns 25, removes key (alias: obj.delete("age"))
 obj.clear()               // removes all entries
+```
+
+### String Methods
+```go
+s := "  Hello, Evie!  "
+
+s.len()                   // character (UTF-8 rune) count
+s.trim()                  // "Hello, Evie!"
+s.toUpper()               // "  HELLO, EVIE!  "
+s.toLower()               // "  hello, evie!  "
+s.contains("Evie")        // true
+s.startsWith("  He")      // true
+s.endsWith("!  ")         // true
+"a,b,c".split(",")        // ["a", "b", "c"]
+"café".slice(1, 4)        // "afé" (also s[1:4])
 ```
 
 ### Buffer Methods
 ```go
-buf := readFile("test.txt")
-buf.len()                 // byte length
-buf.string()              // string content
-string(buf)               // string conversion constructor
+buf := buffer("hi")       // also buffer(), buffer(size), buffer([65, 66]), buffer(other)
+file := fs.readFile("test.txt")
+
+buf.len()                 // byte length (2)
+buf[0]                    // 104 (byte value 0..255)
+buf[0] = 72               // mutate byte in place ("Hi")
+buf.push("!")             // append byte (0..255), string, or buffer (alias: buf.append)
+buf.slice(0, 2)           // new buffer copy (also buf[0:2])
+buf.string()              // "Hi!"
+string(buf)               // "Hi!" (string conversion constructor)
 ```
 
 ---
@@ -639,10 +688,12 @@ Evie provides built-in cooperative concurrency inspired by Go goroutines and Jav
 Use the `go` keyword followed by a function call to run it concurrently:
 
 ```go
-task := go fn() {
-    // runs concurrently
+task := go fetchRemoteData()
+
+// Or invoke an inline anonymous function:
+inline := go fn() {
     return fetchRemoteData()
-}
+}()
 ```
 
 ### Awaiting Tasks (`await`)
@@ -654,7 +705,7 @@ data := await task
 - Multi-await memoization: Awaiting the same task multiple times immediately returns the memoized result without re-executing.
 - Identity await: Awaiting a non-task value (e.g. `await 42`) is a safe no-op that returns the value.
 
-### Multi-Task Concurrency (`await.all`, `await.any`, `await.race`)
+### Multi-Task Concurrency (`await.all`, `await.any`, `await.race`, `await.timeout`)
 ```go
 t1 := go fetchServiceA()
 t2 := go fetchServiceB()
@@ -669,19 +720,23 @@ firstSuccess := await.any(t1, t2)
 
 // Wait for first task to settle (whether success or error)
 winner := await.race(t1, t2)
+
+// Wait for a task with a deadline in milliseconds (cancels and throws on timeout)
+bounded := await.timeout(t1, 500)
 ```
 
 ### Task Methods
 ```go
-t.done()       // returns a channel that closes when done
-t.isDone()     // returns boolean
+t.done()       // returns boolean: whether the task has settled
+t.isDone()     // alias for t.done()
 t.result()     // returns task result (or nil)
 t.error()      // returns error (or nil)
 t.await()      // method form of await
+t.cancel()     // requests cooperative cancellation of the task
 ```
 
 ### Shared State
-Only one fiber of an instance executes Evie code at a time. A fiber hands over to the others when it awaits a task and while it is inside a blocking host function such as `time.wait`. Between those points a fiber runs uninterrupted, so shared variables, arrays, objects and structs never need locks:
+Only one fiber of an instance executes Evie code at a time. A fiber hands over to the others when it awaits a task and while it is inside a blocking host function such as `time.wait`. Between those points a fiber runs uninterrupted, so shared variables, arrays, objects and classes never need locks:
 
 ```go
 var counter := 0
@@ -726,6 +781,7 @@ type OrderResult struct {
 func main() {
     // 1. An engine; the prelude holds symbols every script sees without an import
     eng := evie.New()
+    defer eng.Close()
     eng.SetStatic("calculateTax", vm.BoxGoFunc(vm.Func1(func(subtotal float64) float64 {
         return subtotal * 0.15
     })))
@@ -742,13 +798,21 @@ func main() {
 
     // 3. Call it with Go arguments and unmarshal the result into a struct
     val, err := eng.Call("main.processOrder", 100.0)
+    if err != nil {
+        panic(err)
+    }
     var res OrderResult
-    val.Unmarshal(&res)
+    if err := val.Unmarshal(&res); err != nil {
+        panic(err)
+    }
     fmt.Printf("Total: $%.2f, Status: %s\n", res.Total, res.Message)
     // Output: Total: $115.00, Status: Order processed successfully
 
     // 4. One-line quick evaluation
-    ans, _ := evie.Eval("return [1, 2, 3].map(fn(x) => x * 10)")
+    ans, err := evie.Eval("return [1, 2, 3].map(fn(x) => x * 10)")
+    if err != nil {
+        panic(err)
+    }
     fmt.Println(ans) // [10, 20, 30]
 }
 ```
@@ -760,15 +824,16 @@ The pieces, from most to least convenient:
 | expose a Go function | `vm.Func0`..`Func3` and the `E` variants for `(R, error)`; `vm.Reflect` for any other signature |
 | full control of arguments and errors | `pkg.Func(name, arity, func(c vm.Call) (vm.Value, error))`; mark it `Blocking` if it sleeps or waits on I/O, and watch `c.Context()` so it wakes when the script is stopped |
 | a group of functions scripts import by name | `vm.NewPackage("name")` passed in `evie.Options.Packages` |
+| sandbox stdlib or redirect I/O per engine | `evie.Options.Stdlib` (allowlist, e.g. `[]string{"math", "json"}`), `Options.NoStdlib`, `Options.Stdin`, `Options.Stdout` |
 | symbols visible without an import | `eng.SetStatic` or `evie.Options.Prelude` |
 | lend a Go value to scripts as it is | `vm.NewHostType[T]("Name")` with `Method`, `Constructor`, `Wrap` |
-| a native whose work takes a while | return `vm.Async(func() (vm.Value, error) { ... })`, a task the script awaits |
+| a native whose work takes a while | return `c.Async(func(ctx context.Context) (vm.Value, error) { ... })` (lifecycle-bound task), or `vm.Async` outside a native |
 | call a script function | `eng.Call("pkg.fn", goArgs...)`, or `value.Call(evieArgs...)` on a value from `eng.Lookup("pkg.fn")` |
 | run a file or a project directory | `eng.RunFile`, `eng.RunProject`, or `evie.RunFile` for a one-off |
-| read a result | `AsFloat64`, `AsString`, `AsArray`, `AsObject` and the other `As` methods, `Field(name)` on objects and struct instances, `ToGo`, `Unmarshal(&target)` |
+| read a result | `AsFloat64`, `AsString`, `AsArray`, `AsObject` and the other `As` methods, `Field(name)` / `ClassName()` on objects and class instances, `ToGo`, `Unmarshal(&target)`, `json.Marshal(val)` |
 | behave like the language in a native | `a.Add(b)`, `a.LessThan(b)` and the other operators, `Equals`, `IsTruthy`; a type mismatch returns the script's error |
 | show an error | `evie.Format(err, colors)` renders it the way the `evie` command does |
-| stop a runaway script | `eng.Interrupt()` from any goroutine, or a context: `eng.RunFileContext`, `RunProjectContext`, `EvalContext`, `CallContext` |
+| stop a runaway script or release engine resources | `eng.Interrupt()`, `eng.Close()`, or a context: `eng.RunFileContext`, `RunProjectContext`, `EvalContext`, `CallContext` |
 
 A stopped script fails at its next loop iteration or call, or as soon as it wakes from an `await`, `time.sleep` or a blocking native that watches `c.Context()`. The error says where it stopped, its cause is `vm.ErrInterrupted` or the context's cause, and `catch` lets it pass. A context stops only the run it was given and the tasks that run started; `Interrupt` stops everything the instance is running, and the instance stays usable afterwards.
 
@@ -787,11 +852,13 @@ if _, err := eng.RunFileContext(ctx, "main.ev"); errors.Is(err, context.Deadline
 Import a package by name: `package main imports("math", "strings")`. Functions that wait on the operating system (`fs`, `time.wait`, `io.prompt`, `io.readln`) release the instance while they wait, so other tasks keep running. Arguments of the wrong type raise an error that names the function and the argument.
 
 ### `io`
+Reads and writes use the engine's `Options.Stdin` and `Options.Stdout` (defaulting to `os.Stdin` and `os.Stdout`).
+
 | function | does |
 | :-- | :-- |
 | `print(...values)`, `println(...values)` | write the values separated by spaces |
-| `prompt(message)` | print a message and read a line |
-| `readln()` | read a line |
+| `prompt(message)` | print a message and read a line (`nil` at EOF) |
+| `readln()` | read a line (`nil` at EOF) |
 
 ### `math`
 | function | does |
@@ -802,11 +869,11 @@ Import a package by name: `package main imports("math", "strings")`. Functions t
 | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2(y, x)`, `sinh`, `cosh`, `tanh` | trigonometry, in radians |
 | `min(...)`, `max(...)` | smallest or largest of the arguments, or of one array |
 | `clamp(x, lo, hi)` | `x` limited to the range |
-| `isNaN(x)`, `isFinite(x)` | checks |
+| `isNaN(x)`, `isInf(x)`, `isFinite(x)` | checks |
 | `random()`, `randomInt(lo, hi)` | a number in [0, 1), an integer in [lo, hi] |
 
 ### `strings`
-Strings also have the methods `len`, `trim`, `toLower`, `toUpper`, `contains`, `startsWith`, `endsWith` and `split`. Positions and lengths count characters, not bytes.
+Strings also have the methods `len`, `slice`, `trim`, `toLower`, `toUpper`, `contains`, `startsWith`, `endsWith` and `split`. Positions and lengths count characters (UTF-8 runes), not bytes.
 
 | function | does |
 | :-- | :-- |
@@ -828,7 +895,7 @@ Strings also have the methods `len`, `trim`, `toLower`, `toUpper`, `contains`, `
 | `list(dir)` | sorted names in a directory |
 | `mkdir(dir)` | create a directory and its parents |
 | `remove(path)`, `rename(from, to)` | remove a file or directory tree, move it |
-| `join(a, b)`, `base(path)`, `dir(path)`, `ext(path)` | path helpers; these do not touch the disk |
+| `join(...parts)`, `base(path)`, `dir(path)`, `ext(path)` | path helpers; these do not touch the disk |
 
 ### `time`
 Times are milliseconds since the Unix epoch, so they compare and subtract like any number.
@@ -838,11 +905,11 @@ Times are milliseconds since the Unix epoch, so they compare and subtract like a
 | `now()`, `since(t)` | the current time, milliseconds elapsed since `t` |
 | `clock()` | a monotonic clock in milliseconds, for measuring |
 | `wait(ms)` (also `sleep`, `timer`) | pause the current task |
-| `format(t)`, `format(t, layout)` | RFC 3339 text, or a [Go layout](https://pkg.go.dev/time#pkg-constants) such as `"2006-01-02"` |
-| `parse(text)` | an RFC 3339 time |
+| `format(t)`, `format(t, layout)` | UTC RFC 3339 text, or a [Go layout](https://pkg.go.dev/time#pkg-constants) such as `"2006-01-02"` |
+| `parse(text)`, `parse(text, layout)` | parse an RFC 3339 time or a custom Go layout |
 | `second`, `minute`, `hour`, `day` | durations in milliseconds |
 
 ### `json`
 | function | does |
 | :-- | :-- |
-| `json.encode(value)`, `json.decode(text)` | convert between values and JSON text |
+| `json.encode(value)`, `json.decode(text)` | convert between values and JSON text (rejects NaN/Infinity, functions, tasks, errors, and cycles) |

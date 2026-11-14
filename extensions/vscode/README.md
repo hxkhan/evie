@@ -1,12 +1,19 @@
-# evie
+# Evie for VS Code
 
-This extension provides syntax highlighting for the Evie programming language.
+Syntax highlighting and editor configuration for the [Evie](https://github.com/hxkhan/evie) programming language (`.ev` files).
 
-## Usage
+## Features
 
-- Install the extension in vscode
-- Enjoy your syntax highlighting
+- Syntax highlighting for Evie keywords, `class` definitions and inheritance, `fn` declarations, arrow functions, `go`/`await` concurrency (`await.all`, `await.any`, `await.race`, `await.timeout`), built-in types, and string template interpolation.
+- Line (`//`) and block (`/* ... */`) comment toggling.
+- Auto-closing and surrounding pairs for brackets, double quotes, and backtick template literals.
 
-## Bugs
+## Packaging
 
-If you find any bugs / wrong highlighting, just fill an issue.
+From this directory:
+
+```bash
+npx @vscode/vsce package
+```
+
+Then install the generated `.vsix` file via **Extensions → Install from VSIX...** in VS Code.

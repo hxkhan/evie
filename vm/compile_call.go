@@ -8,8 +8,8 @@ import (
 
 // compileFunction compiles a function body in a scope of its own and fills in
 // the static information the frame protocol needs
-func (vm *Instance) compileFunction(info *funcInfoStatic, params []string, body ast.Node, ustruct *userStruct) *closure {
-	vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: info, ustruct: ustruct})
+func (vm *Instance) compileFunction(info *funcInfoStatic, params []string, body ast.Node, uclass *userClass) *closure {
+	vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: info, uclass: uclass})
 	scope := &vm.cp.closures.Last(0).scope
 	scope.OpenBlock()
 
@@ -100,14 +100,14 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 	}
 }
 
-func (vm *Instance) compileStructMethod(ustruct *userStruct, node ast.Fn) *userFn {
+func (vm *Instance) compileClassMethod(uclass *userClass, node ast.Fn) *userFn {
 	methodArgs := make([]string, 1+len(node.Args))
 	methodArgs[0] = "this"
 	copy(methodArgs[1:], node.Args)
 
 	info := vm.newFuncInfo(node.Name, methodArgs, node.IsVariadic, true)
 	info.def = vm.at(node)
-	vm.compileFunction(info, methodArgs, node.Action, ustruct)
+	vm.compileFunction(info, methodArgs, node.Action, uclass)
 
 	return &userFn{funcInfoStatic: info}
 }
@@ -253,12 +253,12 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			}
 		}
 
-		if us, isUserStruct := value.asUserStruct(); isUserStruct {
-			if len(us.Fields) != len(arguments) {
-				vm.arity(customError("struct '%v' takes %v argument(s) but %v were supplied", us.Name, len(us.Fields), len(arguments)), node, us.def)
+		if uc, isUserClass := value.asUserClass(); isUserClass {
+			if len(uc.Fields) != len(arguments) {
+				vm.arity(customError("class '%v' takes %v argument(s) but %v were supplied", uc.Name, len(uc.Fields), len(arguments)), node, uc.def)
 			}
 			return func(fbr *fiber) (Value, exception) {
-				return us.construct(fbr, site, arguments)
+				return uc.construct(fbr, site, arguments)
 			}
 		}
 
@@ -278,18 +278,18 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 	// optimise: calling a member, as in `obj.method(...)` or `this.items[i].update()`
 	if iFA, ok := node.Fn.(ast.FieldAccess); ok {
 		if ident, ok := iFA.Lhs.(ast.Ident); ok && ident.Name == "super" {
-			ustruct, structLocal, dynamicStruct, thisLocal := vm.resolveSuper(ident)
+			uclass, classLocal, dynamicClass, thisLocal := vm.resolveSuper(ident)
 			methodID := fieldKeyOf(iFA.Rhs).id
 			return func(fbr *fiber) (Value, exception) {
-				parent := ustruct.Parent
-				if dynamicStruct {
-					if us, ok := fbr.get(structLocal).asUserStruct(); ok {
-						parent = us.Parent
+				parent := uclass.Parent
+				if dynamicClass {
+					if uc, ok := fbr.get(classLocal).asUserClass(); ok {
+						parent = uc.Parent
 					}
 				}
 				fn := parent.lookupMethod(methodID)
 				if fn == nil {
-					return Value{}, errorAt(site, "no method '%s' on parent struct '%s'", iFA.Rhs, parent.Name)
+					return Value{}, errorAt(site, "no method '%s' on parent class '%s'", iFA.Rhs, parent.Name)
 				}
 				if exc := fn.accepts(1 + len(arguments)); exc != nil {
 					return Value{}, exc.at(site)
@@ -390,8 +390,8 @@ func callValue(fbr *fiber, site site, value Value, arguments []instruction) (Val
 	if m, isMethod := value.asMethod(); isMethod {
 		return m.call(fbr, site, arguments)
 	}
-	if us, isUserStruct := value.asUserStruct(); isUserStruct {
-		return us.construct(fbr, site, arguments)
+	if uc, isUserClass := value.asUserClass(); isUserClass {
+		return uc.construct(fbr, site, arguments)
 	}
 	if bt, isBuiltinType := value.asBuiltinType(); isBuiltinType {
 		if bt.Constructor == nil {
@@ -403,13 +403,13 @@ func callValue(fbr *fiber, site site, value Value, arguments []instruction) (Val
 }
 
 // memberSite is one `receiver.name(args)` call site. It remembers the last
-// struct type it saw and the method that resolved to, so a call site that
+// class type it saw and the method that resolved to, so a call site that
 // keeps seeing one type skips the lookup.
 type memberSite struct {
 	key          fieldKey
 	name         string
 	site         site
-	cachedStruct *userStruct
+	cachedClass  *userClass
 	cachedMethod *userFn
 }
 
@@ -417,24 +417,24 @@ func (vm *Instance) newMemberSite(iFA ast.FieldAccess) *memberSite {
 	return &memberSite{key: fieldKeyOf(iFA.Rhs), name: iFA.Rhs, site: vm.at(iFA)}
 }
 
-// call calls the member on obj. A struct method is placed directly into the
+// call calls the member on obj. A class method is placed directly into the
 // callee's frame with no bound method or argument slice; the arguments are
 // evaluated by the callee, after the receiver.
 func (m *memberSite) call(fbr *fiber, obj Value, arguments []instruction) (Value, exception) {
-	if usi, ok := obj.asStructInstance(); ok {
+	if ci, ok := obj.asClassInstance(); ok {
 		// a field holding a callable wins over a method of the same name
-		if slot, ok := usi.InstanceOf.slot(m.key.id); ok {
-			return callValue(fbr, m.site, usi.Fields[slot], arguments)
+		if slot, ok := ci.InstanceOf.slot(m.key.id); ok {
+			return callValue(fbr, m.site, ci.Fields[slot], arguments)
 		}
-		if usi.Dynamic != nil {
-			if field, ok := usi.Dynamic[m.key.name]; ok {
+		if ci.Dynamic != nil {
+			if field, ok := ci.Dynamic[m.key.name]; ok {
 				return callValue(fbr, m.site, field, arguments)
 			}
 		}
 
-		if usi.InstanceOf != m.cachedStruct {
-			m.cachedStruct = usi.InstanceOf
-			m.cachedMethod = usi.InstanceOf.lookupMethod(m.key.id)
+		if ci.InstanceOf != m.cachedClass {
+			m.cachedClass = ci.InstanceOf
+			m.cachedMethod = ci.InstanceOf.lookupMethod(m.key.id)
 		}
 		if m.cachedMethod == nil {
 			return Value{}, memberError(m.site, m.name, obj)

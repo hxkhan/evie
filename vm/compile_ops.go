@@ -165,11 +165,11 @@ func (vm *Instance) emitIsInstanceOf(node ast.IsInstanceOf) instruction {
 			return rhs, exc
 		}
 
-		// structs
-		if us, isUserStruct := rhs.asUserStruct(); isUserStruct {
-			if usi, isUserStructInstance := lhs.asStructInstance(); isUserStructInstance {
-				for cur := usi.InstanceOf; cur != nil; cur = cur.Parent {
-					if cur == us {
+		// classes
+		if uc, isUserClass := rhs.asUserClass(); isUserClass {
+			if ci, isClassInstance := lhs.asClassInstance(); isClassInstance {
+				for cur := ci.InstanceOf; cur != nil; cur = cur.Parent {
+					if cur == uc {
 						return BoxBool(true), nil
 					}
 				}

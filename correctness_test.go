@@ -19,7 +19,7 @@ import (
 
 func TestCrossTypeEqualityNeverCorruptsOrLies(t *testing.T) {
 	code := `package main
-	struct Box(v) {}
+	class Box(v) {}
 	fn f() => 1
 	fn main() {
 		checks := [
@@ -76,7 +76,7 @@ func TestCrossTypeEqualityNeverCorruptsOrLies(t *testing.T) {
 
 func TestTruthinessOfAllTypes(t *testing.T) {
 	code := `package main imports("math")
-	struct User(name) {
+	class User(name) {
 		fn hi() => this.name
 	}
 	fn main() {
@@ -84,12 +84,12 @@ func TestTruthinessOfAllTypes(t *testing.T) {
 		e := error("boom")
 		bm := u.hi
 		sbm := "hi".len
-		if !u { throw error("struct instance should be truthy") }
+		if !u { throw error("class instance should be truthy") }
 		if !e { throw error("error should be truthy") }
 		if !bm { throw error("bound method should be truthy") }
 		if !sbm { throw error("builtin bound method should be truthy") }
 		if !math.sqrt { throw error("GoFunc should be truthy") }
-		if !User { throw error("struct type should be truthy") }
+		if !User { throw error("class type should be truthy") }
 		if !string { throw error("builtin type should be truthy") }
 		if !math { throw error("package should be truthy") }
 
@@ -132,22 +132,22 @@ func TestThreeLevelClosureCapture(t *testing.T) {
 	}
 }
 
-func TestLocalStructMethodCapturesAndDynamicParents(t *testing.T) {
+func TestLocalClassMethodCapturesAndDynamicParents(t *testing.T) {
 	code := `package main
-	struct Base1(x) {
+	class Base1(x) {
 		fn tag() => "B1:" + string(this.x)
 	}
-	struct Base2(x) {
+	class Base2(x) {
 		fn tag() => "B2:" + string(this.x)
 	}
 	fn makeGreeter(prefix) {
-		struct Greeter(name) {
+		class Greeter(name) {
 			fn greet() => prefix + " " + this.name
 		}
 		return Greeter
 	}
 	fn makeSub(Parent, suffix) {
-		struct Sub(x) : Parent {
+		class Sub(x) : Parent {
 			fn tag() => super.tag() + suffix
 		}
 		return Sub
@@ -177,16 +177,16 @@ func TestLocalStructMethodCapturesAndDynamicParents(t *testing.T) {
 
 func TestSuperMethodArityChecked(t *testing.T) {
 	tooFew := `package main
-	struct A(x) { fn add(a, b) => this.x + a + b }
-	struct B(x) : A { fn run() => super.add(1) }
+	class A(x) { fn add(a, b) => this.x + a + b }
+	class B(x) : A { fn run() => super.add(1) }
 	fn main() => B(10).run()`
 	if _, err := runCode(tooFew); err == nil || !strings.Contains(err.Error(), "takes 2 arguments but 1 was supplied") {
 		t.Fatalf("expected arity error for too few args, got %v", err)
 	}
 
 	tooMany := `package main
-	struct A(x) { fn add(a) => this.x + a }
-	struct B(x) : A { fn run() => super.add(1, 2, 3) }
+	class A(x) { fn add(a) => this.x + a }
+	class B(x) : A { fn run() => super.add(1, 2, 3) }
 	fn main() => B(10).run()`
 	if _, err := runCode(tooMany); err == nil || !strings.Contains(err.Error(), "takes 1 argument but 3 were supplied") {
 		t.Fatalf("expected arity error for too many args, got %v", err)
@@ -619,7 +619,7 @@ func TestSemicolonsTrailingCommasAndAnonymousPackageDecls(t *testing.T) {
 		`package main
 		fn () {}`,
 		`package main
-		struct (x) {}`,
+		class (x) {}`,
 	} {
 		if _, err := evie.Eval(bad); err == nil {
 			t.Errorf("expected compile error for unnamed top-level declaration: %s", bad)

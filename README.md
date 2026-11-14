@@ -1,6 +1,6 @@
 # The Evie Programming Language
 
-Evie is a lightweight, dynamically typed scripting language written in pure Go without CGO. Combining the dynamic ergonomics of JavaScript and Python with Go's simplicity and Rust's safe-by-default immutability, Evie features cooperative fibers with `go` and `await`, first-class OOP with structs and inheritance, and seamless Go host embedding.
+Evie is a lightweight, dynamically typed scripting language written in pure Go without CGO. Combining the dynamic ergonomics of JavaScript and Python with Go's simplicity and Rust's safe-by-default immutability, Evie features cooperative fibers with `go` and `await`, first-class OOP with classes and inheritance, and seamless Go host embedding.
 
 Preliminary micro-benchmarks show Evie to be faster than PUC [Lua 5.4.2](https://lua.org/) and Google's [V8 Ignition](https://v8.dev/docs/ignition) JavaScript interpreter. See [here](#benchmarks).
 
@@ -9,24 +9,21 @@ Preliminary micro-benchmarks show Evie to be faster than PUC [Lua 5.4.2](https:/
 ## Showcase
 
 #### Recursive Fibonacci ([examples/fib.ev](./examples/fib.ev))
-<!-- TODO: Replace this image -->
 <a href="./examples/fib.ev">
     <img src="./docs/images/fib.png" width="500" alt="A snippet of Evie code">
 </a>
 
 #### String Interpolation & I/O ([examples/input.ev](./examples/input.ev))
-<!-- TODO: Replace this image -->
 <a href="./examples/input.ev">
     <img src="./docs/images/interpolation.png" width="600" alt="A snippet of Evie code">
 </a>
 
 #### Concurrent Tasks with `go` ([examples/go.ev](./examples/go.ev))
-<!-- TODO: Replace this image -->
 <a href="./examples/go.ev">
     <img src="./docs/images/go.png" width="500" alt="A snippet of Evie code">
 </a>
 
-Tasks spawned with `go` run as fibers of the instance and return stateful, memoized `Task` handles that can be awaited (`await task`, `await.all`, `await.any`, `await.race`). Only one fiber of an instance executes Evie code at a time; a fiber hands over at `await` and inside blocking host functions such as `time.wait`, so shared state never needs locking and a script can never race.
+Tasks spawned with `go` run as fibers of the instance and return stateful, memoized `Task` handles that can be awaited (`await task`, `await.all`, `await.any`, `await.race`, `await.timeout`) or cancelled (`task.cancel()`). Only one fiber of an instance executes Evie code at a time; a fiber hands over at `await` and inside blocking host functions such as `time.wait`, so shared state never needs locking and a script can never race.
 
 To test this program, run `go run ./evie -t ./examples/go.ev`.
 
@@ -43,30 +40,32 @@ Two tasks incrementing one global always end at the exact total, because fibers 
 - **Cooperative & Expressive Concurrency**:
   - `go` spawns concurrent fibers returning stateful `Task` instances.
   - `await` pauses the fiber until task resolution with multi-await memoization.
-  - Multi-task coordination via `await.all()`, `await.any()`, and `await.race()`.
+  - Multi-task coordination, deadlines, and cancellation via `await.all()`, `await.any()`, `await.race()`, `await.timeout()`, and `task.cancel()`.
 - **One Running Fiber per Instance**:
-  - Fibers hand over at `await` and inside blocking host functions, so arrays, objects, structs and globals need no locks and cannot race.
+  - Fibers hand over at `await` and inside blocking host functions, so arrays, objects, classes and globals need no locks and cannot race.
   - Parallelism across instances: every `vm.Instance` has its own runner and heap.
 - **Safe-by-Default Immutability**:
   - `x := 10` creates an immutable binding.
   - `var x := 10` is explicitly required for mutability.
-- **First-Class Structs & OOP**:
+- **First-Class Classes & OOP**:
   - Encapsulated methods with implicit `this`.
-  - Classical single inheritance (`struct Sub : Super { ... }`).
+  - Classical single inheritance (`class Sub : Super { ... }`) with `super.method()` calls.
   - Dynamic instance fields (`p.email = "..."`).
   - First-class bound methods (`fnVal := p.greet`).
   - Polymorphic type checks (`p is Person`, `dog is Animal`).
-- **Modern Control Flow & Iteration**:
-  - `if`, `else`, `while`, `break`, and `continue`.
-  - `for item in collection` and `for idx, item in collection` over arrays, objects, and strings.
+- **Modern Control Flow & Collections**:
+  - `if`, `else`, `switch`, `while`, `break`, and `continue`.
+  - `for item in collection` and `for idx, item in collection` over arrays, objects, strings, and buffers.
+  - Indexing and slicing (`arr[a:b]`, `str[a:b]`, `buf[a:b]`) with UTF-8 character semantics on strings.
 - **Robust Error Handling**:
   - `throw error("...")` and `catch(expr)` semantics with first-class `error` values that know their file, line, column and call trace.
   - Compiler-grade diagnostics: every error shows the offending line with the span underlined, related places, a hint, and suggestions for misspelled names.
-- **High-Performance NaN-Boxing**:
-  - 64-bit NaN-boxed `Value` representation (`number`, `bool`, `string`, `buffer`, `array`, `object`, `struct`, `task`, `error`, `function`, `nil`).
+- **Compact 16-Byte Tagged Value**:
+  - Compact 16-byte tagged `Value` (`uint64` + `unsafe.Pointer`) storing `number`, `bool`, and `nil` inline without heap allocation (`number`, `bool`, `string`, `buffer`, `array`, `object`, `class`, `task`, `error`, `function`, `nil`).
 - **Seamless Go Host Embedding**:
   - Go functions become natives through typed wrappers (`vm.Func1(goFunc)`) or reflection (`vm.Reflect(goFunc)`).
-  - Bidirectional marshaling and unmarshaling into native Go structs (`val.Unmarshal(&struct)`).
+  - Bidirectional marshaling and unmarshaling into native Go structs (`val.Unmarshal(&struct)`, `json.Marshal(val)`).
+  - Per-engine stdlib sandboxing (`Options.Stdlib`, `Options.NoStdlib`) and custom I/O streams (`Options.Stdin`, `Options.Stdout`).
   - One-line script execution (`evie.Eval(...)`).
   - Stopping runaway scripts with `Interrupt()` or a context deadline, without the script being able to catch it.
 - **Pure Go (Zero CGO)**:
@@ -96,6 +95,7 @@ func main() {
 
     // 2. An engine with the standard library and the host package
     eng := evie.New(evie.Options{Packages: []*vm.Package{api}})
+    defer eng.Close()
 
     // 3. Load a script
     _, err := eng.Eval(`package main imports("api")
@@ -120,7 +120,7 @@ func main() {
 }
 ```
 
-Natives can also be written against the call context directly, which is the fastest path and gives full control over argument checking:
+Natives can also be written against the call context directly, which is the fastest path and gives full control over argument checking (use `c.Async` for background tasks tied to the engine's lifecycle):
 
 ```go
 pkg.Func("wait", 1, func(c vm.Call) (vm.Value, error) {
@@ -128,8 +128,10 @@ pkg.Func("wait", 1, func(c vm.Call) (vm.Value, error) {
     if err != nil {
         return vm.Value{}, err
     }
+    timer := time.NewTimer(time.Duration(ms) * time.Millisecond)
+    defer timer.Stop()
     select {
-    case <-time.After(time.Duration(ms) * time.Millisecond):
+    case <-timer.C:
         return vm.Value{}, nil
     case <-c.Context().Done(): // the script was stopped
         return vm.Value{}, context.Cause(c.Context())
@@ -153,17 +155,17 @@ _, err := eng.CallContext(ctx, "main.status", 42) // errors.Is(err, context.Dead
 - [x] Functions, Closures & Variadic Arguments (`...args`)
 - [x] Primitive types (`number`, `bool`, `nil`)
 - [x] Reference types (`string`, `buffer`, `array`, `object`, `function`, `task`, `error`)
-- [x] Structs & OOP (methods, `this`, single inheritance, dynamic fields, bound methods)
-- [x] Control flow (`if`, `else`, `while`, `break`, `continue`)
-- [x] For loops (`for item in col`, `for idx, item in col`)
+- [x] Classes & OOP (methods, `this`, single inheritance, `super`, dynamic fields, bound methods)
+- [x] Control flow (`if`, `else`, `switch`, `while`, `break`, `continue`)
+- [x] For loops (`for item in col`, `for idx, item in col`) & slicing (`arr[a:b]`, `str[a:b]`, `buf[a:b]`)
 - [x] Operators (`+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `?`)
 - [x] Logical operators (`!`, `&&`, `||`)
 - [x] Type checking (`is` operator)
-- [x] Concurrency (`go`, `await`, `await.all`, `await.any`, `await.race`, `Task`)
+- [x] Concurrency (`go`, `await`, `await.all`, `await.any`, `await.race`, `await.timeout`, `Task`, `task.cancel`)
 - [x] One running fiber per instance (no locks, no data races, cooperative await)
 - [x] Scoping (global, package, function, block, captured closures)
 - [x] Error handling (`throw`, `catch(expr)`, `error` type)
-- [x] Go Host Embedding (bidirectional marshaling, function reflection, struct unmarshaling)
+- [x] Go Host Embedding (bidirectional marshaling, function reflection, struct unmarshaling, stdlib sandboxing, custom I/O)
 - [x] Standard library (`io`, `fs`, `math`, `strings`, `time`, `json`)
 - [x] Compiler-style diagnostics (source excerpts, spans, hints, did-you-mean, stack traces)
 - [x] Interrupts and deadlines for runaway scripts (`Interrupt`, `RunFileContext`, `CallContext`)
@@ -192,7 +194,7 @@ For a comprehensive guide covering grammar, types, standard methods, and concurr
 
 > Measured on an Intel i5-13400F under Windows 11 with the programs in [examples/](./examples) (`fib.ev`, `fib.lua`, `fib.js`, ...). Each figure is the median wall time of five runs after a warm-up, process start included.
 
-The [benchmark suite](./benchmarks) tracks 30 programs covering calls, closures, structs, method dispatch, host calls, strings, objects, errors and tasks; [results/latest.md](./benchmarks/results/latest.md) has the current numbers.
+The [benchmark suite](./benchmarks) tracks 30 programs covering calls, closures, classes, method dispatch, host calls, strings, objects, errors and tasks; [results/latest.md](./benchmarks/results/latest.md) has the current numbers.
 
 Why `fib(35)`? Because micro-benchmarks measure fundamental VM metrics:
 - Function invocation and call-frame overhead (`29,860,703` recursive calls)
@@ -231,6 +233,6 @@ go build ./evie
 
 ### Run Tests
 ```bash
-go test -v .
+go test ./...
 go vet ./...
 ```

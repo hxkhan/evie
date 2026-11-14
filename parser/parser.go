@@ -35,7 +35,7 @@ type parser struct {
 var keywords = []string{
 	"package", "imports",
 	"nil", "true", "false",
-	"var", "const", "fn", "struct", "super",
+	"var", "const", "fn", "class", "super",
 	"echo",
 	"return",
 	"if", "else",
@@ -250,8 +250,8 @@ func (ps *parser) handleWords(main token.Token, asExpr bool, precedenceLevel int
 		return ast.Echo{Pos: main.Pos, Value: ps.parse(0, true)}
 	case "fn":
 		return ps.parseFn(main, asExpr, precedenceLevel)
-	case "struct":
-		return ps.parseStruct(main)
+	case "class":
+		return ps.parseClass(main)
 	case "super":
 		if !ps.PeekToken().IsSimple(".") {
 			ps.expected("'.' and a method name after 'super'", main, "")
@@ -603,30 +603,30 @@ func (ps *parser) parseFn(main token.Token, asExpr bool, precedenceLevel int) as
 	return fn
 }
 
-// helper to parse a struct
-func (ps *parser) parseStruct(main token.Token) ast.Node {
-	str := ast.StructDefinition{Pos: main.Pos}
+// helper to parse a class
+func (ps *parser) parseClass(main token.Token) ast.Node {
+	cls := ast.ClassDefinition{Pos: main.Pos}
 	if ps.PeekToken().Type == token.Word {
-		name := ps.name("the struct name")
-		str.Name = name.Literal
-		str.Pos = main.Pos.To(name.Pos)
+		name := ps.name("the class name")
+		cls.Name = name.Literal
+		cls.Pos = main.Pos.To(name.Pos)
 	}
 	var isVariadic bool
-	str.Args, isVariadic = ps.parseNamesList(main, "the field list")
+	cls.Args, isVariadic = ps.parseNamesList(main, "the field list")
 	if isVariadic {
-		ps.fail(ps.last.Pos, "struct fields cannot be variadic")
+		ps.fail(ps.last.Pos, "class fields cannot be variadic")
 	}
 
 	if ps.consume(":") {
-		str.Parent = ps.name("the parent struct after ':'").Literal
+		cls.Parent = ps.name("the parent class after ':'").Literal
 	}
 
 	if !ps.consume("{") {
-		ps.expected("'{' for the struct body", main, "in this struct")
+		ps.expected("'{' for the class body", main, "in this class")
 	}
-	str.Action = ps.parseBlock(ps.last)
+	cls.Action = ps.parseBlock(ps.last)
 
-	return str
+	return cls
 }
 
 // helper to parse names surrounded by parentheses
@@ -789,8 +789,8 @@ func (ps *parser) mustBeValue(node ast.Node, assignOK bool) {
 		what = "a 'switch' statement"
 	case ast.While, ast.For:
 		what = "a loop"
-	case ast.StructDefinition:
-		what = "a struct definition"
+	case ast.ClassDefinition:
+		what = "a class definition"
 	default:
 		return
 	}

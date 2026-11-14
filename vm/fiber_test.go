@@ -13,7 +13,7 @@ func TestCallsReleaseFiberStateOnException(t *testing.T) {
 	_, err := evm.EvalSource(diag.NewSource("", []byte(`
 	package main
 
-	struct Box(n) {
+	class Box(n) {
 		fn add(k) {
 			this.n = this.n + k
 		}

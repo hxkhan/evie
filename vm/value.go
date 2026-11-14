@@ -57,8 +57,8 @@ const (
 	kindBuffer
 	kindObject
 	kindBuiltinType
-	kindStruct
-	kindStructInstance
+	kindClass
+	kindClassInstance
 	kindError
 	kindHost
 )
@@ -118,14 +118,14 @@ func BoxObject(obj map[string]Value) Value {
 	return Value{scalar: kindObject, pointer: unsafe.Pointer(&obj)}
 }
 
-// boxUserStruct boxes an evie struct
-func boxUserStruct(obj *userStruct) Value {
-	return Value{scalar: kindStruct, pointer: unsafe.Pointer(obj)}
+// boxUserClass boxes an evie class
+func boxUserClass(obj *userClass) Value {
+	return Value{scalar: kindClass, pointer: unsafe.Pointer(obj)}
 }
 
-// boxStructInstance boxes an evie struct instance
-func boxStructInstance(obj *structInstance) Value {
-	return Value{scalar: kindStructInstance, pointer: unsafe.Pointer(obj)}
+// boxClassInstance boxes an evie class instance
+func boxClassInstance(obj *classInstance) Value {
+	return Value{scalar: kindClassInstance, pointer: unsafe.Pointer(obj)}
 }
 
 // boxTask boxes an evie task
@@ -158,7 +158,7 @@ func (x Value) isImmutableConstant() bool {
 		return true
 	}
 	switch x.scalar {
-	case kindString, kindUserFn, kindGoFunc, kindStruct, kindBuiltinType, kindPackage:
+	case kindString, kindUserFn, kindGoFunc, kindClass, kindBuiltinType, kindPackage:
 		return true
 	}
 	return false
@@ -212,18 +212,18 @@ func (x Value) AsObject() (obj map[string]Value, ok bool) {
 	return *(*map[string]Value)(x.pointer), true
 }
 
-func (x Value) asUserStruct() (obj *userStruct, ok bool) {
-	if x.scalar != kindStruct || isKnown(x.pointer) {
+func (x Value) asUserClass() (obj *userClass, ok bool) {
+	if x.scalar != kindClass || isKnown(x.pointer) {
 		return nil, false
 	}
-	return (*userStruct)(x.pointer), true
+	return (*userClass)(x.pointer), true
 }
 
-func (x Value) asStructInstance() (obj *structInstance, ok bool) {
-	if x.scalar != kindStructInstance || isKnown(x.pointer) {
+func (x Value) asClassInstance() (obj *classInstance, ok bool) {
+	if x.scalar != kindClassInstance || isKnown(x.pointer) {
 		return nil, false
 	}
-	return (*structInstance)(x.pointer), true
+	return (*classInstance)(x.pointer), true
 }
 
 func (x Value) asBuiltinType() (obj *builtinType, ok bool) {
@@ -301,7 +301,7 @@ func (x Value) IsTruthy() bool {
 	case kindBuffer:
 		return len(*(*[]byte)(x.pointer)) != 0
 	default:
-		// functions, bound methods, struct types and instances, tasks, errors,
+		// functions, bound methods, class types and instances, tasks, errors,
 		// packages, builtin types and host values are truthy
 		return true
 	}
@@ -359,9 +359,9 @@ func (x Value) String() string {
 	case kindUserFn:
 		//return (*UserFn)(x.pointer).String()
 		return "callable"
-	case kindStructInstance:
+	case kindClassInstance:
 		var builder strings.Builder
-		(*structInstance)(x.pointer).writeTo(&builder, nil)
+		(*classInstance)(x.pointer).writeTo(&builder, nil)
 		return builder.String()
 	case kindGoFunc:
 		fn := (*GoFunc)(x.pointer)
@@ -380,8 +380,8 @@ func (x Value) String() string {
 		x.writeTo(&builder, nil, false)
 		return builder.String()
 
-	case kindStruct:
-		obj := (*userStruct)(x.pointer)
+	case kindClass:
+		obj := (*userClass)(x.pointer)
 		return fmt.Sprintf("<type %v>", obj.Name)
 	case kindTask:
 		t := (*Task)(x.pointer)
@@ -428,8 +428,8 @@ func (x Value) writeTo(builder *strings.Builder, seen map[unsafe.Pointer]bool, q
 		case kindArray:
 			(*Array)(x.pointer).writeTo(builder, seen)
 			return
-		case kindStructInstance:
-			(*structInstance)(x.pointer).writeTo(builder, seen)
+		case kindClassInstance:
+			(*classInstance)(x.pointer).writeTo(builder, seen)
 			return
 		case kindObject:
 			obj := *(*map[string]Value)(x.pointer)
@@ -490,10 +490,10 @@ func (x Value) TypeOf() string {
 		return "method"
 	case kindBuffer:
 		return "buffer"
-	case kindStruct:
-		return "struct"
-	case kindStructInstance:
-		return "struct"
+	case kindClass:
+		return "class"
+	case kindClassInstance:
+		return "class"
 	case kindBuiltinType:
 		return "type"
 	case kindError:
@@ -506,7 +506,7 @@ func (x Value) TypeOf() string {
 }
 
 // fieldKey names a member that appears as a literal name in the source. Objects
-// are keyed by the name itself; structs, packages and builtin types by the
+// are keyed by the name itself; classes, packages and builtin types by the
 // interned id, which the compiler resolves once.
 type fieldKey struct {
 	id   fields.ID
@@ -562,8 +562,8 @@ func (x Value) getField(k fieldKey) (field Value, ok bool) {
 		value, exists := obj.Fields[k.id]
 		return value, exists
 
-	case kindStructInstance:
-		obj := (*structInstance)(x.pointer)
+	case kindClassInstance:
+		obj := (*classInstance)(x.pointer)
 		if value, exists := obj.GetField(k.id); exists {
 			return value, true
 		}
@@ -630,10 +630,10 @@ func (x Value) memberNames() []string {
 			}
 		}
 		return names
-	case kindStructInstance:
-		usi := (*structInstance)(x.pointer)
+	case kindClassInstance:
+		ci := (*classInstance)(x.pointer)
 		var names []string
-		for cur := usi.InstanceOf; cur != nil; cur = cur.Parent {
+		for cur := ci.InstanceOf; cur != nil; cur = cur.Parent {
 			for _, f := range cur.Fields {
 				names = append(names, fields.Lookup(f))
 			}
@@ -641,7 +641,7 @@ func (x Value) memberNames() []string {
 				names = append(names, fields.Lookup(id))
 			}
 		}
-		return append(names, sortedKeys(usi.Dynamic)...)
+		return append(names, sortedKeys(ci.Dynamic)...)
 	}
 	return nil
 }
@@ -687,9 +687,9 @@ func (x Value) dotAccess(k fieldKey) (field Value) {
 			return Value{}
 		}
 		return *value.Value
-	case kindStructInstance:
-		usi := (*structInstance)(x.pointer)
-		if method := usi.InstanceOf.lookupMethod(k.id); method != nil {
+	case kindClassInstance:
+		ci := (*classInstance)(x.pointer)
+		if method := ci.InstanceOf.lookupMethod(k.id); method != nil {
 			return boxUserFnPtr(method)
 		}
 		return Value{}
@@ -700,11 +700,11 @@ func (x Value) dotAccess(k fieldKey) (field Value) {
 }
 
 // IsCallable reports whether the value can be invoked via Call: functions,
-// bound methods, and struct or builtin types, which construct a value.
+// bound methods, and class or builtin types, which construct a value.
 func (x Value) IsCallable() bool {
 	if !isKnown(x.pointer) {
 		switch x.scalar {
-		case kindUserFn, kindGoFunc, kindBoundMethod, kindStruct:
+		case kindUserFn, kindGoFunc, kindBoundMethod, kindClass:
 			return true
 		case kindBuiltinType:
 			return (*builtinType)(x.pointer).Constructor != nil
@@ -737,8 +737,8 @@ func (x Value) AcceptsArgs() bool {
 				return fn.isVariadic || fn.arguments > 0
 			}
 			return bm.fn.AcceptsArgs()
-		case kindStruct:
-			return len((*userStruct)(x.pointer).Fields) > 0
+		case kindClass:
+			return len((*userClass)(x.pointer).Fields) > 0
 		case kindBuiltinType:
 			fn := (*builtinType)(x.pointer).Constructor
 			return fn != nil && (fn.isVariadic || fn.arguments > 0)
@@ -771,9 +771,9 @@ func (x Value) callGuarded(fbr *fiber, args ...Value) (result Value, exc excepti
 		case kindBoundMethod:
 			bm := (*boundMethod)(x.pointer)
 			return bm.callGuarded(fbr, args...)
-		case kindStruct:
-			us := (*userStruct)(x.pointer)
-			return us.instantiate(args)
+		case kindClass:
+			uc := (*userClass)(x.pointer)
+			return uc.instantiate(args)
 		case kindBuiltinType:
 			bt := (*builtinType)(x.pointer)
 			if bt.Constructor == nil {

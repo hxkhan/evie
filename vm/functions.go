@@ -23,7 +23,7 @@ type funcInfoStatic struct {
 	name       string      // name of the function
 	args       []string    // argument names, including the receiver of a method
 	isVariadic bool        // variadic function (...args)
-	isMethod   bool        // declared inside a struct; args[0] is the receiver
+	isMethod   bool        // declared inside a class; args[0] is the receiver
 	minArgs    int         // fewest arguments a call may pass, receiver included
 	maxArgs    int         // most arguments a call may pass; unbounded when variadic
 	locals     []bool      // all locals & true for those that escape

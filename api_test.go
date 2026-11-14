@@ -56,18 +56,18 @@ func boolOf(v vm.Value) bool {
 	return b
 }
 
-// hosts read and write fields of objects and struct instances by name
+// hosts read and write fields of objects and class instances by name
 func TestPublicFields(t *testing.T) {
 	eng := evie.New()
-	if _, err := eng.Load("shapes.ev", []byte("package shapes\nstruct Point(x, y) {}\nfn make() => Point(1, 2)\nfn obj() => {a: 1}")); err != nil {
+	if _, err := eng.Load("shapes.ev", []byte("package shapes\nclass Point(x, y) {}\nfn make() => Point(1, 2)\nfn obj() => {a: 1}")); err != nil {
 		t.Fatal(err)
 	}
 	p, err := eng.Call("shapes.make")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if name, ok := p.StructName(); !ok || name != "Point" {
-		t.Fatalf("StructName = %q, %v", name, ok)
+	if name, ok := p.ClassName(); !ok || name != "Point" {
+		t.Fatalf("ClassName = %q, %v", name, ok)
 	}
 	if x, ok := p.Field("x"); !ok || x.String() != "1" {
 		t.Fatalf("Field(x) = %v, %v", x, ok)

@@ -1,1 +1,9 @@
-.vscode/launch.json
+# Build artifacts & binaries
+*.exe
+*.vsix
+
+# Local IDE & scratch files
+**/.vscode/launch.json
+ROADMAP.md
+ignored/
+examples/test.ev

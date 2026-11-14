@@ -2,7 +2,7 @@ package main
 
 imports("io")
 
-struct Animal(name) {
+class Animal(name) {
     fn speak() {
         return this.name + " makes a generic animal sound"
     }
@@ -12,7 +12,7 @@ struct Animal(name) {
     }
 }
 
-struct Dog(name, breed) : Animal {
+class Dog(name, breed) : Animal {
     // Method override
     fn speak() {
         return this.name + " barks: Woof! Woof!"
@@ -24,7 +24,7 @@ struct Dog(name, breed) : Animal {
     }
 }
 
-struct Cat(name) : Animal {
+class Cat(name) : Animal {
     // Method override
     fn speak() {
         return this.name + " purrs: Meow"

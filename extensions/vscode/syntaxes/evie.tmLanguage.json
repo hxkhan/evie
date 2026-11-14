@@ -1,15 +1,13 @@
 {
 	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
 	"name": "Evie",
+	"scopeName": "source.ev",
 	"patterns": [
 		{
-			"include": "#keywords"
+			"include": "#comments"
 		},
 		{
-			"include": "#types"
-		},
-		{
-			"include": "#functions"
+			"include": "#block_comment"
 		},
 		{
 			"include": "#template_literals"
@@ -18,13 +16,19 @@
 			"include": "#strings"
 		},
 		{
-			"include": "#chars"
+			"include": "#declarations"
 		},
 		{
-			"include": "#comments"
+			"include": "#keywords"
 		},
 		{
-			"include": "#block_comment"
+			"include": "#types"
+		},
+		{
+			"include": "#constants"
+		},
+		{
+			"include": "#calls"
 		},
 		{
 			"include": "#numeric_literals"
@@ -33,47 +37,11 @@
 			"include": "#operators"
 		},
 		{
-			"include": "#constants"
-		},
-		{
 			"include": "#identifiers"
 		}
 	],
 	"repository": {
-		"keywords": {
-			"patterns": [
-				{
-					"comment": "Control flow keywords",
-					"name": "keyword.control.evie",
-					"match": "\\b(if|else|while|for|in|continue|break|return|switch|case|default|throw|is|catch|go|unsynced|synced|agnostic)\\b"
-				},
-				{
-					"comment": "Declaration keywords",
-					"name": "keyword.declaration.evie",
-					"match": "\\b(package|pub|var|fn|struct|record|static|imports)\\b"
-				},
-				{
-					"comment": "Other keywords",
-					"name": "keyword.other.evie",
-					"match": "\\b(echo|self|this)\\b"
-				},
-				{
-					"comment": "Await and variants",
-					"name": "keyword.control.await.evie",
-					"match": "\\bawait(\\.(all|any|race))?\\b"
-				}
-			]
-		},
-		"types": {
-			"patterns": [
-				{
-					"comment": "Built-in types",
-					"match": "\\b(bool|number|string|error)\\b",
-					"name": "entity.name.type.evie"
-				}
-			]
-		},
-		"functions": {
+		"declarations": {
 			"patterns": [
 				{
 					"comment": "Function definitions with parameters",
@@ -88,6 +56,10 @@
 						"3": {
 							"patterns": [
 								{
+									"match": "\\.\\.\\.",
+									"name": "keyword.operator.variadic.evie"
+								},
+								{
 									"match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b",
 									"name": "variable.parameter.evie"
 								}
@@ -96,13 +68,75 @@
 					}
 				},
 				{
-					"comment": "Method calls (object.method)",
-					"match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+					"comment": "Class definitions with fields and optional inheritance",
+					"match": "\\b(class)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(([^)]*)\\)(?:\\s*:\\s*([A-Za-z_][A-Za-z0-9_]*))?",
 					"captures": {
 						"1": {
-							"name": "variable.other.object.evie"
+							"name": "keyword.declaration.class.evie"
 						},
 						"2": {
+							"name": "entity.name.type.class.evie"
+						},
+						"3": {
+							"patterns": [
+								{
+									"match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b",
+									"name": "variable.parameter.evie"
+								}
+							]
+						},
+						"4": {
+							"name": "entity.other.inherited-class.evie"
+						}
+					}
+				}
+			]
+		},
+		"keywords": {
+			"patterns": [
+				{
+					"comment": "Await and variants",
+					"name": "keyword.control.await.evie",
+					"match": "\\bawait(\\.(all|any|race|timeout))?\\b"
+				},
+				{
+					"comment": "Control flow keywords",
+					"name": "keyword.control.evie",
+					"match": "\\b(if|else|while|for|in|continue|break|return|switch|case|default|throw|is|catch|go)\\b"
+				},
+				{
+					"comment": "Declaration keywords",
+					"name": "keyword.declaration.evie",
+					"match": "\\b(package|imports|var|const|fn|class)\\b"
+				},
+				{
+					"comment": "Language receiver variables",
+					"name": "variable.language.evie",
+					"match": "\\b(this|super)\\b"
+				},
+				{
+					"comment": "Other keywords",
+					"name": "keyword.other.evie",
+					"match": "\\b(echo)\\b"
+				}
+			]
+		},
+		"types": {
+			"patterns": [
+				{
+					"comment": "Built-in types",
+					"match": "\\b(number|bool|string|buffer|array|object|task|error)\\b",
+					"name": "entity.name.type.evie"
+				}
+			]
+		},
+		"calls": {
+			"patterns": [
+				{
+					"comment": "Method calls (.method())",
+					"match": "\\.([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+					"captures": {
+						"1": {
 							"name": "entity.name.function.method.evie"
 						}
 					}
@@ -124,46 +158,128 @@
 			"end": "`",
 			"patterns": [
 				{
+					"name": "constant.character.escape.evie",
+					"match": "\\\\([\"`\\\\ntr0{}])"
+				},
+				{
+					"name": "invalid.illegal.escape.evie",
+					"match": "\\\\."
+				},
+				{
 					"name": "meta.template.expression.evie",
 					"begin": "\\{",
 					"end": "\\}",
+					"beginCaptures": {
+						"0": {
+							"name": "punctuation.definition.template-expression.begin.evie"
+						}
+					},
+					"endCaptures": {
+						"0": {
+							"name": "punctuation.definition.template-expression.end.evie"
+						}
+					},
 					"patterns": [
 						{
-							"include": "#keywords"
+							"include": "#template_braces"
 						},
 						{
-							"include": "#functions"
+							"include": "#comments"
 						},
 						{
-							"include": "#operators"
+							"include": "#block_comment"
 						},
 						{
-							"include": "#constants"
-						},
-						{
-							"include": "#numeric_literals"
+							"include": "#template_literals"
 						},
 						{
 							"include": "#strings"
 						},
 						{
-							"name": "variable.other.evie",
-							"match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+							"include": "#declarations"
+						},
+						{
+							"include": "#keywords"
+						},
+						{
+							"include": "#types"
+						},
+						{
+							"include": "#constants"
+						},
+						{
+							"include": "#calls"
+						},
+						{
+							"include": "#numeric_literals"
+						},
+						{
+							"include": "#operators"
+						},
+						{
+							"include": "#identifiers"
 						}
 					]
+				}
+			]
+		},
+		"template_braces": {
+			"begin": "\\{",
+			"end": "\\}",
+			"patterns": [
+				{
+					"include": "#template_braces"
 				},
 				{
-					"name": "constant.character.escape.evie",
-					"match": "\\\\([\"`\\\\/bfnrt]|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|[0-7]{1,3})"
+					"include": "#comments"
 				},
 				{
-					"name": "invalid.illegal.escape.evie",
-					"match": "\\\\."
+					"include": "#block_comment"
+				},
+				{
+					"include": "#template_literals"
+				},
+				{
+					"include": "#strings"
+				},
+				{
+					"include": "#declarations"
+				},
+				{
+					"include": "#keywords"
+				},
+				{
+					"include": "#types"
+				},
+				{
+					"include": "#constants"
+				},
+				{
+					"include": "#calls"
+				},
+				{
+					"include": "#numeric_literals"
+				},
+				{
+					"include": "#operators"
+				},
+				{
+					"include": "#identifiers"
 				}
 			]
 		},
 		"operators": {
 			"patterns": [
+				{
+					"comment": "Arrow function operator",
+					"name": "storage.type.function.arrow.evie",
+					"match": "=>"
+				},
+				{
+					"comment": "Variadic operator",
+					"name": "keyword.operator.variadic.evie",
+					"match": "\\.\\.\\."
+				},
 				{
 					"comment": "Logical operators",
 					"name": "keyword.operator.logical.evie",
@@ -177,22 +293,17 @@
 				{
 					"comment": "Assignment operators",
 					"name": "keyword.operator.assignment.evie",
-					"match": "(\\+=|-=|/=|\\*=|%=|\\^=|&=|&^=|\\|=|<<=|>>=|:=|=)"
-				},
-				{
-					"comment": "Increment/decrement operators",
-					"name": "keyword.operator.increment.evie",
-					"match": "(\\+\\+|--)"
+					"match": "(\\+=|-=|/=|\\*=|%=|:=|=)"
 				},
 				{
 					"comment": "Arithmetic operators",
 					"name": "keyword.operator.arithmetic.evie",
-					"match": "(\\+|-|/|\\*|%|\\^)"
+					"match": "(\\+|-|/|\\*|%)"
 				},
 				{
-					"comment": "Bitwise operators",
-					"name": "keyword.operator.bitwise.evie",
-					"match": "(&|\\||<<|>>|&^)"
+					"comment": "Field existence operator",
+					"name": "keyword.operator.existence.evie",
+					"match": "\\?"
 				}
 			]
 		},
@@ -229,27 +340,7 @@
 					"patterns": [
 						{
 							"name": "constant.character.escape.evie",
-							"match": "\\\\([\"\\\\/bfnrt]|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|[0-7]{1,3})"
-						},
-						{
-							"name": "invalid.illegal.escape.evie",
-							"match": "\\\\."
-						}
-					]
-				}
-			]
-		},
-		"chars": {
-			"patterns": [
-				{
-					"comment": "Character literals",
-					"name": "string.quoted.single.evie",
-					"begin": "'",
-					"end": "'",
-					"patterns": [
-						{
-							"name": "constant.character.escape.evie",
-							"match": "\\\\(['\\\\/bfnrt]|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|[0-7]{1,3})"
+							"match": "\\\\([\"\\\\ntr0])"
 						},
 						{
 							"name": "invalid.illegal.escape.evie",
@@ -294,34 +385,9 @@
 		"numeric_literals": {
 			"patterns": [
 				{
-					"comment": "Floating-point literals with exponent",
+					"comment": "Floating-point literals",
 					"name": "constant.numeric.float.evie",
-					"match": "\\b\\d+\\.\\d+([eE][-+]?\\d+)?[fF]?\\b"
-				},
-				{
-					"comment": "Floating-point literals without decimal",
-					"name": "constant.numeric.float.evie",
-					"match": "\\b\\d+[eE][-+]?\\d+[fF]?\\b"
-				},
-				{
-					"comment": "Floating-point literals with just decimal",
-					"name": "constant.numeric.float.evie",
-					"match": "\\b\\d+\\.[fF]?\\b"
-				},
-				{
-					"comment": "Binary literals",
-					"name": "constant.numeric.binary.evie",
-					"match": "\\b0[bB][01]+\\b"
-				},
-				{
-					"comment": "Hexadecimal literals",
-					"name": "constant.numeric.hex.evie",
-					"match": "\\b0[xX][0-9a-fA-F]+\\b"
-				},
-				{
-					"comment": "Octal literals",
-					"name": "constant.numeric.octal.evie",
-					"match": "\\b0[oO][0-7]+\\b"
+					"match": "\\b\\d+\\.\\d+\\b"
 				},
 				{
 					"comment": "Integer literals",
@@ -330,6 +396,5 @@
 				}
 			]
 		}
-	},
-	"scopeName": "source.ev"
+	}
 }

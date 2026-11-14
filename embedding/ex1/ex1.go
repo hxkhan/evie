@@ -14,13 +14,13 @@ func main() {
 	prelude.Set("pi", vm.BoxNumber(3.14159))
 
 	eng := evie.New(evie.Options{Prelude: prelude})
+	defer eng.Close()
 
 	_, err := eng.Eval(`package main imports("io", "time")
 
 	fn add(a, b) {
 		io.println("add called in the evie world")
-		io.println("about to wait pi seconds")
-		time.wait(pi * 1000)
+		time.wait(pi * 10)
 		return a + b
 	}`)
 	if err != nil {

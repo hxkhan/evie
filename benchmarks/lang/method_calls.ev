@@ -1,8 +1,8 @@
-// Method dispatch: a monomorphic site, a site alternating between two struct types, methods of zero to two arguments, methods calling methods on fields, and in-place updates.
+// Method dispatch: a monomorphic site, a site alternating between two class types, methods of zero to two arguments, methods calling methods on fields, and in-place updates.
 // expect: 6700000
 package main
 
-struct Circle(r) {
+class Circle(r) {
     fn area() => 3 * this.r * this.r
     fn grow(d) {
         this.r += d
@@ -10,7 +10,7 @@ struct Circle(r) {
     fn scaled(k, d) => this.r * k + d
 }
 
-struct Square(s) {
+class Square(s) {
     fn area() => this.s * this.s
     fn grow(d) {
         this.s += d
@@ -18,7 +18,7 @@ struct Square(s) {
     fn scaled(k, d) => this.s * k - d
 }
 
-struct Pair(a, b) {
+class Pair(a, b) {
     fn total() => this.a.area() + this.b.area()
 }
 

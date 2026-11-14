@@ -183,36 +183,36 @@ func compared(z Value, ok bool, x, y Value, op string) (bool, error) {
 	return b, nil
 }
 
-// Field reads a field of an object or of a struct instance by name
+// Field reads a field of an object or of a class instance by name
 func (x Value) Field(name string) (Value, bool) {
 	if obj, ok := x.AsObject(); ok {
 		v, exists := obj[name]
 		return v, exists
 	}
-	if usi, ok := x.asStructInstance(); ok {
-		return usi.getFieldByName(name)
+	if ci, ok := x.asClassInstance(); ok {
+		return ci.getFieldByName(name)
 	}
 	return Value{}, false
 }
 
-// SetField sets a field of an object or of a struct instance by name; a name
-// a struct does not declare becomes a dynamic field, as in scripts
+// SetField sets a field of an object or of a class instance by name; a name
+// a class does not declare becomes a dynamic field, as in scripts
 func (x Value) SetField(name string, v Value) error {
 	if obj, ok := x.AsObject(); ok {
 		obj[name] = v
 		return nil
 	}
-	if usi, ok := x.asStructInstance(); ok {
-		usi.setFieldByName(name, v)
+	if ci, ok := x.asClassInstance(); ok {
+		ci.setFieldByName(name, v)
 		return nil
 	}
 	return fmt.Errorf("cannot set field '%s' on %s", name, article(x))
 }
 
-// StructName is the name of the struct a struct instance was made from
-func (x Value) StructName() (string, bool) {
-	if usi, ok := x.asStructInstance(); ok {
-		return usi.InstanceOf.Name, true
+// ClassName is the name of the class a class instance was made from
+func (x Value) ClassName() (string, bool) {
+	if ci, ok := x.asClassInstance(); ok {
+		return ci.InstanceOf.Name, true
 	}
 	return "", false
 }

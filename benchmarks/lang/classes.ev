@@ -1,8 +1,8 @@
-// Struct workloads: instantiation, field access through this, method calls, field mutation, bound methods.
+// Class workloads: instantiation, field access through this, method calls, field mutation, bound methods.
 // expect: 1950001
 package main
 
-struct Vec(x, y) {
+class Vec(x, y) {
     fn add(o) => Vec(this.x + o.x, this.y + o.y)
     fn dot(o) => this.x * o.x + this.y * o.y
     fn scale(k) {
@@ -11,7 +11,7 @@ struct Vec(x, y) {
     }
 }
 
-struct Counter(n) {
+class Counter(n) {
     fn inc() {
         this.n = this.n + 1
     }

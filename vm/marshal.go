@@ -683,7 +683,7 @@ func (v Value) toGo(seen map[unsafe.Pointer]any) any {
 		}
 		return res
 	}
-	if inst, ok := v.asStructInstance(); ok {
+	if inst, ok := v.asClassInstance(); ok {
 		ptr := unsafe.Pointer(inst)
 		if existing, ok := seen[ptr]; ok {
 			return existing
@@ -695,7 +695,7 @@ func (v Value) toGo(seen map[unsafe.Pointer]any) any {
 		seen[ptr] = res
 		defer delete(seen, ptr)
 		if inst.InstanceOf != nil {
-			res["__struct"] = inst.InstanceOf.Name
+			res["__class"] = inst.InstanceOf.Name
 			for i, fid := range inst.InstanceOf.Fields {
 				if i < len(inst.Fields) {
 					res[fields.Lookup(fid)] = inst.Fields[i].toGo(seen)
@@ -729,7 +729,7 @@ func (v Value) toGo(seen map[unsafe.Pointer]any) any {
 }
 
 // MarshalJSON implements json.Marshaler for Evie values. It encodes nil, bool,
-// finite numbers, strings, arrays, objects and struct instances (without
+// finite numbers, strings, arrays, objects and class instances (without
 // synthetic metadata keys) and rejects cycles, NaN/Inf, and non-JSON values
 // such as functions, tasks, packages, errors and buffers.
 func (v Value) MarshalJSON() ([]byte, error) {
@@ -829,11 +829,11 @@ func (v Value) writeJSON(b *strings.Builder, seen map[unsafe.Pointer]bool) error
 		b.WriteByte('}')
 		return nil
 
-	case kindStructInstance:
-		inst := (*structInstance)(v.pointer)
+	case kindClassInstance:
+		inst := (*classInstance)(v.pointer)
 		ptr := unsafe.Pointer(inst)
 		if seen[ptr] {
-			return fmt.Errorf("cannot encode cyclic struct '%s' as JSON", inst.InstanceOf.Name)
+			return fmt.Errorf("cannot encode cyclic class '%s' as JSON", inst.InstanceOf.Name)
 		}
 		if seen == nil {
 			seen = make(map[unsafe.Pointer]bool)

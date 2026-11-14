@@ -442,20 +442,20 @@ func TestObjects(t *testing.T) {
 	assertNumber(t, run(t, codeObjFunction), 42)
 }
 
-func TestStructs(t *testing.T) {
-	codeStruct := `
+func TestClasses(t *testing.T) {
+	codeClass := `
 	package main
-	struct Point(x, y) {}
+	class Point(x, y) {}
 	fn main() {
 		p := Point(10, 20)
 		return p.x + p.y
 	}
 	`
-	assertNumber(t, run(t, codeStruct), 30)
+	assertNumber(t, run(t, codeClass), 30)
 
 	codeIsInstance := `
 	package main
-	struct Point(x, y) {}
+	class Point(x, y) {}
 	fn main() {
 		p := Point(1, 2)
 		return p is Point
@@ -463,10 +463,10 @@ func TestStructs(t *testing.T) {
 	`
 	assertBool(t, run(t, codeIsInstance), true)
 
-	// Struct method with this
+	// Class method with this
 	codeMethod := `
 	package main
-	struct Person(name, title) {
+	class Person(name, title) {
 		fn greet(prefix) {
 			return prefix + " " + this.name
 		}
@@ -479,10 +479,10 @@ func TestStructs(t *testing.T) {
 	`
 	assertString(t, run(t, codeMethod), "Hello Alice, title: Engineer")
 
-	// Struct method mutating fields
+	// Class method mutating fields
 	codeMutate := `
 	package main
-	struct Counter(count) {
+	class Counter(count) {
 		fn increment() {
 			this.count = this.count + 1
 		}
@@ -499,7 +499,7 @@ func TestStructs(t *testing.T) {
 	// Method calling another method on this
 	codeMethodCallMethod := `
 	package main
-	struct Greeter(name) {
+	class Greeter(name) {
 		fn base() => "Hello " + this.name
 		fn excited() => this.base() + "!"
 	}
@@ -510,10 +510,10 @@ func TestStructs(t *testing.T) {
 	`
 	assertString(t, run(t, codeMethodCallMethod), "Hello Bob!")
 
-	// Variadic struct method
+	// Variadic class method
 	codeVariadicMethod := `
 	package main
-	struct Formatter(prefix) {
+	class Formatter(prefix) {
 		fn format(...items) {
 			var res := this.prefix
 			var i := 0
@@ -534,7 +534,7 @@ func TestStructs(t *testing.T) {
 	// Bound method extracted and invoked
 	codeBoundMethod := `
 	package main
-	struct Greeter(name) {
+	class Greeter(name) {
 		fn greet(greeting) => greeting + ", " + this.name
 	}
 	fn main() {
@@ -548,7 +548,7 @@ func TestStructs(t *testing.T) {
 	// Calling method with missing argument raises error
 	codeInvalidArgCount := `
 	package main
-	struct Dog(name) {
+	class Dog(name) {
 		fn bark(sound) => this.name + " says " + sound
 	}
 	fn main() {
@@ -562,16 +562,16 @@ func TestStructs(t *testing.T) {
 	}
 }
 
-func TestStructInheritance(t *testing.T) {
+func TestClassInheritance(t *testing.T) {
 	codeInheritance := `
 	package main
-	struct Animal(name) {
+	class Animal(name) {
 		fn speak() => this.name + " makes a sound"
 	}
-	struct Dog(name, breed) : Animal {
+	class Dog(name, breed) : Animal {
 		fn bark() => "Woof! I am " + this.name
 	}
-	struct Cat(name) : Animal {
+	class Cat(name) : Animal {
 		fn speak() => "Meow! I am " + this.name
 	}
 	fn main() {
@@ -608,13 +608,13 @@ func TestStructInheritance(t *testing.T) {
 	// Multi-level inheritance
 	codeMultiLevel := `
 	package main
-	struct Animal(name) {
+	class Animal(name) {
 		fn kind() => "animal: " + this.name
 	}
-	struct Mammal(name) : Animal {
+	class Mammal(name) : Animal {
 		fn warmBlooded() => true
 	}
-	struct Dog(name) : Mammal {
+	class Dog(name) : Mammal {
 		fn bark() => "woof"
 	}
 	fn main() {
@@ -625,22 +625,22 @@ func TestStructInheritance(t *testing.T) {
 	`
 	assertBool(t, run(t, codeMultiLevel), true)
 
-	// Undefined parent struct error
+	// Undefined parent class error
 	codeUndefinedParent := `
 	package main
-	struct Child() : NonExistentParent {}
+	class Child() : NonExistentParent {}
 	fn main() {}
 	`
 	_, err := runCode(codeUndefinedParent)
 	if err == nil {
-		t.Fatal("expected error for undefined parent struct")
+		t.Fatal("expected error for undefined parent class")
 	}
 
 	// Cyclical inheritance error
 	codeCycle := `
 	package main
-	struct Alpha() : Beta {}
-	struct Beta() : Alpha {}
+	class Alpha() : Beta {}
+	class Beta() : Alpha {}
 	fn main() {}
 	`
 	_, err = runCode(codeCycle)
@@ -917,11 +917,11 @@ func TestConcurrency(t *testing.T) {
 	assertBool(t, run(t, codeBlocking), true)
 }
 
-func TestStructConcurrency(t *testing.T) {
-	// 1. Independent struct instances in separate tasks
+func TestClassConcurrency(t *testing.T) {
+	// 1. Independent class instances in separate tasks
 	codeParallel := `
 	package main
-	struct Worker(id, iterations) {
+	class Worker(id, iterations) {
 		fn run() {
 			var sum := 0
 			var i := 0
@@ -943,11 +943,11 @@ func TestStructConcurrency(t *testing.T) {
 	`
 	assertBool(t, run(t, codeParallel), true)
 
-	// 2. Concurrent field reads and mutations on the same struct instance
+	// 2. Concurrent field reads and mutations on the same class instance
 	// Interleaved fibers share one instance safely because only one runs at a time
 	codeConcurrentAccess := `
 	package main
-	struct Counter(val) {
+	class Counter(val) {
 		fn bump() {
 			this.val = this.val + 1
 		}
@@ -978,7 +978,7 @@ func TestStructConcurrency(t *testing.T) {
 	// 3. Updates from several tasks on one instance never get lost
 	codeSyncedMethod := `
 	package main
-	struct SafeCounter(count) {
+	class SafeCounter(count) {
 		fn inc() {
 			this.count = this.count + 1
 		}
@@ -1002,7 +1002,7 @@ func TestStructConcurrency(t *testing.T) {
 	// 4. Concurrent dynamic field and subscript assignments
 	codeDynamicSubscript := `
 	package main
-	struct Item(name) {}
+	class Item(name) {}
 	fn worker(item, key, n) {
 		var i := 0
 		var v := 0
@@ -1558,7 +1558,7 @@ func TestExamples(t *testing.T) {
 		"methods.ev",
 		"nums.ev",
 		"race.ev",
-		"struct.ev",
+		"class.ev",
 		"while.ev",
 		"for.ev",
 		"counter.ev",
@@ -1928,7 +1928,7 @@ func TestNumberAndBoolTypes(t *testing.T) {
 func TestCompoundAssignFieldsAndSubscripts(t *testing.T) {
 	code := `
 	package main
-	struct Counter(n) {
+	class Counter(n) {
 		fn add(k) {
 			this.n += k
 		}
@@ -1967,10 +1967,10 @@ func TestCompoundAssignFieldsAndSubscripts(t *testing.T) {
 	`
 	assertNumber(t, run(t, codeOnce), 1101)
 
-	// concurrent updates of the same struct field are atomic
+	// concurrent updates of the same class field are atomic
 	codeConcurrent := `
 	package main
-	struct Counter(n) {
+	class Counter(n) {
 		fn inc() {
 			this.n += 1
 		}

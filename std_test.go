@@ -199,11 +199,11 @@ fn main() {
 
 func TestStdJSON(t *testing.T) {
 	code := `package main imports("json")
-	struct Point(x, y) {}
+	class Point(x, y) {}
 	fn main() {
 		raw := json.encode({ a: [1, true, nil, "hi"], p: Point(3, 4) })
 		decoded := json.decode(raw)
-		return [raw, decoded.p.x, decoded.p.y, decoded.p.has("__struct")]
+		return [raw, decoded.p.x, decoded.p.y, decoded.p.has("__class")]
 	}`
 	val, err := runCode(code)
 	if err != nil {

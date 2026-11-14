@@ -12,7 +12,7 @@ type IsInstanceOf struct {
 	Rhs Node
 }
 
-type StructDefinition struct {
+type ClassDefinition struct {
 	token.Pos
 	Name   string
 	Parent string
@@ -20,8 +20,8 @@ type StructDefinition struct {
 	Action Node
 }
 
-func (node StructDefinition) String() string {
-	return "struct"
+func (node ClassDefinition) String() string {
+	return "class"
 }
 
 type FieldAccess struct {

@@ -22,6 +22,7 @@ func main() {
 	shop.Set("taxRate", vm.BoxNumber(0.12))
 
 	eng := evie.New(evie.Options{Packages: []*vm.Package{shop}})
+	defer eng.Close()
 
 	_, err := eng.Eval(`package main imports("io", "shop")
 
@@ -46,6 +47,9 @@ func main() {
 	}
 	fmt.Printf("[Go] total = %.2f, message = %q\n", result.Total, result.Message)
 
-	quick, _ := evie.Eval("return [1, 2, 3, 4, 5].filter(fn(x) => x > 2).map(fn(x) => x * 10)")
+	quick, err := evie.Eval("return [1, 2, 3, 4, 5].filter(fn(x) => x > 2).map(fn(x) => x * 10)")
+	if err != nil {
+		panic(err)
+	}
 	fmt.Println("[Go] quick eval:", quick)
 }

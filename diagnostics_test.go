@@ -102,7 +102,7 @@ fn main() {
 
 	expectRendering(t, `package main
 
-struct Point(x, y) {
+class Point(x, y) {
     fn length() => this.x * this.x + this.y * this.y
 }
 

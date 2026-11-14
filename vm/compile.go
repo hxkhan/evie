@@ -158,8 +158,8 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	case ast.Slice:
 		return vm.emitSlice(node)
 
-	case ast.StructDefinition:
-		return vm.emitStruct(node)
+	case ast.ClassDefinition:
+		return vm.emitClass(node)
 	}
 
 	panic(fmt.Errorf("implement %T", node))
@@ -256,10 +256,10 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc exception) {
 	/*
 		------ Loading a package ------
 
-		1. Functions and structs are hoisted: their names exist before anything runs.
+		1. Functions and classes are hoisted: their names exist before anything runs.
 		2. Every top-level binding is declared. One with a constant initializer
 		   gets its value now, so uses of it fold while compiling.
-		3. Function bodies and struct methods are compiled.
+		3. Function bodies and class methods are compiled.
 		4. The remaining initializers and any other top-level statements run in
 		   source order, file after file, so they can call functions and build
 		   any value.
@@ -274,7 +274,7 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc exception) {
 		}
 	}
 
-	// 1. allocate functions & structs
+	// 1. allocate functions & classes
 	for _, it := range code {
 		vm.cp.src = it.src
 		node := it.node
@@ -294,17 +294,17 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc exception) {
 			this.globals[index] = pkgGlobal{Value: &boxed, IsPublic: true, IsStatic: true, IsConstant: true}
 		}
 
-		if str, isStruct := node.(ast.StructDefinition); isStruct {
-			if str.Name == "" {
-				panic(vm.compileErrorAt(str, "cannot declare a struct with no name"))
+		if cls, isClass := node.(ast.ClassDefinition); isClass {
+			if cls.Name == "" {
+				panic(vm.compileErrorAt(cls, "cannot declare a class with no name"))
 			}
-			index := fields.Get(str.Name)
+			index := fields.Get(cls.Name)
 			if _, exists := this.globals[index]; exists {
-				panic(vm.compileErrorAt(str, "'%s' is declared twice in this package", str.Name))
+				panic(vm.compileErrorAt(cls, "'%s' is declared twice in this package", cls.Name))
 			}
 
-			args := make([]fields.ID, len(str.Args))
-			for i, a := range str.Args {
+			args := make([]fields.ID, len(cls.Args))
+			for i, a := range cls.Args {
 				args[i] = fields.Get(a)
 			}
 
@@ -314,10 +314,10 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc exception) {
 			}
 
 			// create a stub for now
-			v := boxUserStruct(&userStruct{
-				Name:         str.Name,
-				def:          vm.at(str),
-				hasParent:    str.Parent != "",
+			v := boxUserClass(&userClass{
+				Name:         cls.Name,
+				def:          vm.at(cls),
+				hasParent:    cls.Parent != "",
 				Fields:       args,
 				FieldOffsets: offsets,
 				Methods:      make(map[fields.ID]*userFn),
@@ -382,45 +382,45 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc exception) {
 		}
 	}
 
-	// 3b. initialize struct methods and inheritance
+	// 3b. initialize class methods and inheritance
 	for _, it := range code {
 		vm.cp.src = it.src
 		node := it.node
-		if str, isStruct := node.(ast.StructDefinition); isStruct {
-			global := this.globals[fields.Get(str.Name)]
-			ustruct := (*userStruct)(global.pointer)
+		if cls, isClass := node.(ast.ClassDefinition); isClass {
+			global := this.globals[fields.Get(cls.Name)]
+			uclass := (*userClass)(global.pointer)
 
-			if str.Parent != "" {
-				parentGlobal, exists := this.globals[fields.Get(str.Parent)]
+			if cls.Parent != "" {
+				parentGlobal, exists := this.globals[fields.Get(cls.Parent)]
 				if !exists {
-					panic(vm.compileErrorAt(str, "cannot find the parent struct '%v'", str.Parent))
+					panic(vm.compileErrorAt(cls, "cannot find the parent class '%v'", cls.Parent))
 				}
-				parentStruct, ok := parentGlobal.Value.asUserStruct()
+				parentClass, ok := parentGlobal.Value.asUserClass()
 				if !ok {
-					panic(vm.compileErrorAt(str, "'%v' is %s, not a struct", str.Parent, article(*parentGlobal.Value)))
+					panic(vm.compileErrorAt(cls, "'%v' is %s, not a class", cls.Parent, article(*parentGlobal.Value)))
 				}
-				for p := parentStruct; p != nil; p = p.Parent {
-					if p == ustruct {
-						panic(vm.compileErrorAt(str, "'%v' and '%v' inherit from each other", str.Name, str.Parent))
+				for p := parentClass; p != nil; p = p.Parent {
+					if p == uclass {
+						panic(vm.compileErrorAt(cls, "'%v' and '%v' inherit from each other", cls.Name, cls.Parent))
 					}
 				}
-				ustruct.Parent = parentStruct
+				uclass.Parent = parentClass
 			}
 
-			if block, ok := str.Action.(ast.Block); ok {
+			if block, ok := cls.Action.(ast.Block); ok {
 				for _, stmt := range block.Code {
 					mFn, isFn := stmt.(ast.Fn)
 					if !isFn {
-						panic(vm.compileErrorAt(stmt, "only methods ('fn') are allowed inside a struct body"))
+						panic(vm.compileErrorAt(stmt, "only methods ('fn') are allowed inside a class body"))
 					}
 					if mFn.Name == "" {
-						panic(vm.compileErrorAt(mFn, "a struct method needs a name"))
+						panic(vm.compileErrorAt(mFn, "a class method needs a name"))
 					}
-					if _, exists := ustruct.Methods[fields.Get(mFn.Name)]; exists {
-						panic(vm.compileErrorAt(mFn, "method '%s' is declared twice on %s", mFn.Name, str.Name))
+					if _, exists := uclass.Methods[fields.Get(mFn.Name)]; exists {
+						panic(vm.compileErrorAt(mFn, "method '%s' is declared twice on %s", mFn.Name, cls.Name))
 					}
-					methodFn := vm.compileStructMethod(ustruct, mFn)
-					ustruct.Methods[fields.Get(mFn.Name)] = methodFn
+					methodFn := vm.compileClassMethod(uclass, mFn)
+					uclass.Methods[fields.Get(mFn.Name)] = methodFn
 				}
 			}
 		}
@@ -520,7 +520,7 @@ func (vm *Instance) importFailed(u unit, path string, pos token.Pos, err error) 
 
 // compileInit compiles the top-level statements of a package that have to run:
 // bindings whose initializer is not a constant, and plain statements. Functions
-// and structs were hoisted already. It returns nil when there is nothing to run.
+// and classes were hoisted already. It returns nil when there is nothing to run.
 func (vm *Instance) compileInit(pkg *Package, code []ast.Node, deferred map[string]bool) *userFn {
 	info := vm.newFuncInfo("init", nil, false, false)
 	vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: info})
@@ -529,7 +529,7 @@ func (vm *Instance) compileInit(pkg *Package, code []ast.Node, deferred map[stri
 	var steps []instruction
 	for _, stmt := range code {
 		switch stmt := stmt.(type) {
-		case ast.Fn, ast.StructDefinition:
+		case ast.Fn, ast.ClassDefinition:
 			continue
 		case ast.Decl:
 			if !deferred[stmt.Name] {
@@ -566,9 +566,9 @@ func (vm *Instance) compileInit(pkg *Package, code []ast.Node, deferred map[stri
 	return &userFn{funcInfoStatic: info}
 }
 
-func (vm *Instance) emitStruct(str ast.StructDefinition) instruction {
-	if str.Name == "" {
-		panic(vm.compileErrorAt(str, "cannot declare a struct with no name"))
+func (vm *Instance) emitClass(cls ast.ClassDefinition) instruction {
+	if cls.Name == "" {
+		panic(vm.compileErrorAt(cls, "cannot declare a class with no name"))
 	}
 
 	if vm.cp.closures.Len() == 0 {
@@ -577,74 +577,74 @@ func (vm *Instance) emitStruct(str ast.StructDefinition) instruction {
 	}
 
 	enclosing := vm.cp.closures.Last(0)
-	index, ok := enclosing.scope.Declare(str.Name, true)
+	index, ok := enclosing.scope.Declare(cls.Name, true)
 	if !ok {
-		panic(vm.compileErrorAt(str, "double declaration of %s", str.Name))
+		panic(vm.compileErrorAt(cls, "double declaration of %s", cls.Name))
 	}
 
-	args := make([]fields.ID, len(str.Args))
-	offsets := make(map[fields.ID]int, len(str.Args))
-	for i, a := range str.Args {
+	args := make([]fields.ID, len(cls.Args))
+	offsets := make(map[fields.ID]int, len(cls.Args))
+	for i, a := range cls.Args {
 		fid := fields.Get(a)
 		args[i] = fid
 		offsets[fid] = i
 	}
 
-	ustruct := &userStruct{
-		Name:         str.Name,
-		def:          vm.at(str),
-		hasParent:    str.Parent != "",
+	uclass := &userClass{
+		Name:         cls.Name,
+		def:          vm.at(cls),
+		hasParent:    cls.Parent != "",
 		Fields:       args,
 		FieldOffsets: offsets,
 		Methods:      make(map[fields.ID]*userFn),
 	}
 
 	var parentInst instruction
-	if str.Parent != "" {
-		if str.Parent == str.Name {
-			panic(vm.compileErrorAt(str, "'%v' and '%v' inherit from each other", str.Name, str.Parent))
+	if cls.Parent != "" {
+		if cls.Parent == cls.Name {
+			panic(vm.compileErrorAt(cls, "'%v' and '%v' inherit from each other", cls.Name, cls.Parent))
 		}
-		parentBinding, err := vm.cp.reach(str.Parent)
+		parentBinding, err := vm.cp.reach(cls.Parent)
 		if err != nil {
-			panic(vm.compileErrorAt(str, "cannot find the parent struct '%v'", str.Parent))
+			panic(vm.compileErrorAt(cls, "cannot find the parent class '%v'", cls.Parent))
 		}
 		if pg, isGlobal := parentBinding.(pkgGlobal); isGlobal && pg.IsConstant {
-			parentStruct, ok := pg.Value.asUserStruct()
+			parentClass, ok := pg.Value.asUserClass()
 			if !ok {
-				panic(vm.compileErrorAt(str, "'%v' is %s, not a struct", str.Parent, article(*pg.Value)))
+				panic(vm.compileErrorAt(cls, "'%v' is %s, not a class", cls.Parent, article(*pg.Value)))
 			}
-			ustruct.Parent = parentStruct
+			uclass.Parent = parentClass
 		} else {
-			parentInst = vm.emitIdentGet(ast.Ident{Pos: str.Pos, Name: str.Parent})
-			ustruct.declClosure = enclosing
-			ustruct.declIndex = index
+			parentInst = vm.emitIdentGet(ast.Ident{Pos: cls.Pos, Name: cls.Parent})
+			uclass.declClosure = enclosing
+			uclass.declIndex = index
 		}
 	}
 
 	hasCaptures := false
-	if block, ok := str.Action.(ast.Block); ok {
+	if block, ok := cls.Action.(ast.Block); ok {
 		for _, stmt := range block.Code {
 			mFn, isFn := stmt.(ast.Fn)
 			if !isFn {
-				panic(vm.compileErrorAt(stmt, "only methods ('fn') are allowed inside a struct body"))
+				panic(vm.compileErrorAt(stmt, "only methods ('fn') are allowed inside a class body"))
 			}
 			if mFn.Name == "" {
-				panic(vm.compileErrorAt(mFn, "a struct method needs a name"))
+				panic(vm.compileErrorAt(mFn, "a class method needs a name"))
 			}
-			if _, exists := ustruct.Methods[fields.Get(mFn.Name)]; exists {
-				panic(vm.compileErrorAt(mFn, "method '%s' is declared twice on %s", mFn.Name, str.Name))
+			if _, exists := uclass.Methods[fields.Get(mFn.Name)]; exists {
+				panic(vm.compileErrorAt(mFn, "method '%s' is declared twice on %s", mFn.Name, cls.Name))
 			}
-			methodFn := vm.compileStructMethod(ustruct, mFn)
+			methodFn := vm.compileClassMethod(uclass, mFn)
 			if len(methodFn.captures) > 0 {
 				hasCaptures = true
 			}
-			ustruct.Methods[fields.Get(mFn.Name)] = methodFn
+			uclass.Methods[fields.Get(mFn.Name)] = methodFn
 		}
 	}
 
-	site := vm.at(str)
+	site := vm.at(cls)
 	if parentInst == nil && !hasCaptures {
-		boxed := boxUserStruct(ustruct)
+		boxed := boxUserClass(uclass)
 		return func(fbr *fiber) (Value, exception) {
 			fbr.setLocal(index, boxed)
 			return Value{}, nil
@@ -652,35 +652,35 @@ func (vm *Instance) emitStruct(str ast.StructDefinition) instruction {
 	}
 
 	return func(fbr *fiber) (Value, exception) {
-		parent := ustruct.Parent
+		parent := uclass.Parent
 		if parentInst != nil {
 			pVal, exc := parentInst(fbr)
 			if exc != nil {
 				return pVal, exc
 			}
-			parentStruct, ok := pVal.asUserStruct()
+			parentClass, ok := pVal.asUserClass()
 			if !ok {
-				return Value{}, errorAt(site, "'%v' is %s, not a struct", str.Parent, article(pVal))
+				return Value{}, errorAt(site, "'%v' is %s, not a class", cls.Parent, article(pVal))
 			}
-			parent = parentStruct
+			parent = parentClass
 		}
 
-		runtimeStruct := &userStruct{
-			Name:         ustruct.Name,
-			def:          ustruct.def,
-			hasParent:    ustruct.hasParent,
+		runtimeClass := &userClass{
+			Name:         uclass.Name,
+			def:          uclass.def,
+			hasParent:    uclass.hasParent,
 			Parent:       parent,
-			Fields:       ustruct.Fields,
-			FieldOffsets: ustruct.FieldOffsets,
-			Methods:      make(map[fields.ID]*userFn, len(ustruct.Methods)),
+			Fields:       uclass.Fields,
+			FieldOffsets: uclass.FieldOffsets,
+			Methods:      make(map[fields.ID]*userFn, len(uclass.Methods)),
 		}
 
 		cell := fbr.newLocal(index)
-		*cell = boxUserStruct(runtimeStruct)
+		*cell = boxUserClass(runtimeClass)
 
-		for id, tmpl := range ustruct.Methods {
+		for id, tmpl := range uclass.Methods {
 			if len(tmpl.captures) == 0 {
-				runtimeStruct.Methods[id] = tmpl
+				runtimeClass.Methods[id] = tmpl
 				continue
 			}
 			captured := make([]*Value, len(tmpl.captures))
@@ -691,7 +691,7 @@ func (vm *Instance) emitStruct(str ast.StructDefinition) instruction {
 					captured[i] = fbr.getCapturedByRef(ref.index)
 				}
 			}
-			runtimeStruct.Methods[id] = &userFn{funcInfoStatic: tmpl.funcInfoStatic, references: captured}
+			runtimeClass.Methods[id] = &userFn{funcInfoStatic: tmpl.funcInfoStatic, references: captured}
 		}
 
 		return Value{}, nil

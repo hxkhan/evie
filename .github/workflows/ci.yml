@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test (race detector)
+        if: runner.os != 'Windows'
+        run: go test -race -count=1 ./...
+
+      - name: Test
+        if: runner.os == 'Windows'
+        run: go test -count=1 ./...
+
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Check generated VM operators
+        run: |
+          go generate ./vm
+          git diff --exit-code vm/ops_gen.go
+
+      - name: Run embedding examples
+        run: |
+          go run ./embedding/ex1
+          go run ./embedding/ex2
+
+      - name: Smoke-test benchmark checksums
+        run: go run ./benchmarks -n 1 -warmup 0
+
+      - name: Fuzz parser (5s)
+        run: go test -fuzz=FuzzParse -fuzztime=5s ./parser
+
+      - name: Validate VS Code extension JSON
+        run: |
+          jq empty \
+            extensions/vscode/package.json \
+            extensions/vscode/language-configuration.json \
+            extensions/vscode/syntaxes/evie.tmLanguage.json

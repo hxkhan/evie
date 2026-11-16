@@ -14,6 +14,8 @@ type Package struct {
 	globals map[fields.ID]pkgGlobal // all global symbols
 
 	origin     string               // the file it was compiled from, for errors
+	compiled   bool                 // true for Evie packages compiled from source
+	inits      []*funcInfoStatic    // package init functions recorded when Options.DebugInfo is set
 	importedAs map[string][2]string // path name -> (import path, bound name) where they differ
 	memberHint string               // shown when a script asks for a member it lacks
 }

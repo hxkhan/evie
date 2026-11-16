@@ -44,7 +44,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		}
 
 	case ast.Break:
-		if vm.cp.closures.Len() == 0 || (vm.cp.closures.Last(0).loops == 0 && vm.cp.closures.Last(0).switches == 0) {
+		if !vm.canBreak() {
 			panic(vm.compileErrorAt(node, "break outside of a loop or switch"))
 		}
 		return func(fbr *fiber) (Value, exception) {
@@ -52,7 +52,7 @@ func (vm *Instance) compile(node ast.Node) instruction {
 		}
 
 	case ast.Continue:
-		if vm.cp.closures.Len() == 0 || vm.cp.closures.Last(0).loops == 0 {
+		if !vm.canContinue() {
 			panic(vm.compileErrorAt(node, "continue outside of a loop"))
 		}
 		return func(fbr *fiber) (Value, exception) {
@@ -165,6 +165,53 @@ func (vm *Instance) compile(node ast.Node) instruction {
 	panic(fmt.Errorf("implement %T", node))
 }
 
+// currentClosure returns the innermost closure being compiled, creating a
+// fallback anonymous scope when compiling a top-level bare statement.
+func (vm *Instance) currentClosure() *closure {
+	if vm.cp.closures.Len() == 0 {
+		cl := &closure{freeVars: ds.Set[int]{}, info: &funcInfoStatic{name: "anonymous"}}
+		cl.scope.TrackSlots = vm.cp.debugInfo
+		cl.scope.OpenBlock()
+		vm.cp.closures.Push(cl)
+	}
+	return vm.cp.closures.Last(0)
+}
+
+func (vm *Instance) canBreak() bool {
+	if vm.cp.closures.Len() == 0 {
+		return false
+	}
+	cl := vm.cp.closures.Last(0)
+	return cl.loops > 0 || cl.switches > 0
+}
+
+func (vm *Instance) canContinue() bool {
+	return vm.cp.closures.Len() > 0 && vm.cp.closures.Last(0).loops > 0
+}
+
+// thisFieldSlot reports whether lhs refers to the current method's own `this`
+// receiver (slot 0, uncaptured, directly inside a class method) and field is
+// one of that class's declared fields. When true, the caller can access the
+// field directly by slot index on the receiver.
+func (vm *Instance) thisFieldSlot(lhs local, field fields.ID) (*userClass, int, bool) {
+	if lhs.index != 0 || lhs.isCaptured || vm.cp.closures.Len() == 0 {
+		return nil, 0, false
+	}
+	uclass := vm.cp.closures.Last(0).uclass
+	if uclass == nil {
+		return nil, 0, false
+	}
+	slot, ok := uclass.FieldOffsets[field]
+	return uclass, slot, ok
+}
+
+// isDirectSelfCall reports whether fn is a non-variadic recursive call to the
+// function currently being compiled, which lets the call frame skip saving and
+// restoring fbr.active.
+func (vm *Instance) isDirectSelfCall(fn *userFn) bool {
+	return !fn.isVariadic && vm.cp.closures.Len() > 0 && fn.funcInfoStatic == vm.cp.closures.Last(0).info
+}
+
 // unit is one source file of a package being compiled
 type unit struct {
 	src  *diag.Source
@@ -227,6 +274,7 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc exception) {
 
 	this := NewPackage(name)
 	this.origin = units[0].src.Name
+	this.compiled = true
 	vm.cp.pkg = this
 	vm.rt.packages[name] = this
 	loaded := false
@@ -433,6 +481,10 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc exception) {
 		if init == nil {
 			continue
 		}
+		if vm.cp.debugInfo {
+			init.funcInfoStatic.def = site{src: u.src}
+			this.inits = append(this.inits, init.funcInfoStatic)
+		}
 		fbr := vm.borrowFiber(vm.rt.forLoading())
 		fbr.running = true // the runner is held by EvalNode
 		_, exc := init.call(fbr, nil)
@@ -443,6 +495,7 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc exception) {
 		}
 	}
 	loaded = true
+	vm.rt.packageOrder = append(vm.rt.packageOrder, name)
 	return Value{}, nil
 }
 
@@ -523,8 +576,10 @@ func (vm *Instance) importFailed(u unit, path string, pos token.Pos, err error) 
 // and classes were hoisted already. It returns nil when there is nothing to run.
 func (vm *Instance) compileInit(pkg *Package, code []ast.Node, deferred map[string]bool) *userFn {
 	info := vm.newFuncInfo("init", nil, false, false)
-	vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: info})
-	vm.cp.closures.Last(0).scope.OpenBlock()
+	cl := &closure{freeVars: ds.Set[int]{}, info: info}
+	cl.scope.TrackSlots = vm.cp.debugInfo
+	vm.cp.closures.Push(cl)
+	cl.scope.OpenBlock()
 
 	var steps []instruction
 	for _, stmt := range code {
@@ -571,12 +626,7 @@ func (vm *Instance) emitClass(cls ast.ClassDefinition) instruction {
 		panic(vm.compileErrorAt(cls, "cannot declare a class with no name"))
 	}
 
-	if vm.cp.closures.Len() == 0 {
-		vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: &funcInfoStatic{name: "anonymous"}})
-		vm.cp.closures.Last(0).scope.OpenBlock()
-	}
-
-	enclosing := vm.cp.closures.Last(0)
+	enclosing := vm.currentClosure()
 	index, ok := enclosing.scope.Declare(cls.Name, true)
 	if !ok {
 		panic(vm.compileErrorAt(cls, "double declaration of %s", cls.Name))
@@ -597,6 +647,9 @@ func (vm *Instance) emitClass(cls ast.ClassDefinition) instruction {
 		Fields:       args,
 		FieldOffsets: offsets,
 		Methods:      make(map[fields.ID]*userFn),
+	}
+	if vm.cp.debugInfo {
+		enclosing.info.ensureDebug().classes = append(enclosing.info.ensureDebug().classes, uclass)
 	}
 
 	var parentInst instruction

@@ -9,8 +9,10 @@ import (
 // compileFunction compiles a function body in a scope of its own and fills in
 // the static information the frame protocol needs
 func (vm *Instance) compileFunction(info *funcInfoStatic, params []string, body ast.Node, uclass *userClass) *closure {
-	vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: info, uclass: uclass})
-	scope := &vm.cp.closures.Last(0).scope
+	cl := &closure{freeVars: ds.Set[int]{}, info: info, uclass: uclass}
+	cl.scope.TrackSlots = vm.cp.debugInfo
+	vm.cp.closures.Push(cl)
+	scope := &cl.scope
 	scope.OpenBlock()
 
 	// declare the parameters and only then compile the code; a receiver is a constant
@@ -35,14 +37,13 @@ func (vm *Instance) closeFunction(info *funcInfoStatic, closure *closure) {
 	for index := range capacity {
 		if closure.freeVars.Has(index) {
 			info.locals[index] = true
-			vm.log.escapesf("CT: fn %v => Local(%v) escapes\n", info.name, index)
 		} else {
 			info.recyclable++
 		}
 	}
 
-	for i, ref := range closure.captures {
-		vm.log.capturef("CT: closure => Capture(%v) -> %v\n", i, ref)
+	if vm.cp.debugInfo {
+		info.ensureDebug().slots = closure.scope.Slots()
 	}
 }
 
@@ -52,6 +53,10 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 
 	// create the function & return it
 	if node.UsedAsExpr {
+		if vm.cp.debugInfo && vm.cp.closures.Len() > 0 {
+			parent := vm.cp.closures.Last(0).info
+			parent.ensureDebug().children = append(parent.ensureDebug().children, info)
+		}
 		closure := vm.compileFunction(info, node.Args, node.Action, nil)
 		captures := closure.captures
 		return func(fbr *fiber) (Value, exception) {
@@ -71,14 +76,13 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 		panic(vm.compileErrorAt(node, "cannot declare an fn statement with no name"))
 	}
 
-	if vm.cp.closures.Len() == 0 {
-		vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: &funcInfoStatic{name: "anonymous"}})
-		vm.cp.closures.Last(0).scope.OpenBlock()
-	}
-
-	index, ok := vm.cp.closures.Last(0).scope.Declare(node.Name, true)
+	enclosing := vm.currentClosure()
+	index, ok := enclosing.scope.Declare(node.Name, true)
 	if !ok {
 		panic(vm.compileErrorAt(node, "double declaration of %s", node.Name))
+	}
+	if vm.cp.debugInfo {
+		enclosing.info.ensureDebug().children = append(enclosing.info.ensureDebug().children, info)
 	}
 
 	closure := vm.compileFunction(info, node.Args, node.Action, nil)
@@ -139,9 +143,9 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 		if fn, isUserFn := value.asUserFn(); isUserFn {
 			vm.arity(fn.accepts(len(arguments)), node, fn.def)
 
-			// optimise: a call to the function being compiled runs on the same active
-			// function, so the frame only needs a new base
-			if !fn.isVariadic && vm.cp.closures.Len() > 0 && fn.funcInfoStatic == vm.cp.closures.Last(0).info {
+			// optimise: a direct recursive call runs on the same active function,
+			// so the frame only needs to save and restore fbr.base
+			if vm.isDirectSelfCall(fn) {
 				return func(fbr *fiber) (result Value, exc exception) {
 					if fbr.signaled() {
 						if exc := fbr.halt(site); exc != nil {

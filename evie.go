@@ -49,7 +49,7 @@ type Options struct {
 
 // Debug holds switches for working on Evie itself; hosts leave them off
 type Debug struct {
-	LogCaptures bool // log when and what closures capture
+	DebugInfo   bool // record slot names, local classes and nested closures during compilation for Dump
 	NoFastPaths bool // compile without the compiler's fast paths, to tell whether a bug is in one
 }
 
@@ -100,7 +100,7 @@ func New(opts ...Options) *Engine {
 	e.vm = vm.New(vm.Options{
 		Resolver:        e.resolve,
 		Prelude:         opt.Prelude,
-		LogCaptures:     opt.Debug.LogCaptures,
+		DebugInfo:       opt.Debug.DebugInfo,
 		DisableInlining: opt.Debug.NoFastPaths || testWithoutFastPaths,
 	})
 	return e

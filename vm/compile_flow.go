@@ -2,7 +2,6 @@ package vm
 
 import (
 	"github.com/hxkhan/evie/ast"
-	"github.com/hxkhan/evie/internal/ds"
 )
 
 func (vm *Instance) emitReturn(node ast.Return) instruction {
@@ -127,13 +126,10 @@ func (vm *Instance) emitWhile(node ast.While) instruction {
 	site := vm.at(node)
 	condition := vm.compileCondition(node.Condition)
 
-	if vm.cp.closures.Len() == 0 {
-		vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: &funcInfoStatic{name: "anonymous"}})
-		vm.cp.closures.Last(0).scope.OpenBlock()
-	}
-	vm.cp.closures.Last(0).loops++
+	cl := vm.currentClosure()
+	cl.loops++
 	action := vm.compile(node.Action)
-	vm.cp.closures.Last(0).loops--
+	cl.loops--
 
 	return func(fbr *fiber) (Value, exception) {
 		for {
@@ -171,31 +167,27 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 	site := vm.at(node)
 	collInst := vm.compile(node.Collection)
 
-	if vm.cp.closures.Len() == 0 {
-		vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: &funcInfoStatic{name: "main"}})
-		vm.cp.closures.Last(0).scope.OpenBlock()
-	}
-
-	vm.cp.closures.Last(0).scope.OpenBlock()
-	defer vm.cp.closures.Last(0).scope.CloseBlock()
+	cl := vm.currentClosure()
+	cl.scope.OpenBlock()
+	defer cl.scope.CloseBlock()
 
 	var idxIndex int = -1
 	if node.IndexVar != "" {
-		idx, ok := vm.cp.closures.Last(0).scope.Declare(node.IndexVar, false)
+		idx, ok := cl.scope.Declare(node.IndexVar, false)
 		if !ok {
 			panic(vm.compileErrorAt(node, "double declaration of %s in for loop", node.IndexVar))
 		}
 		idxIndex = idx
 	}
 
-	itemIndex, ok := vm.cp.closures.Last(0).scope.Declare(node.ItemVar, false)
+	itemIndex, ok := cl.scope.Declare(node.ItemVar, false)
 	if !ok {
 		panic(vm.compileErrorAt(node, "double declaration of %s in for loop", node.ItemVar))
 	}
 
-	vm.cp.closures.Last(0).loops++
+	cl.loops++
 	bodyInst := vm.compile(node.Action)
-	vm.cp.closures.Last(0).loops--
+	cl.loops--
 
 	return func(fbr *fiber) (Value, exception) {
 		collVal, err := collInst(fbr)
@@ -318,10 +310,7 @@ type switchCaseCompiled struct {
 }
 
 func (vm *Instance) emitSwitch(node ast.Switch) instruction {
-	if vm.cp.closures.Len() == 0 {
-		vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: &funcInfoStatic{name: "anonymous"}})
-		vm.cp.closures.Last(0).scope.OpenBlock()
-	}
+	cl := vm.currentClosure()
 
 	cases := make([]switchCaseCompiled, len(node.Cases))
 	for i, c := range node.Cases {
@@ -329,9 +318,9 @@ func (vm *Instance) emitSwitch(node ast.Switch) instruction {
 		for j, val := range c.Values {
 			vals[j] = vm.compile(val)
 		}
-		vm.cp.closures.Last(0).switches++
+		cl.switches++
 		action := vm.compile(c.Action)
-		vm.cp.closures.Last(0).switches--
+		cl.switches--
 		cases[i] = switchCaseCompiled{
 			values: vals,
 			action: action,
@@ -340,9 +329,9 @@ func (vm *Instance) emitSwitch(node ast.Switch) instruction {
 
 	var defaultAction instruction
 	if node.Default != nil {
-		vm.cp.closures.Last(0).switches++
+		cl.switches++
 		defaultAction = vm.compile(node.Default)
-		vm.cp.closures.Last(0).switches--
+		cl.switches--
 	}
 
 	// Tagless switch: switch { case cond1, cond2: ... }
@@ -420,64 +409,20 @@ func (vm *Instance) emitSwitch(node ast.Switch) instruction {
 }
 
 func (vm *Instance) emitBlock(node ast.Block) instruction {
-	if vm.cp.closures.Len() == 0 {
-		vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: &funcInfoStatic{name: "anonymous"}})
-		vm.cp.closures.Last(0).scope.OpenBlock()
-	}
+	cl := vm.currentClosure()
+	cl.scope.OpenBlock()
+	defer cl.scope.CloseBlock()
 
-	vm.cp.closures.Last(0).scope.OpenBlock()
-	defer vm.cp.closures.Last(0).scope.CloseBlock()
-
-	// optimise: statement extraction from block; saves an extra dispatch
+	// optimise: a single-statement block whose statement already yields Value{}
+	// (or returns directly) can be emitted directly, skipping the block wrapper
 	if len(node.Code) == 1 && vm.cp.inline {
-		node := node.Code[0]
-		// optimise: {return x}
-		if ret, isReturn := node.(ast.Return); isReturn {
-			// optimise: returning constants
-			if in, isInput := ret.Value.(ast.Input[float64]); isInput {
-				value := BoxNumber(in.Value)
-				return func(fbr *fiber) (Value, exception) {
-					return value, signalReturn
-				}
-			}
-
-			// optimise: returning locals
-			if iGet, isIdentGet := ret.Value.(ast.Ident); isIdentGet {
-				variable, err := vm.cp.reach(iGet.Name)
-				if err != nil {
-					panic(vm.locate(err, iGet))
-				}
-
-				if v, isLocal := variable.(local); isLocal {
-					if v.isCaptured {
-						return func(fbr *fiber) (Value, exception) {
-							return fbr.getCaptured(v.index), signalReturn
-						}
-					}
-					return func(fbr *fiber) (Value, exception) {
-						return fbr.getLocal(v.index), signalReturn
-					}
-				}
-			}
-
-			what := vm.compile(ret.Value)
-			return func(fbr *fiber) (Value, exception) {
-				v, err := what(fbr)
-				if err != nil {
-					return v, err
-				}
-
-				return v, signalReturn
-			}
-		}
-
-		// generic statement extraction for statements that evaluate to Value{}
-		switch n := node.(type) {
-		case ast.Decl, ast.Assign, ast.MutableBinOp, ast.Conditional, ast.While, ast.For, ast.Switch, ast.Echo, ast.Break, ast.Continue, ast.Throw, ast.Block, ast.ClassDefinition:
-			return vm.compile(node)
+		stmt := node.Code[0]
+		switch n := stmt.(type) {
+		case ast.Return, ast.Decl, ast.Assign, ast.MutableBinOp, ast.Conditional, ast.While, ast.For, ast.Switch, ast.Echo, ast.Break, ast.Continue, ast.Throw, ast.Block, ast.ClassDefinition:
+			return vm.compile(stmt)
 		case ast.Fn:
 			if !n.UsedAsExpr {
-				return vm.compile(node)
+				return vm.compile(stmt)
 			}
 		}
 	}

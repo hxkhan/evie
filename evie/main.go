@@ -41,7 +41,7 @@ func main() {
 	flag.BoolVar(version, "v", false, "print the version and exit (short for -version)")
 	timing := flag.Bool("t", false, "print the execution time")
 	inline := flag.Bool("inline", true, "let the compiler use its fast paths; false is for debugging the compiler")
-	logCaptures := flag.Bool("log-captures", false, "log when and what closures capture")
+	dump := flag.Bool("dump", false, "compile and print packages, globals, classes, slots, escapes and captures without running main")
 	flag.Usage = func() {
 		fmt.Fprint(flag.CommandLine.Output(), usage)
 		flag.PrintDefaults()
@@ -75,10 +75,30 @@ func main() {
 		Args: scriptArgs,
 		Debug: evie.Debug{
 			NoFastPaths: !*inline,
-			LogCaptures: *logCaptures,
+			DebugInfo:   *dump,
 		},
 	})
 	stopOnInterrupt(eng)
+
+	if *dump {
+		var err error
+		if hasCode {
+			err = dumpInline(eng, *code)
+		} else {
+			target := flag.Arg(0)
+			if info, statErr := os.Stat(target); statErr == nil && info.IsDir() {
+				err = eng.LoadProject(target)
+			} else {
+				err = eng.LoadFile(target)
+			}
+		}
+		if err != nil {
+			report(err)
+		}
+		eng.Dump(os.Stdout)
+		eng.Close()
+		return
+	}
 
 	before := time.Now()
 	var res vm.Value
@@ -118,19 +138,17 @@ var standard = map[string]bool{
 	"time":    true,
 }
 
-// runInline runs code from the command line. A program that declares its own
-// package runs as written; anything else becomes the body of main, returning
-// its value when it is a single expression.
-func runInline(eng *evie.Engine, code string, scriptArgs []string) (vm.Value, error) {
+// prepareInline wraps bare -e code into package main with auto-detected stdlib imports.
+func prepareInline(code string) (string, error) {
 	if parser.PeekPackageName(diag.NewSource("-e", []byte(code))) != "" {
-		return runSource(eng, code, scriptArgs)
+		return code, nil
 	}
 
 	// parse the code alone first, on the line it will have inside main, so a
 	// syntax error points into it rather than at the wrapper
 	node, err := parser.ParseSource(diag.NewSource("-e", []byte("\n"+code)))
 	if err != nil {
-		return vm.Value{}, err
+		return "", err
 	}
 
 	used := collectStdImports(node)
@@ -149,9 +167,29 @@ func runInline(eng *evie.Engine, code string, scriptArgs []string) (vm.Value, er
 	header += " fn main() {\n"
 
 	if block, ok := node.(ast.Block); ok && len(block.Code) == 1 && isExpression(block.Code[0]) {
-		return runSource(eng, header+"return "+code+"\n}", scriptArgs)
+		return header + "return " + code + "\n}", nil
 	}
-	return runSource(eng, header+code+"\n}", scriptArgs)
+	return header + code + "\n}", nil
+}
+
+// runInline runs code from the command line. A program that declares its own
+// package runs as written; anything else becomes the body of main, returning
+// its value when it is a single expression.
+func runInline(eng *evie.Engine, code string, scriptArgs []string) (vm.Value, error) {
+	src, err := prepareInline(code)
+	if err != nil {
+		return vm.Value{}, err
+	}
+	return runSource(eng, src, scriptArgs)
+}
+
+func dumpInline(eng *evie.Engine, code string) error {
+	src, err := prepareInline(code)
+	if err != nil {
+		return err
+	}
+	_, err = eng.Load("-e", []byte(src))
+	return err
 }
 
 // collectStdImports walks the parsed AST to find standard library packages

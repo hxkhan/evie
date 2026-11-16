@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	goio "io"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -112,6 +113,14 @@ func display(path string) string {
 // Close waits for every task of the engine to finish
 func (e *Engine) Close() {
 	e.vm.WaitForNoActivity()
+}
+
+// Dump writes a human-readable summary of every compiled package, global,
+// class, function, local stack slot, escape decision, and closure capture in
+// the engine. Set Options.Debug.DebugInfo before loading to include slot names,
+// local classes, nested closures, and resolved capture names.
+func (e *Engine) Dump(w goio.Writer) {
+	e.vm.Dump(w)
 }
 
 // resolve finds a package for an import path. A name such as "io" is looked
@@ -441,6 +450,79 @@ func (e *Engine) RunFileContext(ctx context.Context, filePath string) (vm.Value,
 		return vm.Value{}, err
 	}
 	return e.runMain(ctx)
+}
+
+// LoadFile compiles and loads a single file and all of its imports without
+// invoking main.main. For bare scripts without a package header, the script is
+// compiled without executing it.
+func (e *Engine) LoadFile(filePath string) error {
+	if e.ran {
+		return errRanAlready
+	}
+	e.ran = true
+
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		return err
+	}
+	if e.root == "" {
+		e.root = filepath.Dir(absPath)
+	}
+	leave, err := e.enter(canonicalKey(absPath), absPath, filepath.Dir(absPath))
+	if err != nil {
+		return err
+	}
+	defer leave()
+
+	src, err := readSource(absPath)
+	if err != nil {
+		return err
+	}
+	if parser.PeekPackageName(src) == "" {
+		if err := e.vm.CompileSource(src); err != nil {
+			return err
+		}
+		e.loadedFiles = append(e.loadedFiles, absPath)
+		return nil
+	}
+	return e.evalMain(context.Background(), []string{absPath}, []*diag.Source{src})
+}
+
+// LoadProject compiles and loads the program in a directory without invoking
+// main.main.
+func (e *Engine) LoadProject(dirPath string) error {
+	if e.ran {
+		return errRanAlready
+	}
+	e.ran = true
+
+	absDir, err := filepath.Abs(dirPath)
+	if err != nil {
+		return err
+	}
+	e.root = absDir
+	e.dirStack = append(e.dirStack, absDir)
+	defer func() { e.dirStack = e.dirStack[:len(e.dirStack)-1] }()
+
+	files, err := evFiles(absDir)
+	if err != nil {
+		return err
+	}
+	var paths []string
+	var sources []*diag.Source
+	for _, file := range files {
+		src, err := readSource(file)
+		if err != nil {
+			return err
+		}
+		if parser.PeekPackageName(src) == "main" {
+			paths, sources = append(paths, file), append(sources, src)
+		}
+	}
+	if len(sources) == 0 {
+		return fmt.Errorf("no file in %s declares package main", display(absDir))
+	}
+	return e.evalMain(context.Background(), paths, sources)
 }
 
 // RunProject runs the program in a directory. Every file at its top level that

@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"log"
-	"os"
 	"slices"
 	"sync"
 
@@ -18,9 +16,8 @@ import (
 )
 
 type Instance struct {
-	cp  compiler
-	rt  runtime
-	log logger
+	cp compiler
+	rt runtime
 }
 
 type closure struct {
@@ -37,9 +34,10 @@ type closure struct {
 type PackageResolver func(name string) (*Package, error)
 
 type compiler struct {
-	inline  bool         // use dispatch inlining (combining instructions into one)
-	prelude *Package     // symbols visible to every package without an import
-	src     *diag.Source // the source being compiled, for error positions
+	inline    bool         // use dispatch inlining (combining instructions into one)
+	debugInfo bool         // record slot names and nested closures for Dump
+	prelude   *Package     // symbols visible to every package without an import
+	src       *diag.Source // the source being compiled, for error positions
 
 	pkg      *Package           // the package being compiled right now
 	closures ds.Slice[*closure] // currently open closures
@@ -48,11 +46,13 @@ type compiler struct {
 }
 
 type runtime struct {
-	packages map[string]*Package // loaded packages
-	fibers   sync.Pool           // pooled fibers for this vm
-	runner   sync.Mutex          // held by the fiber that is executing evie code
-	wg       sync.WaitGroup      // wait for all fibers to complete
-	stops                        // when running code has to stop
+	packages     map[string]*Package // loaded packages
+	packageOrder []string            // compiled Evie packages in load order
+	scriptInfo   *funcInfoStatic     // last compiled bare script when Options.DebugInfo is set
+	fibers       sync.Pool           // pooled fibers for this vm
+	runner       sync.Mutex          // held by the fiber that is executing evie code
+	wg           sync.WaitGroup      // wait for all fibers to complete
+	stops                            // when running code has to stop
 }
 
 // pkgGlobal is a package-level binding
@@ -67,7 +67,7 @@ type Options struct {
 	Resolver PackageResolver // finds a package by import path when it is not loaded yet
 	Prelude  *Package        // symbols visible everywhere without an import; the builtin types are added to it
 
-	LogCaptures     bool // log when and what is captured
+	DebugInfo       bool // record slot names, local classes and nested closures during compilation for Dump
 	DisableInlining bool // compile without the fast paths for constants, locals and known callees; for debugging the compiler
 }
 
@@ -85,18 +85,15 @@ func New(opts Options) (vm *Instance) {
 	}
 
 	vm = &Instance{
-		compiler{
-			resolver: opts.Resolver,
-			prelude:  prelude,
-			inline:   !opts.DisableInlining,
-			closures: make(ds.Slice[*closure], 0, 6),
+		cp: compiler{
+			resolver:  opts.Resolver,
+			prelude:   prelude,
+			inline:    !opts.DisableInlining,
+			debugInfo: opts.DebugInfo,
+			closures:  make(ds.Slice[*closure], 0, 6),
 		},
-		runtime{
+		rt: runtime{
 			packages: make(map[string]*Package),
-		},
-		logger{
-			Logger:      *log.New(os.Stdout, "", 0),
-			logCaptures: opts.LogCaptures,
 		},
 	}
 
@@ -178,8 +175,10 @@ func (vm *Instance) evalNode(node ast.Node, s *stopper) (result Value, err error
 		prevClosures := vm.cp.closures.Len()
 		hasClosure := prevClosures > 0
 		if !hasClosure {
-			vm.cp.closures.Push(&closure{freeVars: ds.Set[int]{}, info: fbr.active.funcInfoStatic})
-			vm.cp.closures.Last(0).scope.OpenBlock()
+			cl := &closure{freeVars: ds.Set[int]{}, info: fbr.active.funcInfoStatic}
+			cl.scope.TrackSlots = vm.cp.debugInfo
+			vm.cp.closures.Push(cl)
+			cl.scope.OpenBlock()
 		}
 		defer func() {
 			for vm.cp.closures.Len() > prevClosures {
@@ -190,6 +189,10 @@ func (vm *Instance) evalNode(node ast.Node, s *stopper) (result Value, err error
 		code := vm.compile(node)
 		if !hasClosure {
 			vm.closeFunction(fbr.active.funcInfoStatic, vm.cp.closures.Last(0))
+			if vm.cp.debugInfo {
+				fbr.active.funcInfoStatic.def = site{src: vm.cp.src}
+				vm.rt.scriptInfo = fbr.active.funcInfoStatic
+			}
 		}
 		v, exc := fbr.runGuarded(code)
 		if exc != nil {
@@ -212,6 +215,52 @@ func (vm *Instance) evalNode(node ast.Node, s *stopper) (result Value, err error
 // EvalSource parses and evaluates a named source; errors show its text
 func (vm *Instance) EvalSource(src *diag.Source) (Value, error) {
 	return vm.evalSource(src, nil)
+}
+
+// CompileSource parses and compiles a bare script (without a package header)
+// without executing it. Intended for inspection tools such as Dump.
+func (vm *Instance) CompileSource(src *diag.Source) (err error) {
+	node, err := parser.ParseSource(src)
+	if err != nil {
+		return err
+	}
+	if pkg, isPackage := node.(ast.Package); isPackage {
+		_, err = vm.evalNode(pkg, nil)
+		return err
+	}
+
+	vm.rt.acquire()
+	defer vm.rt.release()
+
+	prevSrc := vm.cp.src
+	vm.cp.src = src
+	defer func() { vm.cp.src = prevSrc }()
+
+	prevClosures := vm.cp.closures.Len()
+	defer func() {
+		for vm.cp.closures.Len() > prevClosures {
+			vm.cp.closures.Pop()
+		}
+		if r := recover(); r != nil {
+			switch e := r.(type) {
+			case error:
+				err = e
+			default:
+				err = recovered(r)
+			}
+		}
+	}()
+
+	info := &funcInfoStatic{name: "<script>", def: site{src: src}, vm: vm}
+	cl := &closure{freeVars: ds.Set[int]{}, info: info}
+	cl.scope.TrackSlots = vm.cp.debugInfo
+	vm.cp.closures.Push(cl)
+	cl.scope.OpenBlock()
+
+	_ = vm.compile(node)
+	vm.closeFunction(info, cl)
+	vm.rt.scriptInfo = info
+	return nil
 }
 
 // EvalSourceContext is EvalSource bound to ctx: when ctx is done, the code

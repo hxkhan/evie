@@ -10,15 +10,29 @@ type Binding struct {
 	IsStatic bool
 }
 
+// SlotInfo records the name and mutability of a local stack slot when slot
+// tracking is enabled for compiler inspection.
+type SlotInfo struct {
+	Name     string
+	IsStatic bool
+}
+
 type bindings map[string]Binding
 
 type Scope struct {
-	blocks []bindings // each block-scope gets its own bindings table
-	index  int        // current free index in this whole scope
+	blocks     []bindings // each block-scope gets its own bindings table
+	index      int        // current free index in this whole scope
+	TrackSlots bool       // when true, Declare records SlotInfo in slots
+	slots      []SlotInfo
 }
 
 func (sc *Scope) Capacity() int {
 	return sc.index
+}
+
+// Slots returns the recorded slot metadata when TrackSlots was enabled.
+func (sc *Scope) Slots() []SlotInfo {
+	return sc.slots
 }
 
 func (sc *Scope) OpenBlock() {
@@ -47,6 +61,9 @@ func (sc *Scope) Declare(name string, isStatic bool) (index int, success bool) {
 		return 0, false
 	}
 	top[name] = Binding{Index: sc.index, IsStatic: isStatic}
+	if sc.TrackSlots {
+		sc.slots = append(sc.slots, SlotInfo{Name: name, IsStatic: isStatic})
+	}
 	sc.index++
 	return sc.index - 1, true
 }

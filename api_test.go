@@ -1,7 +1,10 @@
 package evie_test
 
 import (
+	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -140,5 +143,93 @@ func TestPublicCallsAndTasks(t *testing.T) {
 	<-tk.Done()
 	if v, err := tk.Result(); err != nil || v.String() != "done" {
 		t.Fatalf("Result = %v, %v", v, err)
+	}
+}
+
+func TestDumpAndLoadWithoutRunningMain(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.ev")
+	src := `package main imports("math")
+
+const PI := 3.14
+var hits := 0
+
+class Base(x) {
+	fn get() => this.x
+}
+
+class Child(x, y) : Base {
+	fn sum() => super.get() + this.y
+}
+
+fn outer(seed) {
+	var count := seed
+	class LocalBox(v) {
+		fn bumped() => this.v + count
+	}
+	return fn() {
+		return fn() => count
+	}
+}
+
+fn main() {
+	throw error("main must not run during LoadFile")
+}
+`
+	if err := os.WriteFile(mainPath, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	eng := evie.New(evie.Options{Debug: evie.Debug{DebugInfo: true}})
+	if err := eng.LoadFile(mainPath); err != nil {
+		t.Fatalf("LoadFile failed: %v", err)
+	}
+	var buf bytes.Buffer
+	eng.Dump(&buf)
+	out := buf.String()
+
+	for _, want := range []string{
+		"package main",
+		"imports: math",
+		"const PI = 3.14 [folded]",
+		"var hits [runtime]",
+		"class Base",
+		"class Child : Base",
+		"fields: [0] x, [1] y",
+		"fn outer(seed)",
+		"[1] count (var, escapes)",
+		"class LocalBox",
+		"[0] <- Local(1) 'count'",
+		"[0] <- Captured(0) 'count'",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("Dump output missing %q:\n%s", want, out)
+		}
+	}
+
+	// Bare script compiles without executing side effects in LoadFile
+	barePath := filepath.Join(dir, "bare.ev")
+	if err := os.WriteFile(barePath, []byte("var x := 1\nthrow error(\"must not run\")\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bareEng := evie.New(evie.Options{Debug: evie.Debug{DebugInfo: true}})
+	if err := bareEng.LoadFile(barePath); err != nil {
+		t.Fatalf("LoadFile on bare script failed: %v", err)
+	}
+	var bareBuf bytes.Buffer
+	bareEng.Dump(&bareBuf)
+	if !strings.Contains(bareBuf.String(), "[0] x (var)") {
+		t.Fatalf("bare script dump missing local slot:\n%s", bareBuf.String())
+	}
+
+	// Dump also works gracefully when DebugInfo is false (default zero-overhead mode)
+	plainEng := evie.New()
+	if _, err := plainEng.Load("plain.ev", []byte("package main\nfn add(a, b) => a + b\n")); err != nil {
+		t.Fatal(err)
+	}
+	var plainBuf bytes.Buffer
+	plainEng.Dump(&plainBuf)
+	if !strings.Contains(plainBuf.String(), "fn add(a, b)") {
+		t.Fatalf("Dump without DebugInfo missing function:\n%s", plainBuf.String())
 	}
 }

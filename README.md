@@ -227,6 +227,9 @@ go build ./evie
 ./evie -e 'math.sqrt(2)'
 ./evie -e 'for w in strings.fields("go evie go") { io.println(strings.upper(w)) }'
 
+# Inspect compiled packages, globals, classes, slots, escapes and closure captures without running main
+./evie -dump ./examples/captures.ev
+
 # Print the version (also -v), or the commit the binary was built from
 ./evie --version
 ```

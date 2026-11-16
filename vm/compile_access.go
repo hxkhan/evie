@@ -8,7 +8,7 @@ import (
 )
 
 func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
-	index, success := vm.cp.closures.Last(0).scope.Declare(node.Name, node.IsStatic)
+	index, success := vm.currentClosure().scope.Declare(node.Name, node.IsStatic)
 	if !success {
 		panic(vm.compileErrorAt(node, "double declaration of %s", node.Name))
 	}
@@ -107,300 +107,236 @@ func assignField(fbr *fiber, site site, obj Value, name string, index fields.ID,
 }
 
 func (vm *Instance) emitAssign(node ast.Assign) instruction {
-	site := vm.at(node)
-	// handle variables
-	if iGet, isIdentGet := node.Lhs.(ast.Ident); isIdentGet {
-		variable, err := vm.cp.reach(iGet.Name)
-		if err != nil {
-			panic(vm.locate(err, iGet))
-		}
-
-		// compile new value
-		value := vm.compile(node.Value)
-
-		switch v := variable.(type) {
-		case local:
-			if v.isStatic {
-				panic(vm.compileErrorAt(iGet, "cannot assign to '%v' because it is a constant", iGet.Name).withHint("declare it with var to allow reassignment: var " + iGet.Name + " := ..."))
-			}
-
-			return func(fbr *fiber) (Value, exception) {
-				value, err := value(fbr)
-				if err != nil {
-					return value, err
-				}
-
-				fbr.set(v, value)
-				return Value{}, nil
-			}
-
-		case pkgGlobal:
-			if v.IsStatic {
-				panic(vm.compileErrorAt(iGet, "cannot assign to '%v' because it is a constant", iGet.Name).withHint("declare it with var to allow reassignment: var " + iGet.Name + " := ..."))
-			}
-
-			return func(fbr *fiber) (Value, exception) {
-				value, err := value(fbr)
-				if err != nil {
-					return value, err
-				}
-
-				*(v.Value) = value
-				return Value{}, nil
-			}
-
-		}
+	switch lhs := node.Lhs.(type) {
+	case ast.Ident:
+		return vm.emitIdentAssign(lhs, node.Value)
+	case ast.FieldAccess:
+		return vm.emitFieldAssign(node, lhs)
+	case ast.Subscript:
+		return vm.emitSubscriptAssign(node, lhs)
 	}
-
-	// handle field access assignments
-	if fa, isFieldAccess := node.Lhs.(ast.FieldAccess); isFieldAccess {
-		if ident, ok := fa.Lhs.(ast.Ident); ok && ident.Name == "super" {
-			panic(vm.compileErrorAt(node, "cannot assign to 'super.%s'", fa.Rhs))
-		}
-		// Lhs can for e.g. be an ast.Ident
-		switch lhs := vm.evaluate(fa.Lhs).(type) {
-		case local:
-			// compile new value & return setter
-			value := vm.compile(node.Value)
-			index := fields.Get(fa.Rhs)
-
-			if lhs.index == 0 && !lhs.isCaptured && vm.cp.closures.Len() > 0 && vm.cp.closures.Last(0).uclass != nil {
-				uclass := vm.cp.closures.Last(0).uclass
-				if slot, ok := uclass.FieldOffsets[index]; ok {
-					return func(fbr *fiber) (Value, exception) {
-						v, err := value(fbr)
-						if err != nil {
-							return v, err
-						}
-						thisVal := fbr.stack[fbr.base]
-						if thisVal.scalar == kindClassInstance && !isKnown(thisVal.pointer) {
-							ci := (*classInstance)(thisVal.pointer)
-							if ci.InstanceOf == uclass && slot < len(ci.Fields) {
-								ci.Fields[slot] = v
-								return Value{}, nil
-							}
-							ci.SetField(index, v)
-							return Value{}, nil
-						}
-						return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, thisVal.TypeOf())
-					}
-				}
-			}
-
-			return func(fbr *fiber) (Value, exception) {
-				lhs := fbr.get(lhs)
-
-				if obj, ok := lhs.AsObject(); ok {
-					value, err := value(fbr)
-					if err != nil {
-						return value, err
-					}
-
-					obj[fa.Rhs] = value
-					return Value{}, nil
-				}
-
-				if obj, ok := lhs.asClassInstance(); ok {
-					value, err := value(fbr)
-					if err != nil {
-						return value, err
-					}
-
-					obj.SetField(index, value)
-					return Value{}, nil
-				}
-
-				return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, lhs.TypeOf())
-			}
-
-		case Value:
-			// an imported package folds to a constant; its symbols are checked now
-			if pkg, ok := lhs.AsPackage(); ok {
-				field, exists := pkg.globals[fields.Get(fa.Rhs)]
-				if !exists || !field.IsPublic {
-					panic(vm.compileErrorAt(fa, "package '%s' has no symbol '%s'", pkg.name, fa.Rhs))
-				}
-
-				if field.IsStatic {
-					panic(vm.compileErrorAt(fa, "cannot assign to '%s.%s' because it is a constant", pkg.name, fa.Rhs).withHint("declare it with var in its package to allow reassignment"))
-				}
-
-				value := vm.compile(node.Value)
-				return func(fbr *fiber) (Value, exception) {
-					value, err := value(fbr)
-					if err != nil {
-						return value, err
-					}
-
-					*(field.Value) = value
-					return Value{}, nil
-				}
-			}
-
-		case pkgGlobal:
-			// compile new value & return setter
-			value := vm.compile(node.Value)
-			index := fields.Get(fa.Rhs)
-			return func(fbr *fiber) (Value, exception) {
-				if pkg, ok := lhs.AsPackage(); ok {
-					field, exists := pkg.globals[index]
-					if !exists || !field.IsPublic {
-						return Value{}, errorAt(site, "package '%s' has no symbol '%s'", pkg.name, fa.Rhs)
-					}
-
-					if field.IsStatic {
-						return Value{}, errorAt(site, "cannot assign to '%s.%s' because it is a constant", pkg.name, fa.Rhs)
-					}
-
-					value, err := value(fbr)
-					if err != nil {
-						return value, err
-					}
-
-					*(field.Value) = value
-					return Value{}, nil
-				}
-
-				if obj, ok := lhs.AsObject(); ok {
-					value, err := value(fbr)
-					if err != nil {
-						return value, err
-					}
-
-					obj[fa.Rhs] = value
-					return Value{}, nil
-				}
-
-				if obj, ok := lhs.asClassInstance(); ok {
-					value, err := value(fbr)
-					if err != nil {
-						return value, err
-					}
-
-					obj.SetField(index, value)
-					return Value{}, nil
-				}
-
-				return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, lhs.TypeOf())
-			}
-		}
-
-		// any other receiver, as in `this.child.v = x`, `arr[i].x = v` or
-		// `make().x = v`: the receiver is evaluated first, then the value
-		receiver := vm.compile(fa.Lhs)
-		value := vm.compile(node.Value)
-		index := fields.Get(fa.Rhs)
-		return func(fbr *fiber) (Value, exception) {
-			obj, exc := receiver(fbr)
-			if exc != nil {
-				return obj, exc
-			}
-			return assignField(fbr, site, obj, fa.Rhs, index, value)
-		}
-	}
-
-	// handle subscript assignments: arr[i] = val, obj[key] = val, classInstance[key] = val
-	if sub, isSubscript := node.Lhs.(ast.Subscript); isSubscript {
-		targetCompiled := vm.compile(sub.Lhs)
-		keyCompiled := vm.compile(sub.Key)
-		valCompiled := vm.compile(node.Value)
-
-		return func(fbr *fiber) (Value, exception) {
-			target, err := targetCompiled(fbr)
-			if err != nil {
-				return target, err
-			}
-
-			keyVal, err := keyCompiled(fbr)
-			if err != nil {
-				return keyVal, err
-			}
-
-			newVal, err := valCompiled(fbr)
-			if err != nil {
-				return newVal, err
-			}
-
-			// 1. Array index assignment: arr[i] = newVal
-			if arr, ok := target.AsArray(); ok {
-				idxFloat, ok := keyVal.AsFloat64()
-				if !ok {
-					return Value{}, errorAt(site, "array index must be a number, got '%s'", keyVal.TypeOf())
-				}
-				idx := int(idxFloat)
-				if float64(idx) != idxFloat {
-					return Value{}, errorAt(site, "array index must be an integer, got %v", idxFloat)
-				}
-				length := len(arr.Data)
-				if idx < 0 {
-					idx = length + idx
-				}
-
-				if idx < 0 || idx >= length {
-					return Value{}, errorAt(site, "IndexError: index %d out of bounds (length %d)", int(idxFloat), length)
-				}
-
-				arr.Data[idx] = newVal
-				return Value{}, nil
-			}
-
-			// 2. Object key assignment: obj[key] = newVal
-			if obj, ok := target.AsObject(); ok {
-				keyStr, ok := keyVal.AsString()
-				if !ok {
-					return Value{}, errorAt(site, "object key must be a string, got '%s'", keyVal.TypeOf())
-				}
-
-				obj[keyStr] = newVal
-				return Value{}, nil
-			}
-
-			// 3. Class instance field assignment: classInst[key] = newVal
-			if ci, ok := target.asClassInstance(); ok {
-				keyStr, ok := keyVal.AsString()
-				if !ok {
-					return Value{}, errorAt(site, "class field key must be a string, got '%s'", keyVal.TypeOf())
-				}
-
-				ci.setFieldByName(keyStr, newVal)
-				return Value{}, nil
-			}
-
-			// 4. Buffer byte assignment: buf[i] = byteVal
-			if buf, ok := target.AsBuffer(); ok {
-				idxFloat, ok := keyVal.AsFloat64()
-				if !ok {
-					return Value{}, errorAt(site, "buffer index must be a number, got '%s'", keyVal.TypeOf())
-				}
-				idx := int(idxFloat)
-				if float64(idx) != idxFloat {
-					return Value{}, errorAt(site, "buffer index must be an integer, got %v", idxFloat)
-				}
-				length := len(buf)
-				if idx < 0 {
-					idx = length + idx
-				}
-				if idx < 0 || idx >= length {
-					return Value{}, errorAt(site, "IndexError: buffer index %d out of bounds (length %d)", int(idxFloat), length)
-				}
-				b, exc := checkByte(site, newVal)
-				if exc != nil {
-					return Value{}, exc
-				}
-				buf[idx] = b
-				return Value{}, nil
-			}
-
-			return Value{}, errorAt(site, "cannot assign to subscript of type '%s'", target.TypeOf())
-		}
-	}
-
 	panic(vm.compileErrorAt(node, "cannot assign to '%v'", node.Lhs))
 }
 
+func (vm *Instance) emitIdentAssign(lhs ast.Ident, rhs ast.Node) instruction {
+	variable, err := vm.cp.reach(lhs.Name)
+	if err != nil {
+		panic(vm.locate(err, lhs))
+	}
+
+	value := vm.compile(rhs)
+
+	switch v := variable.(type) {
+	case local:
+		if v.isStatic {
+			panic(vm.compileErrorAt(lhs, "cannot assign to '%v' because it is a constant", lhs.Name).withHint("declare it with var to allow reassignment: var " + lhs.Name + " := ..."))
+		}
+		return func(fbr *fiber) (Value, exception) {
+			vNew, err := value(fbr)
+			if err != nil {
+				return vNew, err
+			}
+			fbr.set(v, vNew)
+			return Value{}, nil
+		}
+
+	case pkgGlobal:
+		if v.IsStatic {
+			panic(vm.compileErrorAt(lhs, "cannot assign to '%v' because it is a constant", lhs.Name).withHint("declare it with var to allow reassignment: var " + lhs.Name + " := ..."))
+		}
+		return func(fbr *fiber) (Value, exception) {
+			vNew, err := value(fbr)
+			if err != nil {
+				return vNew, err
+			}
+			*(v.Value) = vNew
+			return Value{}, nil
+		}
+	}
+
+	panic(vm.compileErrorAt(lhs, "cannot assign to '%v'", lhs.Name))
+}
+
+func (vm *Instance) emitFieldAssign(node ast.Assign, fa ast.FieldAccess) instruction {
+	site := vm.at(node)
+	if ident, ok := fa.Lhs.(ast.Ident); ok && ident.Name == "super" {
+		panic(vm.compileErrorAt(node, "cannot assign to 'super.%s'", fa.Rhs))
+	}
+
+	switch lhs := vm.evaluate(fa.Lhs).(type) {
+	case local:
+		value := vm.compile(node.Value)
+		index := fields.Get(fa.Rhs)
+
+		// Fast path: assigning a declared field directly on `this` inside its own class method.
+		if uclass, slot, ok := vm.thisFieldSlot(lhs, index); ok {
+			return func(fbr *fiber) (Value, exception) {
+				v, err := value(fbr)
+				if err != nil {
+					return v, err
+				}
+				thisVal := fbr.stack[fbr.base] // slot 0 of a method frame is `this`
+				if ci, ok := thisVal.asClassInstance(); ok {
+					if ci.InstanceOf == uclass && slot < len(ci.Fields) {
+						ci.Fields[slot] = v
+						return Value{}, nil
+					}
+					ci.SetField(index, v)
+					return Value{}, nil
+				}
+				return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, thisVal.TypeOf())
+			}
+		}
+
+		return func(fbr *fiber) (Value, exception) {
+			target := fbr.get(lhs)
+
+			if obj, ok := target.AsObject(); ok {
+				v, err := value(fbr)
+				if err != nil {
+					return v, err
+				}
+				obj[fa.Rhs] = v
+				return Value{}, nil
+			}
+
+			if ci, ok := target.asClassInstance(); ok {
+				v, err := value(fbr)
+				if err != nil {
+					return v, err
+				}
+				ci.SetField(index, v)
+				return Value{}, nil
+			}
+
+			return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, target.TypeOf())
+		}
+
+	case Value:
+		// An imported package folds to a constant; verify mutability at compile time.
+		if pkg, ok := lhs.AsPackage(); ok {
+			field, exists := pkg.globals[fields.Get(fa.Rhs)]
+			if !exists || !field.IsPublic {
+				panic(vm.compileErrorAt(fa, "package '%s' has no symbol '%s'", pkg.name, fa.Rhs))
+			}
+			if field.IsStatic {
+				panic(vm.compileErrorAt(fa, "cannot assign to '%s.%s' because it is a constant", pkg.name, fa.Rhs).withHint("declare it with var in its package to allow reassignment"))
+			}
+
+			value := vm.compile(node.Value)
+			return func(fbr *fiber) (Value, exception) {
+				v, err := value(fbr)
+				if err != nil {
+					return v, err
+				}
+				*(field.Value) = v
+				return Value{}, nil
+			}
+		}
+
+	case pkgGlobal:
+		value := vm.compile(node.Value)
+		index := fields.Get(fa.Rhs)
+		return func(fbr *fiber) (Value, exception) {
+			return assignField(fbr, site, *lhs.Value, fa.Rhs, index, value)
+		}
+	}
+
+	// Any other receiver (`this.child.v = x`, `arr[i].x = v`, `make().x = v`):
+	// evaluate receiver first, then the right-hand value.
+	receiver := vm.compile(fa.Lhs)
+	value := vm.compile(node.Value)
+	index := fields.Get(fa.Rhs)
+	return func(fbr *fiber) (Value, exception) {
+		obj, exc := receiver(fbr)
+		if exc != nil {
+			return obj, exc
+		}
+		return assignField(fbr, site, obj, fa.Rhs, index, value)
+	}
+}
+
+func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) instruction {
+	site := vm.at(node)
+	targetCompiled := vm.compile(sub.Lhs)
+	keyCompiled := vm.compile(sub.Key)
+	valCompiled := vm.compile(node.Value)
+
+	return func(fbr *fiber) (Value, exception) {
+		target, err := targetCompiled(fbr)
+		if err != nil {
+			return target, err
+		}
+
+		keyVal, err := keyCompiled(fbr)
+		if err != nil {
+			return keyVal, err
+		}
+
+		newVal, err := valCompiled(fbr)
+		if err != nil {
+			return newVal, err
+		}
+
+		// 1. Array index assignment: arr[i] = newVal
+		if arr, ok := target.AsArray(); ok {
+			idx, ok := resolveIndex(keyVal, len(arr.Data))
+			if !ok {
+				return Value{}, indexError(site, keyVal, len(arr.Data), "array")
+			}
+			arr.Data[idx] = newVal
+			return Value{}, nil
+		}
+
+		// 2. Object key assignment: obj[key] = newVal
+		if obj, ok := target.AsObject(); ok {
+			keyStr, ok := keyVal.AsString()
+			if !ok {
+				return Value{}, errorAt(site, "object key must be a string, got '%s'", keyVal.TypeOf())
+			}
+			obj[keyStr] = newVal
+			return Value{}, nil
+		}
+
+		// 3. Class instance field assignment: classInst[key] = newVal
+		if ci, ok := target.asClassInstance(); ok {
+			keyStr, ok := keyVal.AsString()
+			if !ok {
+				return Value{}, errorAt(site, "class field key must be a string, got '%s'", keyVal.TypeOf())
+			}
+			ci.setFieldByName(keyStr, newVal)
+			return Value{}, nil
+		}
+
+		// 4. Buffer byte assignment: buf[i] = byteVal
+		if buf, ok := target.AsBuffer(); ok {
+			idx, ok := resolveIndex(keyVal, len(buf))
+			if !ok {
+				return Value{}, indexError(site, keyVal, len(buf), "buffer")
+			}
+			b, exc := checkByte(site, newVal)
+			if exc != nil {
+				return Value{}, exc
+			}
+			buf[idx] = b
+			return Value{}, nil
+		}
+
+		return Value{}, errorAt(site, "cannot assign to subscript of type '%s'", target.TypeOf())
+	}
+}
+
+// resolveSuper finds the enclosing class method for a `super.method` reference
+// (walking outward through nested closures so lambdas inside methods work).
+//
+// For top-level classes or local classes with a constant parent, uclass.Parent
+// is already fixed at compile time (dynamicClass == false). For local classes
+// whose parent is a local/parameter resolved at runtime (declClosure != nil),
+// we also capture the local class binding from its declaring closure frame so
+// each call to the enclosing function sees its own runtime parent.
 func (vm *Instance) resolveSuper(node ast.Node) (uclass *userClass, classLocal local, dynamicClass bool, thisLocal local) {
-	for scroll := range vm.cp.closures.Len() {
-		if c := vm.cp.closures.Last(scroll).uclass; c != nil {
+	for depth := range vm.cp.closures.Len() {
+		if c := vm.cp.closures.Last(depth).uclass; c != nil {
 			uclass = c
 			break
 		}
@@ -416,12 +352,12 @@ func (vm *Instance) resolveSuper(node ast.Node) (uclass *userClass, classLocal l
 		panic(vm.compileErrorAt(node, "'super' can only be used inside a class method"))
 	}
 	if uclass.declClosure != nil {
-		for scroll := range vm.cp.closures.Len() {
-			if vm.cp.closures.Last(scroll) == uclass.declClosure {
-				if scroll == 0 {
+		for depth := range vm.cp.closures.Len() {
+			if vm.cp.closures.Last(depth) == uclass.declClosure {
+				if depth == 0 {
 					classLocal = local{index: int16(uclass.declIndex), isCaptured: false, isStatic: true}
 				} else {
-					classLocal = local{index: int16(vm.cp.addToCaptured(scroll, uclass.declIndex)), isCaptured: true, isStatic: true}
+					classLocal = local{index: int16(vm.cp.addToCaptured(depth, uclass.declIndex)), isCaptured: true, isStatic: true}
 				}
 				dynamicClass = true
 				break
@@ -458,26 +394,22 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 	if lhs := vm.evaluate(node.Lhs); lhs != nil {
 		switch lhs := lhs.(type) {
 		case local:
-			if lhs.index == 0 && !lhs.isCaptured && vm.cp.closures.Len() > 0 && vm.cp.closures.Last(0).uclass != nil {
-				uclass := vm.cp.closures.Last(0).uclass
-				if slot, ok := uclass.FieldOffsets[index]; ok {
-					return func(fbr *fiber) (Value, exception) {
-						thisVal := fbr.stack[fbr.base]
-						if thisVal.scalar == kindClassInstance && !isKnown(thisVal.pointer) {
-							ci := (*classInstance)(thisVal.pointer)
-							if ci.InstanceOf == uclass && slot < len(ci.Fields) {
-								val := ci.Fields[slot]
-								return val, nil
-							}
-							if val, exists := ci.GetField(index); exists {
-								return val, nil
-							}
+			// Fast path: reading a declared field directly on `this` inside its own class method.
+			if uclass, slot, ok := vm.thisFieldSlot(lhs, index); ok {
+				return func(fbr *fiber) (Value, exception) {
+					thisVal := fbr.stack[fbr.base] // slot 0 of a method frame is `this`
+					if ci, ok := thisVal.asClassInstance(); ok {
+						if ci.InstanceOf == uclass && slot < len(ci.Fields) {
+							return ci.Fields[slot], nil
 						}
-						if field, exists := thisVal.getField(key); exists {
-							return field, nil
+						if val, exists := ci.GetField(index); exists {
+							return val, nil
 						}
-						return Value{}, memberError(site, node.Rhs, *thisVal)
 					}
+					if field, exists := thisVal.getField(key); exists {
+						return field, nil
+					}
+					return Value{}, memberError(site, node.Rhs, *thisVal)
 				}
 			}
 
@@ -485,17 +417,14 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 			var cachedSlot int = -1
 			return func(fbr *fiber) (Value, exception) {
 				v := fbr.get(lhs)
-				if v.scalar == kindClassInstance && !isKnown(v.pointer) {
-					ci := (*classInstance)(v.pointer)
+				if ci, ok := v.asClassInstance(); ok {
 					if ci.InstanceOf == cachedClass && cachedSlot >= 0 && cachedSlot < len(ci.Fields) {
-						val := ci.Fields[cachedSlot]
-						return val, nil
+						return ci.Fields[cachedSlot], nil
 					}
 					if slot, ok := ci.InstanceOf.FieldOffsets[index]; ok {
 						cachedClass = ci.InstanceOf
 						cachedSlot = slot
-						val := ci.Fields[slot]
-						return val, nil
+						return ci.Fields[slot], nil
 					}
 				}
 				if field, exists := v.getField(key); exists {
@@ -543,17 +472,14 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 			return lhs, exc
 		}
 
-		if lhs.scalar == kindClassInstance && !isKnown(lhs.pointer) {
-			ci := (*classInstance)(lhs.pointer)
+		if ci, ok := lhs.asClassInstance(); ok {
 			if ci.InstanceOf == cachedClass && cachedSlot >= 0 && cachedSlot < len(ci.Fields) {
-				val := ci.Fields[cachedSlot]
-				return val, nil
+				return ci.Fields[cachedSlot], nil
 			}
 			if slot, ok := ci.InstanceOf.FieldOffsets[index]; ok {
 				cachedClass = ci.InstanceOf
 				cachedSlot = slot
-				val := ci.Fields[slot]
-				return val, nil
+				return ci.Fields[slot], nil
 			}
 		}
 
@@ -563,6 +489,39 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 
 		return Value{}, memberError(site, node.Rhs, lhs)
 	}
+}
+
+// resolveIndex parses an integer index (wrapping negative indices from the end)
+// and reports whether it lies in [0, length). Kept free of error-path calls so
+// Go inlines it at every subscript and existence-check site.
+func resolveIndex(keyVal Value, length int) (int, bool) {
+	idxFloat, ok := keyVal.AsFloat64()
+	if !ok {
+		return 0, false
+	}
+	idx := int(idxFloat)
+	if float64(idx) != idxFloat {
+		return 0, false
+	}
+	if idx < 0 {
+		idx += length
+	}
+	return idx, idx >= 0 && idx < length
+}
+
+func indexError(site site, keyVal Value, length int, kind string) exception {
+	idxFloat, ok := keyVal.AsFloat64()
+	if !ok {
+		return errorAt(site, "%s index must be a number, got '%s'", kind, keyVal.TypeOf())
+	}
+	idx := int(idxFloat)
+	if float64(idx) != idxFloat {
+		return errorAt(site, "%s index must be an integer, got %v", kind, idxFloat)
+	}
+	if kind == "array" {
+		return errorAt(site, "IndexError: index %d out of bounds (length %d)", idx, length)
+	}
+	return errorAt(site, "IndexError: %s index %d out of bounds (length %d)", kind, idx, length)
 }
 
 func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
@@ -583,23 +542,10 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 
 		// 1. Array indexing: arr[0], arr[-1]
 		if arr, ok := target.AsArray(); ok {
-			idxFloat, ok := indexVal.AsFloat64()
+			idx, ok := resolveIndex(indexVal, len(arr.Data))
 			if !ok {
-				return Value{}, errorAt(site, "array index must be a number, got '%s'", indexVal.TypeOf())
+				return Value{}, indexError(site, indexVal, len(arr.Data), "array")
 			}
-			idx := int(idxFloat)
-			if float64(idx) != idxFloat {
-				return Value{}, errorAt(site, "array index must be an integer, got %v", idxFloat)
-			}
-			length := len(arr.Data)
-			if idx < 0 {
-				idx = length + idx
-			}
-
-			if idx < 0 || idx >= length {
-				return Value{}, errorAt(site, "IndexError: index %d out of bounds (length %d)", int(idxFloat), length)
-			}
-
 			return arr.Data[idx], nil
 		}
 
@@ -609,7 +555,6 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 			if !ok {
 				return Value{}, errorAt(site, "object key must be a string, got '%s'", indexVal.TypeOf())
 			}
-
 			val, exists := obj[keyStr]
 			if !exists {
 				return Value{}, nil
@@ -623,7 +568,6 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 			if !ok {
 				return Value{}, errorAt(site, "class field key must be a string, got '%s'", indexVal.TypeOf())
 			}
-
 			val, exists := ci.getFieldByName(keyStr)
 			if !exists {
 				return Value{}, errorAt(site, "undefined field '%s' in class", keyStr)
@@ -635,41 +579,25 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 		if str, ok := target.AsString(); ok {
 			idxFloat, ok := indexVal.AsFloat64()
 			if !ok {
-				return Value{}, errorAt(site, "string index must be a number, got '%s'", indexVal.TypeOf())
+				return Value{}, indexError(site, indexVal, 0, "string")
 			}
 			idx := int(idxFloat)
 			if float64(idx) != idxFloat {
-				return Value{}, errorAt(site, "string index must be an integer, got %v", idxFloat)
+				return Value{}, indexError(site, indexVal, 0, "string")
 			}
-
 			ch, length, ok := runeAt(str, idx)
 			if !ok {
-				return Value{}, errorAt(site, "IndexError: string index %d out of bounds (length %d)", int(idxFloat), length)
+				return Value{}, indexError(site, indexVal, length, "string")
 			}
-
 			return BoxString(ch), nil
 		}
 
 		// 5. Buffer indexing: buf[0] -> byte value as number
 		if buf, ok := target.AsBuffer(); ok {
-			idxFloat, ok := indexVal.AsFloat64()
+			idx, ok := resolveIndex(indexVal, len(buf))
 			if !ok {
-				return Value{}, errorAt(site, "buffer index must be a number, got '%s'", indexVal.TypeOf())
+				return Value{}, indexError(site, indexVal, len(buf), "buffer")
 			}
-			idx := int(idxFloat)
-			if float64(idx) != idxFloat {
-				return Value{}, errorAt(site, "buffer index must be an integer, got %v", idxFloat)
-			}
-
-			length := len(buf)
-			if idx < 0 {
-				idx = length + idx
-			}
-
-			if idx < 0 || idx >= length {
-				return Value{}, errorAt(site, "IndexError: buffer index %d out of bounds (length %d)", int(idxFloat), length)
-			}
-
 			return BoxNumber(float64(buf[idx])), nil
 		}
 
@@ -933,46 +861,16 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 				return BoxBool(false), nil
 			}
 			if arr, ok := lhs.AsArray(); ok {
-				if idxFloat, ok := k.AsFloat64(); ok {
-					idx := int(idxFloat)
-					if float64(idx) != idxFloat {
-						return BoxBool(false), nil
-					}
-					length := len(arr.Data)
-					if idx < 0 {
-						idx = length + idx
-					}
-					return BoxBool(idx >= 0 && idx < length), nil
-				}
-				return BoxBool(false), nil
+				_, ok := resolveIndex(k, len(arr.Data))
+				return BoxBool(ok), nil
 			}
 			if str, ok := lhs.AsString(); ok {
-				if idxFloat, ok := k.AsFloat64(); ok {
-					idx := int(idxFloat)
-					if float64(idx) != idxFloat {
-						return BoxBool(false), nil
-					}
-					length := utf8.RuneCountInString(str)
-					if idx < 0 {
-						idx = length + idx
-					}
-					return BoxBool(idx >= 0 && idx < length), nil
-				}
-				return BoxBool(false), nil
+				_, ok := resolveIndex(k, utf8.RuneCountInString(str))
+				return BoxBool(ok), nil
 			}
 			if buf, ok := lhs.AsBuffer(); ok {
-				if idxFloat, ok := k.AsFloat64(); ok {
-					idx := int(idxFloat)
-					if float64(idx) != idxFloat {
-						return BoxBool(false), nil
-					}
-					length := len(buf)
-					if idx < 0 {
-						idx = length + idx
-					}
-					return BoxBool(idx >= 0 && idx < length), nil
-				}
-				return BoxBool(false), nil
+				_, ok := resolveIndex(k, len(buf))
+				return BoxBool(ok), nil
 			}
 			if ci, ok := lhs.asClassInstance(); ok {
 				if keyStr, ok := k.AsString(); ok {
@@ -1102,22 +1000,10 @@ func (vm *Instance) emitCompoundSubscriptAssign(node ast.MutableBinOp, sub ast.S
 		}
 
 		if arr, ok := obj.AsArray(); ok {
-			idxFloat, ok := keyVal.AsFloat64()
+			idx, ok := resolveIndex(keyVal, len(arr.Data))
 			if !ok {
-				return Value{}, errorAt(site, "array index must be a number, got '%s'", keyVal.TypeOf())
+				return Value{}, indexError(site, keyVal, len(arr.Data), "array")
 			}
-			idx := int(idxFloat)
-			if float64(idx) != idxFloat {
-				return Value{}, errorAt(site, "array index must be an integer, got %v", idxFloat)
-			}
-			length := len(arr.Data)
-			if idx < 0 {
-				idx = length + idx
-			}
-			if idx < 0 || idx >= length {
-				return Value{}, errorAt(site, "IndexError: index %d out of bounds (length %d)", int(idxFloat), length)
-			}
-
 			result, exc := apply(fbr, arr.Data[idx], value)
 			if exc != nil {
 				return result, exc
@@ -1158,20 +1044,9 @@ func (vm *Instance) emitCompoundSubscriptAssign(node ast.MutableBinOp, sub ast.S
 		}
 
 		if buf, ok := obj.AsBuffer(); ok {
-			idxFloat, ok := keyVal.AsFloat64()
+			idx, ok := resolveIndex(keyVal, len(buf))
 			if !ok {
-				return Value{}, errorAt(site, "buffer index must be a number, got '%s'", keyVal.TypeOf())
-			}
-			idx := int(idxFloat)
-			if float64(idx) != idxFloat {
-				return Value{}, errorAt(site, "buffer index must be an integer, got %v", idxFloat)
-			}
-			length := len(buf)
-			if idx < 0 {
-				idx = length + idx
-			}
-			if idx < 0 || idx >= length {
-				return Value{}, errorAt(site, "IndexError: buffer index %d out of bounds (length %d)", int(idxFloat), length)
+				return Value{}, indexError(site, keyVal, len(buf), "buffer")
 			}
 			result, exc := apply(fbr, BoxNumber(float64(buf[idx])), value)
 			if exc != nil {

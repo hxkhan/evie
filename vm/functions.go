@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
+
+	"github.com/hxkhan/evie/internal/ds"
 )
 
 type capture struct {
@@ -18,20 +20,36 @@ func (c capture) String() string {
 	return fmt.Sprintf("Captured(%v)", c.index)
 }
 
+// fnDebugInfo holds extra compiler metadata recorded only when Options.DebugInfo
+// is enabled so Dump can display slot names, local classes, and nested closures.
+type fnDebugInfo struct {
+	slots    []ds.SlotInfo
+	children []*funcInfoStatic
+	classes  []*userClass
+}
+
 // funcInfoStatic holds static function information
 type funcInfoStatic struct {
-	name       string      // name of the function
-	args       []string    // argument names, including the receiver of a method
-	isVariadic bool        // variadic function (...args)
-	isMethod   bool        // declared inside a class; args[0] is the receiver
-	minArgs    int         // fewest arguments a call may pass, receiver included
-	maxArgs    int         // most arguments a call may pass; unbounded when variadic
-	locals     []bool      // all locals & true for those that escape
-	captures   []capture   // captured references
-	recyclable int         // number of non-escaping locals
-	code       instruction // the actual function code
-	def        site        // where the function was declared
-	vm         *Instance   // the corresponding vm
+	name       string       // name of the function
+	args       []string     // argument names, including the receiver of a method
+	isVariadic bool         // variadic function (...args)
+	isMethod   bool         // declared inside a class; args[0] is the receiver
+	minArgs    int          // fewest arguments a call may pass, receiver included
+	maxArgs    int          // most arguments a call may pass; unbounded when variadic
+	locals     []bool       // all locals & true for those that escape
+	captures   []capture    // captured references
+	recyclable int          // number of non-escaping locals
+	code       instruction  // the actual function code
+	def        site         // where the function was declared
+	vm         *Instance    // the corresponding vm
+	debug      *fnDebugInfo // populated only when Options.DebugInfo is true
+}
+
+func (fn *funcInfoStatic) ensureDebug() *fnDebugInfo {
+	if fn.debug == nil {
+		fn.debug = &fnDebugInfo{}
+	}
+	return fn.debug
 }
 
 // newFuncInfo describes a function before its body is compiled

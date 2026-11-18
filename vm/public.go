@@ -10,13 +10,15 @@ import (
 // Package is a namespace of symbols: the globals of a compiled evie file, or
 // the functions and constants a host registers for scripts to import.
 type Package struct {
-	name    string                  // name of the package
+	id      string                  // canonical module id (unique per loaded module; defaults to name)
+	name    string                  // declared package name
 	globals map[fields.ID]pkgGlobal // all global symbols
 
 	origin     string               // the file it was compiled from, for errors
 	compiled   bool                 // true for Evie packages compiled from source
 	inits      []*funcInfoStatic    // package init functions recorded when Options.DebugInfo is set
-	importedAs map[string][2]string // path name -> (import path, bound name) where they differ
+	imports    []string             // formatted import bindings for Dump (e.g. "math", "./math as mymath")
+	importedAs map[string][2]string // path/declared name -> (import path, bound name) where they differ
 	memberHint string               // shown when a script asks for a member it lacks
 }
 
@@ -29,7 +31,7 @@ func (pkg *Package) SetMemberHint(hint string) {
 // NewPackage creates an empty host package. Scripts import it by the name it
 // is resolved under; an empty name is filled in from the import path.
 func NewPackage(name string) *Package {
-	return &Package{name: name, globals: map[fields.ID]pkgGlobal{}}
+	return &Package{id: name, name: name, globals: map[fields.ID]pkgGlobal{}}
 }
 
 // Clone returns an independent copy of the package's namespace so an engine can
@@ -37,6 +39,7 @@ func NewPackage(name string) *Package {
 // with the caller or other engines.
 func (pkg *Package) Clone() *Package {
 	cp := &Package{
+		id:      pkg.id,
 		name:    pkg.name,
 		globals: make(map[fields.ID]pkgGlobal, len(pkg.globals)),
 		origin:  pkg.origin,
@@ -47,12 +50,28 @@ func (pkg *Package) Clone() *Package {
 	return cp
 }
 
+// ID returns the package's canonical module identifier (falling back to Name).
+func (pkg *Package) ID() string {
+	if pkg.id != "" {
+		return pkg.id
+	}
+	return pkg.name
+}
+
+// SetID sets the package's canonical module identifier.
+func (pkg *Package) SetID(id string) {
+	pkg.id = id
+}
+
 func (pkg *Package) Name() string {
 	return pkg.name
 }
 
 func (pkg *Package) setName(name string) {
 	pkg.name = name
+	if pkg.id == "" {
+		pkg.id = name
+	}
 }
 
 // Box boxes the package to be used as a value

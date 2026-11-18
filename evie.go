@@ -1,6 +1,13 @@
 // Package evie embeds the Evie scripting language in a Go program.
 //
+// Create an [Engine] with [New] to evaluate scripts, call Evie functions from Go,
+// and expose host packages with [Options]. For multi-file programs or concurrent
+// execution across isolated engines, parse once into an immutable [Bundle] with
+// [ParseFile], [ParseProject], [ParseFileFS], or [ParseProjectFS]. Use [Format]
+// to render parse, compile, and runtime errors with source excerpts and traces.
+//
 //	eng := evie.New()
+//	defer eng.Close()
 //	eng.Eval(`package main
 //	fn add(a, b) => a + b`)
 //	sum, err := eng.Call("main.add", 2, 3)
@@ -9,6 +16,7 @@ package evie
 import (
 	"errors"
 	goio "io"
+	iofs "io/fs"
 	"path/filepath"
 
 	"github.com/hxkhan/evie/diag"
@@ -34,6 +42,7 @@ var stdlib = map[string]func() *vm.Package{
 // Options configures an Engine. The zero value gives the standard library,
 // relative imports resolved against the entry file, and no host packages.
 type Options struct {
+	FS       iofs.FS                                // filesystem for file/project loading and relative imports; defaults to the OS filesystem (and sandboxes imports within FS)
 	NoStdlib bool                                   // do not offer the standard library packages
 	Stdlib   []string                               // when non-empty, only allow these standard library packages (e.g. "math", "strings", "json")
 	Packages []*vm.Package                          // host packages, importable by their names
@@ -66,7 +75,7 @@ func New(opts ...Options) *Engine {
 	}
 
 	root := opt.Root
-	if root != "" {
+	if root != "" && opt.FS == nil {
 		if abs, err := filepath.Abs(root); err == nil {
 			root = abs
 		}
@@ -85,16 +94,16 @@ func New(opts ...Options) *Engine {
 		root:         root,
 		stdAllow:     stdAllow,
 		packages:     make(map[string]*vm.Package, len(opt.Packages)),
-		filePackages: make(map[string]*vm.Package),
-		dirPackages:  make(map[string]*vm.Package),
-		loading:      make(map[string]bool),
+		bundleLoaded: make(map[string]*vm.Package),
 	}
 	for _, pkg := range opt.Packages {
 		if pkg == nil {
 			continue
 		}
 		// clone the package wrapper so per-engine hints never mutate the caller's Package
-		e.packages[pkg.Name()] = pkg.Clone()
+		cp := pkg.Clone()
+		cp.SetID("host:" + pkg.Name())
+		e.packages[pkg.Name()] = cp
 	}
 
 	e.vm = vm.New(vm.Options{

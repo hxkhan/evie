@@ -16,6 +16,9 @@
 			"include": "#strings"
 		},
 		{
+			"include": "#imports_clause"
+		},
+		{
 			"include": "#declarations"
 		},
 		{
@@ -41,6 +44,38 @@
 		}
 	],
 	"repository": {
+		"imports_clause": {
+			"comment": "Import list with contextual 'as' alias",
+			"begin": "\\b(imports)\\s*\\(",
+			"end": "\\)",
+			"beginCaptures": {
+				"1": {
+					"name": "keyword.declaration.evie"
+				}
+			},
+			"patterns": [
+				{
+					"include": "#comments"
+				},
+				{
+					"include": "#block_comment"
+				},
+				{
+					"include": "#strings"
+				},
+				{
+					"match": "\\b(as)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+					"captures": {
+						"1": {
+							"name": "keyword.control.as.evie"
+						},
+						"2": {
+							"name": "entity.name.namespace.evie"
+						}
+					}
+				}
+			]
+		},
 		"declarations": {
 			"patterns": [
 				{

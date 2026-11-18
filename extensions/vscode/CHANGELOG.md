@@ -6,6 +6,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+- Added highlighting for contextual `as` import aliases (`imports("./math" as mymath)`).
 - Updated class syntax highlighting from `struct` to `class`, including class fields and `: Parent` inheritance scopes.
 - Added highlighting for `const`, `super`, `await.timeout`, and built-in types (`buffer`, `array`, `object`, `task`).
 - Removed obsolete keywords (`synced`, `unsynced`, `agnostic`, `pub`, `record`, `static`, `self`), non-existent operators (bitwise, `++`, `--`), single-quoted char literals, and unsupported numeric literal forms.

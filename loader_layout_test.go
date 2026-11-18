@@ -105,7 +105,7 @@ func TestLoaderPackageNames(t *testing.T) {
 		"imp.ev":       "package main imports(\"./other\")\nfn main() => 0",
 	})
 	_, err := evie.RunFile(filepath.Join(dir, "dup.ev"))
-	expectError(t, err, "package 'util' is already loaded from", "lib1")
+	expectError(t, err, "binds as 'util'", "already bound by './lib1/util'")
 	_, err = evie.RunFile(filepath.Join(dir, "mix.ev"))
 	expectError(t, err, "declares package 'beta'", "declares 'alpha'")
 	_, err = evie.RunFile(filepath.Join(dir, "imp.ev"))

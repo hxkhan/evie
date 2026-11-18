@@ -46,8 +46,9 @@ type compiler struct {
 }
 
 type runtime struct {
-	packages     map[string]*Package // loaded packages
-	packageOrder []string            // compiled Evie packages in load order
+	packages     map[string]*Package // loaded packages by canonical module ID
+	byName       map[string]*Package // loaded packages by declared short name (for Lookup/Call)
+	packageOrder []string            // compiled Evie module IDs in load order
 	scriptInfo   *funcInfoStatic     // last compiled bare script when Options.DebugInfo is set
 	fibers       sync.Pool           // pooled fibers for this vm
 	runner       sync.Mutex          // held by the fiber that is executing evie code
@@ -94,6 +95,7 @@ func New(opts Options) (vm *Instance) {
 		},
 		rt: runtime{
 			packages: make(map[string]*Package),
+			byName:   make(map[string]*Package),
 		},
 	}
 
@@ -161,7 +163,7 @@ func (vm *Instance) evalNode(node ast.Node, s *stopper) (result Value, err error
 		if src == nil {
 			src = diag.NewSource("", nil)
 		}
-		v, exc := vm.runPackage([]unit{{src: src, node: pkg}})
+		v, exc := vm.runPackage("", []unit{{src: src, node: pkg}})
 		if exc != nil {
 			err = exc
 		}
@@ -212,19 +214,47 @@ func (vm *Instance) evalNode(node ast.Node, s *stopper) (result Value, err error
 	}
 }
 
+// ParsedUnit pairs a named source with its already-parsed AST so a pre-parsed
+// program (such as an evie.Bundle) can be compiled into multiple VM instances
+// without re-reading or re-parsing source files.
+type ParsedUnit struct {
+	Source *diag.Source
+	Node   ast.Node
+}
+
 // EvalSource parses and evaluates a named source; errors show its text
 func (vm *Instance) EvalSource(src *diag.Source) (Value, error) {
 	return vm.evalSource(src, nil)
 }
 
+// EvalParsedSourceContext evaluates an already-parsed source bound to ctx.
+func (vm *Instance) EvalParsedSourceContext(ctx context.Context, pu ParsedUnit) (Value, error) {
+	s := vm.rt.scope(ctx)
+	defer s.drop()
+
+	prev := vm.cp.src
+	vm.cp.src = pu.Source
+	defer func() { vm.cp.src = prev }()
+	return vm.evalNode(pu.Node, s)
+}
+
 // CompileSource parses and compiles a bare script (without a package header)
 // without executing it. Intended for inspection tools such as Dump.
-func (vm *Instance) CompileSource(src *diag.Source) (err error) {
+func (vm *Instance) CompileSource(src *diag.Source) error {
 	node, err := parser.ParseSource(src)
 	if err != nil {
 		return err
 	}
-	if pkg, isPackage := node.(ast.Package); isPackage {
+	return vm.CompileParsedSource(ParsedUnit{Source: src, Node: node})
+}
+
+// CompileParsedSource compiles an already-parsed bare script without executing
+// it. If pu.Node is an ast.Package, it is loaded normally.
+func (vm *Instance) CompileParsedSource(pu ParsedUnit) (err error) {
+	if pkg, isPackage := pu.Node.(ast.Package); isPackage {
+		prev := vm.cp.src
+		vm.cp.src = pu.Source
+		defer func() { vm.cp.src = prev }()
 		_, err = vm.evalNode(pkg, nil)
 		return err
 	}
@@ -233,7 +263,7 @@ func (vm *Instance) CompileSource(src *diag.Source) (err error) {
 	defer vm.rt.release()
 
 	prevSrc := vm.cp.src
-	vm.cp.src = src
+	vm.cp.src = pu.Source
 	defer func() { vm.cp.src = prevSrc }()
 
 	prevClosures := vm.cp.closures.Len()
@@ -251,13 +281,13 @@ func (vm *Instance) CompileSource(src *diag.Source) (err error) {
 		}
 	}()
 
-	info := &funcInfoStatic{name: "<script>", def: site{src: src}, vm: vm}
+	info := &funcInfoStatic{name: "<script>", def: site{src: pu.Source}, vm: vm}
 	cl := &closure{freeVars: ds.Set[int]{}, info: info}
 	cl.scope.TrackSlots = vm.cp.debugInfo
 	vm.cp.closures.Push(cl)
 	cl.scope.OpenBlock()
 
-	_ = vm.compile(node)
+	_ = vm.compile(pu.Node)
 	vm.closeFunction(info, cl)
 	vm.rt.scriptInfo = info
 	return nil
@@ -300,6 +330,34 @@ func (vm *Instance) EvalPackageContext(ctx context.Context, sources ...*diag.Sou
 	return vm.evalPackage(s, sources)
 }
 
+// EvalParsedPackageContext compiles one package from pre-parsed AST units and
+// runs its initializers under ctx, without re-parsing source text. moduleID
+// uniquely identifies the module (such as its canonical file or directory path);
+// when empty, the package's declared name is used.
+func (vm *Instance) EvalParsedPackageContext(ctx context.Context, moduleID string, parsed []ParsedUnit) (*Package, error) {
+	if len(parsed) == 0 {
+		return nil, errors.New("EvalParsedPackageContext needs at least one unit")
+	}
+	units := make([]unit, len(parsed))
+	for i, pu := range parsed {
+		pkg, ok := pu.Node.(ast.Package)
+		if !ok {
+			return nil, fmt.Errorf("%s does not declare a package", pu.Source.Name)
+		}
+		units[i] = unit{src: pu.Source, node: pkg}
+	}
+	s := vm.rt.scope(ctx)
+	defer s.drop()
+	if err := vm.evalPackageUnits(moduleID, units, s); err != nil {
+		return nil, err
+	}
+	id := moduleID
+	if id == "" {
+		id = units[0].node.Name
+	}
+	return vm.rt.packages[id], nil
+}
+
 func (vm *Instance) evalPackage(s *stopper, sources []*diag.Source) (*Package, error) {
 	if len(sources) == 0 {
 		return nil, errors.New("EvalPackage needs at least one source")
@@ -316,14 +374,14 @@ func (vm *Instance) evalPackage(s *stopper, sources []*diag.Source) (*Package, e
 		}
 		units[i] = unit{src: src, node: pkg}
 	}
-	if err := vm.evalPackageUnits(units, s); err != nil {
+	if err := vm.evalPackageUnits("", units, s); err != nil {
 		return nil, err
 	}
 	return vm.rt.packages[units[0].node.Name], nil
 }
 
 // evalPackageUnits runs runPackage under the runner, turning panics into errors
-func (vm *Instance) evalPackageUnits(units []unit, s *stopper) (err error) {
+func (vm *Instance) evalPackageUnits(moduleID string, units []unit, s *stopper) (err error) {
 	vm.rt.acquire()
 	defer vm.rt.release()
 	defer vm.rt.loadingUnder(s)()
@@ -342,7 +400,7 @@ func (vm *Instance) evalPackageUnits(units []unit, s *stopper) (err error) {
 		}
 	}()
 
-	if _, exc := vm.runPackage(units); exc != nil {
+	if _, exc := vm.runPackage(moduleID, units); exc != nil {
 		return exc
 	}
 	return nil
@@ -359,13 +417,21 @@ func (vm *Instance) Packages() iter.Seq[*Package] {
 	}
 }
 
-// Package retrieves a loaded package, if not found; then nil is returned
-func (vm *Instance) Package(name string) (pkg *Package) {
-	pkg, exists := vm.rt.packages[name]
-	if !exists {
-		return nil
+// PackageByID retrieves a loaded package by its exact canonical module ID.
+func (vm *Instance) PackageByID(id string) *Package {
+	return vm.rt.packages[id]
+}
+
+// Package retrieves a loaded package by canonical module ID or declared short
+// name; returns nil if not found.
+func (vm *Instance) Package(key string) *Package {
+	if pkg, exists := vm.rt.packages[key]; exists {
+		return pkg
 	}
-	return pkg
+	if pkg, exists := vm.rt.byName[key]; exists {
+		return pkg
+	}
+	return nil
 }
 
 func (vm *Instance) WaitForNoActivity() {

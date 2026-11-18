@@ -1,0 +1,11 @@
+package main imports("io", "math", "./math" as pricing)
+
+fn quote(customer, subtotal, taxRate) {
+	raw := pricing.total(subtotal, taxRate)
+	rounded := math.round(raw * 100) / 100
+	io.println(`quoted {customer}: {rounded}`)
+	return {
+		customer: customer,
+		total: rounded
+	}
+}

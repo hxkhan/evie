@@ -63,6 +63,7 @@ jobs:
         run: |
           go run ./embedding/ex1
           go run ./embedding/ex2
+          go run ./embedding/ex3
 
       - name: Smoke-test benchmark checksums
         run: go run ./benchmarks -n 1 -warmup 0

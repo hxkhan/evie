@@ -54,11 +54,11 @@ shop/
 - **A folder is one package.** Every `.ev` file in it declares the same name, and the files are compiled together, so any file can use what another declares.
 - **A project's main package** is every top-level file that declares `package main`. `evie shop/` (or `eng.RunProject`) runs it; the other top-level files are packages imported by path. `evie file.ev` (or `eng.RunFile`) runs that one file.
 - **Imports name a path or a package.** `"./cart"` and `"../lib/text"` are files or folders relative to the importing file, tried as `cart.ev` and then `cart/`. A bare name such as `"io"` is a package the host or the standard library provides. A local `math.ev` is imported as `"./math"`.
-- **An import is bound by the name its package declares**, not by its path: `imports("./util/money")` gives `money`.
-- **Imports belong to the whole package**, so a package imports a name once, in any of its files.
-- **Each package name is used once per program.** Two packages that declare the same name, a folder whose files disagree, or importing a `main` file is an error that names both places.
+- **An import is bound by its alias or declared package name**: `imports("./util/money")` binds as `money`, and `imports("./util/money" as m)` binds as `m` (`as` is contextual inside `imports(...)` only).
+- **Imports belong to the whole package**, so a package imports a module once, in any of its files.
+- **Modules are identified by their canonical path, not only by short name.** Two different folders can both declare `package util` (or a local `./math.ev` can declare `package math` alongside stdlib `"math"`). If a single package imports both, give one an alias: `imports("math", "./math" as localMath)`. A folder whose files disagree on their package name, or importing a `main` file, is an error.
 - **Errors inside an imported package** are reported in that package's file, with a note at the import.
-- **An engine runs one program** and loads each package once; create a new engine for the next program.
+- **An engine runs one program** and loads each module once; create a new engine for the next program (or parse once into an `*evie.Bundle` and run it across multiple engines).
 
 ---
 
@@ -824,7 +824,8 @@ The pieces, from most to least convenient:
 | expose a Go function | `vm.Func0`..`Func3` and the `E` variants for `(R, error)`; `vm.Reflect` for any other signature |
 | full control of arguments and errors | `pkg.Func(name, arity, func(c vm.Call) (vm.Value, error))`; mark it `Blocking` if it sleeps or waits on I/O, and watch `c.Context()` so it wakes when the script is stopped |
 | a group of functions scripts import by name | `vm.NewPackage("name")` passed in `evie.Options.Packages` |
-| sandbox stdlib or redirect I/O per engine | `evie.Options.Stdlib` (allowlist, e.g. `[]string{"math", "json"}`), `Options.NoStdlib`, `Options.Stdin`, `Options.Stdout` |
+| sandbox stdlib, filesystem imports, or I/O per engine | `evie.Options.FS` (`embed.FS` / `io/fs.FS`, sandboxes imports), `Options.Stdlib` (allowlist), `Options.NoStdlib`, `Options.Stdin`, `Options.Stdout` |
+| parse a multi-file program once and run in many engines | `evie.ParseFile`, `ParseProject`, `ParseFileFS`, `ParseProjectFS` → `*evie.Bundle` with `bundle.Run(opts...)`, `eng.LoadBundle(b)`, `eng.RunBundle(b)` |
 | symbols visible without an import | `eng.SetStatic` or `evie.Options.Prelude` |
 | lend a Go value to scripts as it is | `vm.NewHostType[T]("Name")` with `Method`, `Constructor`, `Wrap` |
 | a native whose work takes a while | return `c.Async(func(ctx context.Context) (vm.Value, error) { ... })` (lifecycle-bound task), or `vm.Async` outside a native |

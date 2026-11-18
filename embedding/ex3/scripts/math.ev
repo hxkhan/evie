@@ -1,0 +1,20 @@
+package math
+
+// Local pricing helpers packaged under "math" to demonstrate importing both
+// the standard library "math" and a local "./math" module with an alias.
+
+class PricingRule(rate, threshold) {
+	fn discountFor(subtotal) {
+		if subtotal >= this.threshold {
+			return subtotal * this.rate
+		}
+		return 0
+	}
+}
+
+defaultRule := PricingRule(0.10, 100)
+
+fn total(subtotal, taxRate) {
+	discount := defaultRule.discountFor(subtotal)
+	return (subtotal - discount) * (1 + taxRate)
+}

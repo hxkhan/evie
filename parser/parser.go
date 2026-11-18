@@ -202,16 +202,15 @@ func (ps *parser) parsePackage() ast.Package {
 		}
 		open := ps.last
 		if !ps.consume(")") {
-			pack.Imports, pack.ImportPos = ps.parseStringList(open)
+			pack.Imports = ps.parseImportList(open)
 		}
 	}
 	return pack
 }
 
-// parseStringList parses a comma-separated list of strings and where each is
-func (ps *parser) parseStringList(open token.Token) ([]string, []token.Pos) {
-	var imports []string
-	var positions []token.Pos
+// parseImportList parses a comma-separated list of `"path"` or `"path" as alias` entries.
+func (ps *parser) parseImportList(open token.Token) []ast.ImportSpec {
+	var imports []ast.ImportSpec
 	for {
 		next := ps.PeekToken()
 		if next.Type != token.String {
@@ -220,8 +219,16 @@ func (ps *parser) parseStringList(open token.Token) ([]string, []token.Pos) {
 		ps.NextToken()
 		textPos := next.Pos
 		textPos.Column++ // text starts after the opening quote
-		imports = append(imports, ps.unescape(next.Literal, textPos, ""))
-		positions = append(positions, next.Pos)
+		spec := ast.ImportSpec{
+			Pos:  next.Pos,
+			Path: ps.unescape(next.Literal, textPos, ""),
+		}
+		if ps.consume("as") {
+			alias := ps.name("an alias name after 'as'")
+			spec.Alias = alias.Literal
+			spec.Pos = next.Pos.To(alias.Pos)
+		}
+		imports = append(imports, spec)
 
 		if ps.consume(")") {
 			break
@@ -233,7 +240,7 @@ func (ps *parser) parseStringList(open token.Token) ([]string, []token.Pos) {
 			break
 		}
 	}
-	return imports, positions
+	return imports
 }
 
 func (ps *parser) parseFloat(tok token.Token) float64 {

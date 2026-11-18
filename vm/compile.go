@@ -227,7 +227,7 @@ type sourced struct {
 // runPackage compiles a package from all of its files at once and runs its
 // initializers. Declarations are hoisted across the files, so any file can use
 // what another declares, and imports belong to the whole package.
-func (vm *Instance) runPackage(units []unit) (res Value, exc exception) {
+func (vm *Instance) runPackage(moduleID string, units []unit) (res Value, exc exception) {
 	prevPkg, prevSrc := vm.cp.pkg, vm.cp.src
 	prevClosures := vm.cp.closures.Len()
 
@@ -264,7 +264,11 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc exception) {
 	}
 
 	vm.cp.src = units[0].src
-	if existing, exists := vm.rt.packages[name]; exists {
+	id := moduleID
+	if id == "" {
+		id = name
+	}
+	if existing, exists := vm.rt.packages[id]; exists {
 		ce := vm.compileErrorAt(units[0].node, "package '%s' is already loaded", name)
 		if existing.origin != "" {
 			ce.Message = fmt.Sprintf("package '%s' is already loaded from %s", name, existing.origin)
@@ -273,31 +277,44 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc exception) {
 	}
 
 	this := NewPackage(name)
+	this.id = id
 	this.origin = units[0].src.Name
 	this.compiled = true
 	vm.cp.pkg = this
-	vm.rt.packages[name] = this
+	vm.rt.packages[id] = this
+	prevByName, hadByName := vm.rt.byName[name]
+	if !hadByName || name == "main" {
+		vm.rt.byName[name] = this
+	}
 	loaded := false
 	defer func() {
-		if !loaded && vm.rt.packages[name] == this {
-			delete(vm.rt.packages, name)
+		if !loaded {
+			if vm.rt.packages[id] == this {
+				delete(vm.rt.packages, id)
+			}
+			if vm.rt.byName[name] == this {
+				if hadByName {
+					vm.rt.byName[name] = prevByName
+				} else {
+					delete(vm.rt.byName, name)
+				}
+			}
 		}
 	}()
 
-	// imports belong to the whole package; each is resolved once
+	// imports belong to the whole package; each (path, alias) is resolved once,
+	// and two distinct imports cannot bind the same local name in one package
 	seen := map[string]bool{}
+	bound := map[string]string{} // local bound name -> import path
 	for _, u := range units {
 		vm.cp.src = u.src
-		for i, path := range u.node.Imports {
-			if seen[path] {
+		for _, spec := range u.node.Imports {
+			dedupKey := spec.Path + "\x00" + spec.Alias
+			if seen[dedupKey] {
 				continue
 			}
-			seen[path] = true
-			var pos token.Pos
-			if i < len(u.node.ImportPos) {
-				pos = u.node.ImportPos[i]
-			}
-			vm.bindImport(this, u, path, pos)
+			seen[dedupKey] = true
+			vm.bindImport(this, u, spec, bound)
 		}
 	}
 
@@ -495,19 +512,20 @@ func (vm *Instance) runPackage(units []unit) (res Value, exc exception) {
 		}
 	}
 	loaded = true
-	vm.rt.packageOrder = append(vm.rt.packageOrder, name)
+	vm.rt.packageOrder = append(vm.rt.packageOrder, id)
 	return Value{}, nil
 }
 
-// bindImport resolves one import of a package and binds it under the name the
-// imported package declares
-func (vm *Instance) bindImport(this *Package, u unit, path string, pos token.Pos) {
+// bindImport resolves one import of a package and binds it under its alias
+// (when given) or the imported package's declared name.
+func (vm *Instance) bindImport(this *Package, u unit, spec ast.ImportSpec, bound map[string]string) {
+	path, pos := spec.Path, spec.Pos
 	// with a resolver every import goes through it, since only the resolver
 	// knows which file a path means for this importer; without one, imports
 	// name packages that are already loaded
 	var pkg *Package
 	if vm.cp.resolver == nil {
-		pkg = vm.rt.packages[path]
+		pkg = vm.Package(path)
 		if pkg == nil {
 			panic(vm.compileErrorAtPos(pos, "cannot import '%s': no package resolver is configured", path))
 		}
@@ -526,8 +544,12 @@ func (vm *Instance) bindImport(this *Package, u unit, path string, pos token.Pos
 			base := filepath.Base(path)
 			pkg.setName(strings.TrimSuffix(base, filepath.Ext(base)))
 		}
-		if existing, ok := vm.rt.packages[pkg.Name()]; !ok {
-			vm.rt.packages[pkg.Name()] = pkg
+		pkgID := pkg.ID()
+		if existing, ok := vm.rt.packages[pkgID]; !ok {
+			vm.rt.packages[pkgID] = pkg
+			if _, exists := vm.rt.byName[pkg.Name()]; !exists {
+				vm.rt.byName[pkg.Name()] = pkg
+			}
 		} else if existing != pkg {
 			ce := vm.compileErrorAtPos(pos, "cannot import '%s': it declares package '%s', which is already loaded", path, pkg.Name())
 			if existing.origin != "" {
@@ -537,18 +559,41 @@ func (vm *Instance) bindImport(this *Package, u unit, path string, pos token.Pos
 		}
 	}
 
-	v := pkg.Box()
-	bindName := pkg.Name()
-	this.globals[fields.Get(bindName)] = pkgGlobal{Value: &v, IsPublic: false, IsStatic: true, IsConstant: true}
+	bindName := spec.Alias
+	if bindName == "" {
+		bindName = pkg.Name()
+	}
+	if prevPath, clash := bound[bindName]; clash && prevPath != path {
+		panic(vm.compileErrorAtPos(pos, "import '%s' binds as '%s', which is already bound by '%s'", path, bindName, prevPath).
+			withHint(fmt.Sprintf("use 'as <alias>' to give one a different name, e.g. imports(\"%s\" as %s2)", path, bindName)))
+	}
+	bound[bindName] = path
 
-	// remember an import bound under another name than its path suggests, so a
-	// script that uses the path's name can be told
-	base := filepath.Base(path)
-	if base = strings.TrimSuffix(base, filepath.Ext(base)); base != bindName {
+	v := pkg.Box()
+	this.globals[fields.Get(bindName)] = pkgGlobal{Value: &v, IsPublic: false, IsStatic: true, IsConstant: true}
+	if spec.Alias != "" {
+		this.imports = append(this.imports, fmt.Sprintf("%s as %s", path, spec.Alias))
+	} else {
+		this.imports = append(this.imports, bindName)
+	}
+
+	// remember an import bound under another name than its path or declared
+	// name suggests, so a script that uses the wrong name gets a helpful hint
+	recordAliasHint := func(unaliased string) {
+		if unaliased == "" || unaliased == bindName {
+			return
+		}
 		if this.importedAs == nil {
 			this.importedAs = map[string][2]string{}
 		}
-		this.importedAs[base] = [2]string{path, bindName}
+		if _, exists := this.importedAs[unaliased]; !exists {
+			this.importedAs[unaliased] = [2]string{path, bindName}
+		}
+	}
+	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(filepath.Base(path)))
+	recordAliasHint(base)
+	if spec.Alias != "" {
+		recordAliasHint(pkg.Name())
 	}
 }
 

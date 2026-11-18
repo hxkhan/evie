@@ -74,6 +74,9 @@ func dumpPackage(w io.Writer, pkg *Package) {
 		globals = append(globals, globalEntry{name: name, g: g})
 	}
 
+	if len(pkg.imports) > 0 {
+		imports = append([]string(nil), pkg.imports...)
+	}
 	sort.Strings(imports)
 	if len(imports) > 0 {
 		fmt.Fprintf(w, "  imports: %s\n", strings.Join(imports, ", "))

@@ -13,12 +13,18 @@ type Node interface {
 	Where() token.Pos
 }
 
+// ImportSpec is one entry in `imports("path")` or `imports("path" as alias)`.
+type ImportSpec struct {
+	token.Pos
+	Path  string
+	Alias string // empty when not explicitly aliased
+}
+
 type Package struct {
 	token.Pos
-	Name      string
-	Imports   []string
-	ImportPos []token.Pos // where each import string is, for errors
-	Code      []Node
+	Name    string
+	Imports []ImportSpec
+	Code    []Node
 }
 
 type Literal interface {
@@ -78,10 +84,14 @@ func (pkg Package) String() string {
 	// imports
 	if len(pkg.Imports) > 0 {
 		b.WriteString(" imports(")
-		for i, name := range pkg.Imports {
+		for i, spec := range pkg.Imports {
 			b.WriteByte('"')
-			b.WriteString(name)
+			b.WriteString(spec.Path)
 			b.WriteByte('"')
+			if spec.Alias != "" {
+				b.WriteString(" as ")
+				b.WriteString(spec.Alias)
+			}
 
 			if i != len(pkg.Imports)-1 {
 				b.WriteByte(',')

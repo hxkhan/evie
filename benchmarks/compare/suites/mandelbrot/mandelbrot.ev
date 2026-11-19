@@ -1,0 +1,32 @@
+package main
+
+fn mandelbrot(size, maxIter) {
+	var total := 0
+	var py := 0
+	while py < size {
+		y0 := (py / size) * 2.0 - 1.0
+		var px := 0
+		while px < size {
+			x0 := (px / size) * 3.5 - 2.5
+			var x := 0.0
+			var y := 0.0
+			var iter := 0
+			while iter < maxIter {
+				xx := x * x
+				yy := y * y
+				if xx + yy > 4.0 {
+					break
+				}
+				y = 2.0 * x * y + y0
+				x = xx - yy + x0
+				iter += 1
+			}
+			total += iter
+			px += 1
+		}
+		py += 1
+	}
+	return total
+}
+
+fn main() => mandelbrot(400, 50)

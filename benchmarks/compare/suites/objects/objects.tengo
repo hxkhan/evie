@@ -1,0 +1,26 @@
+fmt := import("fmt")
+
+main := func() {
+	keys := []
+	for i := 0; i < 500; i++ {
+		keys = append(keys, "k"+string(i))
+	}
+
+	total := 0
+	for r := 0; r < 400; r++ {
+		m := {}
+		for j := 0; j < 500; j++ {
+			m[keys[j]] = j + r
+		}
+		for j := 0; j < 500; j++ {
+			k := keys[j]
+			m[k] = m[k] + (j % 5)
+		}
+		for j := 0; j < 500; j++ {
+			total += m[keys[j]]
+		}
+	}
+	return total
+}
+
+fmt.println(main())

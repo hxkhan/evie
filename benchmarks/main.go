@@ -237,7 +237,7 @@ func discover(root string, re *regexp.Regexp) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() && d.Name() == "results" {
+		if d.IsDir() && (d.Name() == "results" || d.Name() == "compare") {
 			return filepath.SkipDir
 		}
 		if d.IsDir() || filepath.Ext(path) != ".ev" {

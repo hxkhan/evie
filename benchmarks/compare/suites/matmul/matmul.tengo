@@ -1,0 +1,31 @@
+fmt := import("fmt")
+
+matmul := func(n) {
+	a := []
+	b := []
+	for i := 0; i < n; i++ {
+		ra := []
+		rb := []
+		for j := 0; j < n; j++ {
+			ra = append(ra, (i*3+j*7)%17)
+			rb = append(rb, (i*5+j*11)%19)
+		}
+		a = append(a, ra)
+		b = append(b, rb)
+	}
+
+	total := 0
+	for i := 0; i < n; i++ {
+		ai := a[i]
+		for j := 0; j < n; j++ {
+			acc := 0
+			for k := 0; k < n; k++ {
+				acc += ai[k] * b[k][j]
+			}
+			total += acc
+		}
+	}
+	return total
+}
+
+fmt.println(matmul(120))

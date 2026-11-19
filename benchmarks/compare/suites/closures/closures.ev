@@ -1,0 +1,30 @@
+package main
+
+fn makeAcc(start) {
+	var total := start
+	return fn(delta) {
+		total += delta
+		return total
+	}
+}
+
+fn main() {
+	var sum := 0
+	var i := 0
+	while i < 50000 {
+		acc := makeAcc(i)
+		acc(3)
+		acc(7)
+		sum += acc(-2)
+		i += 1
+	}
+
+	big := makeAcc(0)
+	var j := 0
+	while j < 1000000 {
+		big(j % 7)
+		j += 1
+	}
+	sum += big(0)
+	return sum
+}

@@ -1,0 +1,41 @@
+package main
+
+fn matmul(n) {
+	var a := []
+	var b := []
+	var i := 0
+	while i < n {
+		var ra := []
+		var rb := []
+		var j := 0
+		while j < n {
+			ra.push((i * 3 + j * 7) % 17)
+			rb.push((i * 5 + j * 11) % 19)
+			j += 1
+		}
+		a.push(ra)
+		b.push(rb)
+		i += 1
+	}
+
+	var total := 0
+	i = 0
+	while i < n {
+		ai := a[i]
+		var j := 0
+		while j < n {
+			var acc := 0
+			var k := 0
+			while k < n {
+				acc += ai[k] * b[k][j]
+				k += 1
+			}
+			total += acc
+			j += 1
+		}
+		i += 1
+	}
+	return total
+}
+
+fn main() => matmul(120)

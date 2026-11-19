@@ -1,0 +1,47 @@
+fmt := import("fmt")
+
+newAdder := func(base, step) {
+	self := { base: base, step: step }
+	self.adjust = func(x) {
+		self.base = (self.base + self.step) % 1000
+		return self.base + x
+	}
+	self.compute = func(x) {
+		return self.adjust(x) + self.step
+	}
+	return self
+}
+
+newScaler := func(base, factor) {
+	self := { base: base, factor: factor }
+	self.adjust = func(x) {
+		self.base = (self.base + x) % 1000
+		return self.base * self.factor
+	}
+	self.compute = func(x) {
+		return self.adjust(x) - self.factor
+	}
+	return self
+}
+
+main := func() {
+	items := []
+	for i := 0; i < 200; i++ {
+		if i % 2 == 0 {
+			items = append(items, newAdder(i, (i%7)+1))
+		} else {
+			items = append(items, newScaler(i, (i%5)+1))
+		}
+	}
+
+	total := 0
+	for r := 0; r < 2000; r++ {
+		x := r % 13
+		for item in items {
+			total += item.compute(x)
+		}
+	}
+	return total
+}
+
+fmt.println(main())

@@ -1,0 +1,26 @@
+fmt := import("fmt")
+
+sieve := func(n) {
+	flags := []
+	for i := 0; i < n; i++ {
+		flags = append(flags, 0)
+	}
+
+	for i := 2; i * i < n; i++ {
+		if flags[i] == 0 {
+			for j := i * i; j < n; j += i {
+				flags[j] = 1
+			}
+		}
+	}
+
+	count := 0
+	for i := 2; i < n; i++ {
+		if flags[i] == 0 {
+			count++
+		}
+	}
+	return count
+}
+
+fmt.println(sieve(1000000))

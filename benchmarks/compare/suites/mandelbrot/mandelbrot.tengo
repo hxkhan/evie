@@ -1,0 +1,29 @@
+fmt := import("fmt")
+
+mandelbrot := func(size, maxIter) {
+	total := 0
+	fsize := float(size)
+	for py := 0; py < size; py++ {
+		y0 := (float(py) / fsize) * 2.0 - 1.0
+		for px := 0; px < size; px++ {
+			x0 := (float(px) / fsize) * 3.5 - 2.5
+			x := 0.0
+			y := 0.0
+			iter := 0
+			for iter < maxIter {
+				xx := x * x
+				yy := y * y
+				if xx + yy > 4.0 {
+					break
+				}
+				y = 2.0 * x * y + y0
+				x = xx - yy + x0
+				iter++
+			}
+			total += iter
+		}
+	}
+	return total
+}
+
+fmt.println(mandelbrot(400, 50))

@@ -21,13 +21,20 @@ type Instance struct {
 }
 
 type closure struct {
-	captures ds.Slice[capture]
-	freeVars ds.Set[int]
-	scope    ds.Scope
-	info     *funcInfoStatic
-	uclass   *userClass
-	loops    int
-	switches int
+	captures      ds.Slice[capture]
+	freeVars      ds.Set[int]
+	capturedNames map[string]bool // identifier names referenced inside nested functions/classes
+	scope         ds.Scope
+	info          *funcInfoStatic
+	uclass        *userClass
+	loops         int
+	switches      int
+}
+
+// mayEscape reports whether a local binding with name may be captured by a
+// nested closure or class method inside this function.
+func (cl *closure) mayEscape(name string) bool {
+	return cl.capturedNames[name]
 }
 
 // PackageResolver resolves a package by import name or path.
@@ -165,53 +172,41 @@ func (vm *Instance) evalNode(node ast.Node, s *stopper) (result Value, err error
 		}
 		v, exc := vm.runPackage("", []unit{{src: src, node: pkg}})
 		if exc != nil {
-			err = exc
+			return v, exc
 		}
-		result = v
-	} else {
-		fbr := vm.borrowFiber(vm.rt.forLoading())
-		defer vm.releaseFiber(fbr)
-		fbr.running = true // the runner is held above
-		fbr.active = &userFn{funcInfoStatic: &funcInfoStatic{name: "anonymous"}}
-
-		prevClosures := vm.cp.closures.Len()
-		hasClosure := prevClosures > 0
-		if !hasClosure {
-			cl := &closure{freeVars: ds.Set[int]{}, info: fbr.active.funcInfoStatic}
-			cl.scope.TrackSlots = vm.cp.debugInfo
-			vm.cp.closures.Push(cl)
-			cl.scope.OpenBlock()
-		}
-		defer func() {
-			for vm.cp.closures.Len() > prevClosures {
-				vm.cp.closures.Pop()
-			}
-		}()
-
-		code := vm.compile(node)
-		if !hasClosure {
-			vm.closeFunction(fbr.active.funcInfoStatic, vm.cp.closures.Last(0))
-			if vm.cp.debugInfo {
-				fbr.active.funcInfoStatic.def = site{src: vm.cp.src}
-				vm.rt.scriptInfo = fbr.active.funcInfoStatic
-			}
-		}
-		v, exc := fbr.runGuarded(code)
-		if exc != nil {
-			err = exc
-		}
-		result = v
-	}
-
-	// don't implicitly return the return value of the last executed instruction
-	switch err {
-	case nil:
 		return Value{}, nil
-	case signalReturn:
-		return result, nil
-	default:
-		return result, err
 	}
+
+	fbr := vm.borrowFiber(vm.rt.forLoading())
+	defer vm.releaseFiber(fbr)
+	fbr.running = true // the runner is held above
+
+	info := &funcInfoStatic{name: "anonymous", def: site{src: vm.cp.src}, vm: vm}
+	prevClosures := vm.cp.closures.Len()
+	cl := &closure{freeVars: ds.Set[int]{}, info: info, capturedNames: findCapturedNames(node)}
+	cl.scope.TrackSlots = vm.cp.debugInfo
+	vm.cp.closures.Push(cl)
+	cl.scope.OpenBlock()
+	defer func() {
+		for vm.cp.closures.Len() > prevClosures {
+			vm.cp.closures.Pop()
+		}
+	}()
+
+	info.code = vm.compile(node)
+	vm.closeFunction(info, cl)
+	if vm.cp.debugInfo {
+		vm.rt.scriptInfo = info
+	}
+
+	fn := &userFn{funcInfoStatic: info}
+	v, exc := fbr.runGuarded(func(fbr *fiber) (Value, exception) {
+		return fn.call(fbr, nil)
+	})
+	if exc != nil {
+		return v, exc
+	}
+	return v, nil
 }
 
 // ParsedUnit pairs a named source with its already-parsed AST so a pre-parsed
@@ -282,7 +277,7 @@ func (vm *Instance) CompileParsedSource(pu ParsedUnit) (err error) {
 	}()
 
 	info := &funcInfoStatic{name: "<script>", def: site{src: pu.Source}, vm: vm}
-	cl := &closure{freeVars: ds.Set[int]{}, info: info}
+	cl := &closure{freeVars: ds.Set[int]{}, info: info, capturedNames: findCapturedNames(pu.Node)}
 	cl.scope.TrackSlots = vm.cp.debugInfo
 	vm.cp.closures.Push(cl)
 	cl.scope.OpenBlock()

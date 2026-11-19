@@ -8,24 +8,44 @@ import (
 )
 
 func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
-	index, success := vm.currentClosure().scope.Declare(node.Name, node.IsStatic)
+	cl := vm.currentClosure()
+	index, success := cl.scope.Declare(node.Name, node.IsStatic)
 	if !success {
 		panic(vm.compileErrorAt(node, "double declaration of %s", node.Name))
 	}
+	escapes := cl.mayEscape(node.Name)
 
 	// try to evaluate
 	switch value := vm.evaluate(node.Value).(type) {
 	case local:
+		if escapes {
+			return func(fbr *fiber) (Value, exception) {
+				fbr.setEscapingLocal(index, *fbr.get(value))
+				return Value{}, nil
+			}
+		}
 		return func(fbr *fiber) (Value, exception) {
 			fbr.setLocal(index, *fbr.get(value))
 			return Value{}, nil
 		}
 	case Value:
+		if escapes {
+			return func(fbr *fiber) (Value, exception) {
+				fbr.setEscapingLocal(index, value)
+				return Value{}, nil
+			}
+		}
 		return func(fbr *fiber) (Value, exception) {
 			fbr.setLocal(index, value)
 			return Value{}, nil
 		}
 	case pkgGlobal:
+		if escapes {
+			return func(fbr *fiber) (Value, exception) {
+				fbr.setEscapingLocal(index, *value.Value)
+				return Value{}, nil
+			}
+		}
 		return func(fbr *fiber) (Value, exception) {
 			fbr.setLocal(index, *value.Value)
 			return Value{}, nil
@@ -34,14 +54,23 @@ func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
 
 	// generic
 	value := vm.compile(node.Value)
+	if escapes {
+		return func(fbr *fiber) (Value, exception) {
+			cell := fbr.newEscapingLocal(index)
+			v, err := value(fbr)
+			if err != nil {
+				return v, err
+			}
+			*cell = v
+			return Value{}, nil
+		}
+	}
 	return func(fbr *fiber) (Value, exception) {
-		cell := fbr.newLocal(index)
 		v, err := value(fbr)
 		if err != nil {
 			return v, err
 		}
-
-		*cell = v
+		fbr.setLocal(index, v)
 		return Value{}, nil
 	}
 }

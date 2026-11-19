@@ -9,7 +9,7 @@ import (
 // compileFunction compiles a function body in a scope of its own and fills in
 // the static information the frame protocol needs
 func (vm *Instance) compileFunction(info *funcInfoStatic, params []string, body ast.Node, uclass *userClass) *closure {
-	cl := &closure{freeVars: ds.Set[int]{}, info: info, uclass: uclass}
+	cl := &closure{freeVars: ds.Set[int]{}, info: info, uclass: uclass, capturedNames: findCapturedNames(body)}
 	cl.scope.TrackSlots = vm.cp.debugInfo
 	vm.cp.closures.Push(cl)
 	scope := &cl.scope
@@ -87,10 +87,25 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 
 	closure := vm.compileFunction(info, node.Args, node.Action, nil)
 	captures := closure.captures
+	escapes := enclosing.mayEscape(node.Name)
 
 	// create the function & declare it
+	if escapes {
+		return func(fbr *fiber) (Value, exception) {
+			cell := fbr.newEscapingLocal(index)
+			captured := make([]*Value, len(captures))
+			for i, ref := range captures {
+				if ref.isLocal {
+					captured[i] = fbr.getLocalByRef(ref.index)
+				} else {
+					captured[i] = fbr.getCapturedByRef(ref.index)
+				}
+			}
+			*cell = boxUserFn(userFn{funcInfoStatic: info, references: captured})
+			return Value{}, nil
+		}
+	}
 	return func(fbr *fiber) (Value, exception) {
-		cell := fbr.newLocal(index)
 		captured := make([]*Value, len(captures))
 		for i, ref := range captures {
 			if ref.isLocal {
@@ -99,7 +114,7 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 				captured[i] = fbr.getCapturedByRef(ref.index)
 			}
 		}
-		*cell = boxUserFn(userFn{funcInfoStatic: info, references: captured})
+		fbr.setLocal(index, boxUserFn(userFn{funcInfoStatic: info, references: captured}))
 		return Value{}, nil
 	}
 }

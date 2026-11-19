@@ -813,6 +813,66 @@ func TestLoopClosureAndTaskCaptures(t *testing.T) {
 	}
 }
 
+func TestBareScriptAndInitLoopCaptures(t *testing.T) {
+	t.Run("bare_script", func(t *testing.T) {
+		val, err := evie.Eval(`
+			var fns := []
+			for i, x in [10, 20, 30] {
+				y := x + i
+				fns.push(fn() => [i, x, y])
+			}
+			return [fns[0](), fns[1](), fns[2]()]
+		`)
+		if err != nil {
+			t.Fatalf("Eval failed: %v", err)
+		}
+		want := `[[0, 10, 10], [1, 20, 21], [2, 30, 32]]`
+		if val.String() != want {
+			t.Fatalf("got %s, want %s", val, want)
+		}
+	})
+
+	t.Run("package_init", func(t *testing.T) {
+		val := run(t, `package main
+			var fns := []
+			for x in [1, 2, 3] {
+				fns.push(fn() => x * 10)
+			}
+			fn main() => [fns[0](), fns[1](), fns[2]()]`)
+		if val.String() != "[10, 20, 30]" {
+			t.Fatalf("got %s, want [10, 20, 30]", val)
+		}
+	})
+
+	t.Run("recursive_fn_and_class_in_loop", func(t *testing.T) {
+		val := run(t, `package main
+			fn main() {
+				var fns := []
+				var classes := []
+				for base in [1, 2, 3] {
+					fn sumTo(n) {
+						if n <= 0 { return base }
+						return n + sumTo(n - 1)
+					}
+					fns.push(sumTo)
+
+					class Box(v) {
+						fn total() => this.v + base
+					}
+					classes.push(Box(10))
+				}
+				return [
+					[fns[0](2), fns[1](2), fns[2](2)],
+					[classes[0].total(), classes[1].total(), classes[2].total()],
+				]
+			}`)
+		want := "[[4, 5, 6], [11, 12, 13]]"
+		if val.String() != want {
+			t.Fatalf("got %s, want %s", val, want)
+		}
+	})
+}
+
 // break and continue outside a loop or across a function boundary are rejected at compile time
 func TestBreakAndContinueValidation(t *testing.T) {
 	cases := map[string]string{

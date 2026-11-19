@@ -212,6 +212,51 @@ func (vm *Instance) isDirectSelfCall(fn *userFn) bool {
 	return !fn.isVariadic && vm.cp.closures.Len() > 0 && fn.funcInfoStatic == vm.cp.closures.Last(0).info
 }
 
+// findCapturedNames returns the set of identifier names referenced inside any
+// nested function or class method within body. Returns nil when body contains
+// no nested functions or classes, allocating nothing in the common case.
+func findCapturedNames(body ast.Node) map[string]bool {
+	var captured map[string]bool
+	collectCapturedNames(body, &captured)
+	return captured
+}
+
+func collectCapturedNames(body ast.Node, captured *map[string]bool) {
+	mark := func(name string) {
+		if *captured == nil {
+			*captured = map[string]bool{}
+		}
+		(*captured)[name] = true
+	}
+	scanNested := func(n ast.Node) {
+		ast.Walk(n, func(sub ast.Node) bool {
+			switch s := sub.(type) {
+			case ast.Ident:
+				mark(s.Name)
+				if s.Name == "super" {
+					mark("this")
+				}
+			case ast.ClassDefinition:
+				if s.Parent != "" {
+					mark(s.Parent)
+				}
+			}
+			return true
+		})
+	}
+	ast.Walk(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case ast.Fn:
+			scanNested(n.Action)
+			return false
+		case ast.ClassDefinition:
+			scanNested(n.Action)
+			return false
+		}
+		return true
+	})
+}
+
 // unit is one source file of a package being compiled
 type unit struct {
 	src  *diag.Source
@@ -620,8 +665,22 @@ func (vm *Instance) importFailed(u unit, path string, pos token.Pos, err error) 
 // bindings whose initializer is not a constant, and plain statements. Functions
 // and classes were hoisted already. It returns nil when there is nothing to run.
 func (vm *Instance) compileInit(pkg *Package, code []ast.Node, deferred map[string]bool) *userFn {
+	var captured map[string]bool
+	for _, stmt := range code {
+		switch stmt := stmt.(type) {
+		case ast.Fn, ast.ClassDefinition:
+			continue
+		case ast.Decl:
+			if deferred[stmt.Name] {
+				collectCapturedNames(stmt.Value, &captured)
+			}
+		default:
+			collectCapturedNames(stmt, &captured)
+		}
+	}
+
 	info := vm.newFuncInfo("init", nil, false, false)
-	cl := &closure{freeVars: ds.Set[int]{}, info: info}
+	cl := &closure{freeVars: ds.Set[int]{}, info: info, capturedNames: captured}
 	cl.scope.TrackSlots = vm.cp.debugInfo
 	vm.cp.closures.Push(cl)
 	cl.scope.OpenBlock()
@@ -741,8 +800,15 @@ func (vm *Instance) emitClass(cls ast.ClassDefinition) instruction {
 	}
 
 	site := vm.at(cls)
+	escapes := enclosing.mayEscape(cls.Name)
 	if parentInst == nil && !hasCaptures {
 		boxed := boxUserClass(uclass)
+		if escapes {
+			return func(fbr *fiber) (Value, exception) {
+				fbr.setEscapingLocal(index, boxed)
+				return Value{}, nil
+			}
+		}
 		return func(fbr *fiber) (Value, exception) {
 			fbr.setLocal(index, boxed)
 			return Value{}, nil
@@ -773,7 +839,12 @@ func (vm *Instance) emitClass(cls ast.ClassDefinition) instruction {
 			Methods:      make(map[fields.ID]*userFn, len(uclass.Methods)),
 		}
 
-		cell := fbr.newLocal(index)
+		var cell *Value
+		if escapes {
+			cell = fbr.newEscapingLocal(index)
+		} else {
+			cell = fbr.getLocalByRef(index)
+		}
 		*cell = boxUserClass(runtimeClass)
 
 		for id, tmpl := range uclass.Methods {

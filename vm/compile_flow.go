@@ -189,6 +189,24 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 	bodyInst := vm.compile(node.Action)
 	cl.loops--
 
+	idxEscapes := idxIndex >= 0 && cl.mayEscape(node.IndexVar)
+	itemEscapes := cl.mayEscape(node.ItemVar)
+
+	bindIdx := func(fbr *fiber, v Value) {
+		if idxEscapes {
+			fbr.setEscapingLocal(idxIndex, v)
+		} else {
+			fbr.setLocal(idxIndex, v)
+		}
+	}
+	bindItem := func(fbr *fiber, v Value) {
+		if itemEscapes {
+			fbr.setEscapingLocal(itemIndex, v)
+		} else {
+			fbr.setLocal(itemIndex, v)
+		}
+	}
+
 	return func(fbr *fiber) (Value, exception) {
 		collVal, err := collInst(fbr)
 		if err != nil {
@@ -196,6 +214,49 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 		}
 
 		if arr, ok := collVal.AsArray(); ok {
+			if !idxEscapes && !itemEscapes {
+				if idxIndex >= 0 {
+					for i, item := range arr.Data {
+						if fbr.signaled() {
+							if exc := fbr.halt(site); exc != nil {
+								return Value{}, exc
+							}
+						}
+						fbr.setLocal(idxIndex, BoxNumber(float64(i)))
+						fbr.setLocal(itemIndex, item)
+
+						v, err := bodyInst(fbr)
+						if err != nil {
+							if err == signalContinue {
+								continue
+							} else if err == signalBreak {
+								break
+							}
+							return v, err
+						}
+					}
+				} else {
+					for _, item := range arr.Data {
+						if fbr.signaled() {
+							if exc := fbr.halt(site); exc != nil {
+								return Value{}, exc
+							}
+						}
+						fbr.setLocal(itemIndex, item)
+
+						v, err := bodyInst(fbr)
+						if err != nil {
+							if err == signalContinue {
+								continue
+							} else if err == signalBreak {
+								break
+							}
+							return v, err
+						}
+					}
+				}
+				return Value{}, nil
+			}
 			for i, item := range arr.Data {
 				if fbr.signaled() {
 					if exc := fbr.halt(site); exc != nil {
@@ -203,9 +264,9 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 					}
 				}
 				if idxIndex >= 0 {
-					fbr.setLocal(idxIndex, BoxNumber(float64(i)))
+					bindIdx(fbr, BoxNumber(float64(i)))
 				}
-				fbr.setLocal(itemIndex, item)
+				bindItem(fbr, item)
 
 				v, err := bodyInst(fbr)
 				if err != nil {
@@ -229,10 +290,10 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 				}
 				keyVal := BoxString(k)
 				if idxIndex >= 0 {
-					fbr.setLocal(idxIndex, keyVal)
-					fbr.setLocal(itemIndex, obj[k])
+					bindIdx(fbr, keyVal)
+					bindItem(fbr, obj[k])
 				} else {
-					fbr.setLocal(itemIndex, keyVal)
+					bindItem(fbr, keyVal)
 				}
 
 				v, err := bodyInst(fbr)
@@ -257,9 +318,9 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 					}
 				}
 				if idxIndex >= 0 {
-					fbr.setLocal(idxIndex, BoxNumber(float64(i)))
+					bindIdx(fbr, BoxNumber(float64(i)))
 				}
-				fbr.setLocal(itemIndex, BoxString(string(r)))
+				bindItem(fbr, BoxString(string(r)))
 				i++
 
 				v, err := bodyInst(fbr)
@@ -283,9 +344,9 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 					}
 				}
 				if idxIndex >= 0 {
-					fbr.setLocal(idxIndex, BoxNumber(float64(i)))
+					bindIdx(fbr, BoxNumber(float64(i)))
 				}
-				fbr.setLocal(itemIndex, BoxNumber(float64(b)))
+				bindItem(fbr, BoxNumber(float64(b)))
 
 				v, err := bodyInst(fbr)
 				if err != nil {

@@ -90,33 +90,23 @@ func (fbr *fiber) set(binding local, value Value) {
 }
 
 func (fbr *fiber) getLocal(index int16) Value {
-	if fbr.base+int(index) < len(fbr.stack) {
-		return *(fbr.stack[fbr.base+int(index)])
-	}
-	return Value{}
+	return *(fbr.stack[fbr.base+int(index)])
 }
 
 func (fbr *fiber) setLocal(index int, value Value) {
-	for len(fbr.stack) <= fbr.base+index {
-		fbr.stack = append(fbr.stack, &Value{})
-	}
-	if fbr.active != nil && index < len(fbr.active.locals) && fbr.active.locals[index] {
-		fbr.stack[fbr.base+index] = &value
-		return
-	}
 	*(fbr.stack[fbr.base+index]) = value
 }
 
-func (fbr *fiber) newLocal(index int) *Value {
-	for len(fbr.stack) <= fbr.base+index {
-		fbr.stack = append(fbr.stack, &Value{})
-	}
-	if fbr.active != nil && index < len(fbr.active.locals) && fbr.active.locals[index] {
-		cell := &Value{}
-		fbr.stack[fbr.base+index] = cell
-		return cell
-	}
-	return fbr.stack[fbr.base+index]
+func (fbr *fiber) setEscapingLocal(index int, value Value) {
+	cell := new(Value)
+	*cell = value
+	fbr.stack[fbr.base+index] = cell
+}
+
+func (fbr *fiber) newEscapingLocal(index int) *Value {
+	cell := new(Value)
+	fbr.stack[fbr.base+index] = cell
+	return cell
 }
 
 func (fbr *fiber) getCaptured(index int16) Value {
@@ -124,9 +114,6 @@ func (fbr *fiber) getCaptured(index int16) Value {
 }
 
 func (fbr *fiber) getLocalByRef(index int) *Value {
-	for len(fbr.stack) <= fbr.base+index {
-		fbr.stack = append(fbr.stack, &Value{})
-	}
 	return fbr.stack[fbr.base+index]
 }
 

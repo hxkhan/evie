@@ -227,121 +227,15 @@ func collectStdImports(root ast.Node) map[string]bool {
 	}
 	collectDecls(root)
 
-	var walk func(n ast.Node)
-	walk = func(n ast.Node) {
-		if n == nil {
-			return
-		}
-		switch n := n.(type) {
-		case ast.Block:
-			for _, s := range n.Code {
-				walk(s)
-			}
-		case ast.FieldAccess:
-			if id, ok := n.Lhs.(ast.Ident); ok && standard[id.Name] && !declared[id.Name] {
+	ast.Walk(root, func(n ast.Node) bool {
+		if fa, ok := n.(ast.FieldAccess); ok {
+			if id, ok := fa.Lhs.(ast.Ident); ok && standard[id.Name] && !declared[id.Name] {
 				used[id.Name] = true
-				return
+				return false
 			}
-			walk(n.Lhs)
-		case ast.Decl:
-			walk(n.Value)
-		case ast.Assign:
-			walk(n.Lhs)
-			walk(n.Value)
-		case ast.BinOp:
-			walk(n.Lhs)
-			walk(n.Rhs)
-		case ast.MutableBinOp:
-			walk(n.Lhs)
-			walk(n.Rhs)
-		case ast.Plus:
-			walk(n.Value)
-		case ast.Neg:
-			walk(n.Value)
-		case ast.Not:
-			walk(n.Value)
-		case ast.IsInstanceOf:
-			walk(n.Lhs)
-			walk(n.Rhs)
-		case ast.Exists:
-			walk(n.Value)
-		case ast.Subscript:
-			walk(n.Lhs)
-			walk(n.Key)
-		case ast.Slice:
-			walk(n.Lhs)
-			walk(n.Start)
-			walk(n.End)
-		case ast.ArrayLiteral:
-			for _, el := range n.Elements {
-				walk(el)
-			}
-		case ast.Object:
-			for _, f := range n.Fields {
-				walk(f.Value)
-			}
-		case ast.StringTemplate:
-			for _, a := range n.Args {
-				walk(a)
-			}
-		case ast.Call:
-			walk(n.Fn)
-			for _, a := range n.Args {
-				walk(a)
-			}
-		case ast.Fn:
-			walk(n.Action)
-		case ast.ClassDefinition:
-			walk(n.Action)
-		case ast.Conditional:
-			walk(n.Condition)
-			walk(n.Action)
-			walk(n.Otherwise)
-		case ast.While:
-			walk(n.Condition)
-			walk(n.Action)
-		case ast.For:
-			walk(n.Collection)
-			walk(n.Action)
-		case ast.Switch:
-			walk(n.Value)
-			for _, c := range n.Cases {
-				for _, v := range c.Values {
-					walk(v)
-				}
-				walk(c.Action)
-			}
-			walk(n.Default)
-		case ast.Return:
-			walk(n.Value)
-		case ast.Throw:
-			walk(n.Value)
-		case ast.Catch:
-			walk(n.Action)
-		case ast.Echo:
-			walk(n.Value)
-		case ast.Go:
-			walk(n.Fn)
-		case ast.Await:
-			walk(n.Task)
-		case ast.AwaitAll:
-			for _, t := range n.Tasks {
-				walk(t)
-			}
-		case ast.AwaitAny:
-			for _, t := range n.Tasks {
-				walk(t)
-			}
-		case ast.AwaitRace:
-			for _, t := range n.Tasks {
-				walk(t)
-			}
-		case ast.AwaitTimeout:
-			walk(n.Task)
-			walk(n.Timeout)
 		}
-	}
-	walk(root)
+		return true
+	})
 	return used
 }
 

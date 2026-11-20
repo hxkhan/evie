@@ -1,6 +1,8 @@
 package vm
 
 import (
+	"math"
+
 	"github.com/hxkhan/evie/ast"
 )
 
@@ -76,6 +78,28 @@ func (vm *Instance) compileCondition(node ast.Node) func(fbr *fiber) (bool, exce
 	if bin, ok := node.(ast.BinOp); ok {
 		if fast, ok := vm.compileComparison(bin, site); ok {
 			return fast
+		}
+		if vm.cp.inline && (bin.Operator == ast.EqOp || bin.Operator == ast.NotEqOp) {
+			if rhs, ok := vm.evaluate(bin.Rhs).(Value); ok && rhs.pointer == f64Type {
+				lhs := vm.compile(bin.Lhs)
+				rn := math.Float64frombits(rhs.scalar)
+				if bin.Operator == ast.EqOp {
+					return func(fbr *fiber) (bool, exception) {
+						a, err := lhs(fbr)
+						if err != nil {
+							return false, err
+						}
+						return a.pointer == f64Type && math.Float64frombits(a.scalar) == rn, nil
+					}
+				}
+				return func(fbr *fiber) (bool, exception) {
+					a, err := lhs(fbr)
+					if err != nil {
+						return false, err
+					}
+					return a.pointer != f64Type || math.Float64frombits(a.scalar) != rn, nil
+				}
+			}
 		}
 	}
 

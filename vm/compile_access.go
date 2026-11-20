@@ -13,7 +13,7 @@ func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
 	if !success {
 		panic(vm.compileErrorAt(node, "double declaration of %s", node.Name))
 	}
-	escapes := cl.mayEscape(node.Name)
+	escapes := cl.needsFreshCell(node.Name)
 
 	// try to evaluate
 	switch value := vm.evaluate(node.Value).(type) {

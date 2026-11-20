@@ -800,7 +800,7 @@ func (vm *Instance) emitClass(cls ast.ClassDefinition) instruction {
 	}
 
 	site := vm.at(cls)
-	escapes := enclosing.mayEscape(cls.Name)
+	escapes := enclosing.needsFreshCell(cls.Name)
 	if parentInst == nil && !hasCaptures {
 		boxed := boxUserClass(uclass)
 		if escapes {

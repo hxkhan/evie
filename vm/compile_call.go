@@ -1,6 +1,8 @@
 package vm
 
 import (
+	"unicode/utf8"
+
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/internal/ds"
@@ -87,7 +89,7 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 
 	closure := vm.compileFunction(info, node.Args, node.Action, nil)
 	captures := closure.captures
-	escapes := enclosing.mayEscape(node.Name)
+	escapes := enclosing.needsFreshCell(node.Name)
 
 	// create the function & declare it
 	if escapes {
@@ -318,80 +320,94 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 			}
 		}
 		if lhs, ok := vm.evaluate(iFA.Lhs).(local); ok {
-			return vm.emitMemberCall(iFA, lhs, arguments)
+			return vm.emitMemberCall(iFA, lhs, node.Args, arguments)
 		}
 		return vm.emitMemberCallOn(iFA, vm.compile(iFA.Lhs), arguments)
 	}
 
 	// generic compilation: the target is a runtime value, most often a function
+	if vm.cp.inline {
+		if fnLocal, isLocal := vm.evaluate(node.Fn).(local); isLocal {
+			return func(fbr *fiber) (Value, exception) {
+				return invokeDynamic(fbr, site, *fbr.get(fnLocal), arguments)
+			}
+		}
+	}
+
 	value := vm.compile(node.Fn)
 	return func(fbr *fiber) (Value, exception) {
-		value, exc := value(fbr)
+		target, exc := value(fbr)
 		if exc != nil {
-			return value, exc
+			return target, exc
 		}
-		fn, isUserFn := value.asUserFn()
-		if !isUserFn {
-			return callValue(fbr, site, value, arguments)
-		}
-		if exc := fn.accepts(len(arguments)); exc != nil {
-			return Value{}, exc.at(site)
-		}
+		return invokeDynamic(fbr, site, target, arguments)
+	}
+}
 
-		// the frame protocol again, spelled out: a call through a local or a
-		// closure is the second most common call shape
-		if fbr.signaled() {
-			if exc := fbr.halt(site); exc != nil {
-				return Value{}, exc
-			}
-		}
-		base := len(fbr.stack)
-		for _, escapes := range fn.locals {
-			if !escapes {
-				fbr.stack = append(fbr.stack, fbr.pop())
-			} else {
-				fbr.stack = append(fbr.stack, &Value{})
-			}
-		}
+// invokeDynamic calls a runtime-resolved value (most often a user closure)
+// directly without going through an extra wrapper.
+func invokeDynamic(fbr *fiber, site site, target Value, arguments []instruction) (Value, exception) {
+	fn, isUserFn := target.asUserFn()
+	if !isUserFn {
+		return callValue(fbr, site, target, arguments)
+	}
+	if exc := fn.accepts(len(arguments)); exc != nil {
+		return Value{}, exc.at(site)
+	}
 
-		fixed := len(arguments)
-		if fn.isVariadic {
-			fixed = len(fn.args) - 1
+	// the frame protocol again, spelled out: a call through a local or a
+	// closure is the second most common call shape
+	if fbr.signaled() {
+		if exc := fbr.halt(site); exc != nil {
+			return Value{}, exc
 		}
-		for idx := range fixed {
-			arg, exc := arguments[idx](fbr)
-			if exc != nil {
-				fbr.push(fn.recyclable)
-				fbr.popStack(len(fn.locals))
-				return Value{}, exc
-			}
-			*(fbr.stack[base+idx]) = arg
+	}
+	base := len(fbr.stack)
+	for _, escapes := range fn.locals {
+		if !escapes {
+			fbr.stack = append(fbr.stack, fbr.pop())
+		} else {
+			fbr.stack = append(fbr.stack, &Value{})
 		}
-		if fn.isVariadic {
-			if exc := fbr.evalVariadicTail(base, fixed, fixed, arguments); exc != nil {
-				fbr.push(fn.recyclable)
-				fbr.popStack(len(fn.locals))
-				return Value{}, exc
-			}
+	}
+
+	fixed := len(arguments)
+	if fn.isVariadic {
+		fixed = len(fn.args) - 1
+	}
+	for idx := range fixed {
+		arg, exc := arguments[idx](fbr)
+		if exc != nil {
+			fbr.push(fn.recyclable)
+			fbr.popStack(len(fn.locals))
+			return Value{}, exc
 		}
-
-		prevBase, prevActive := fbr.base, fbr.active
-		fbr.base, fbr.active = base, fn
-
-		result, exc := fn.code(fbr)
-
-		fbr.push(fn.recyclable)
-		fbr.popStack(len(fn.locals))
-		fbr.base, fbr.active = prevBase, prevActive
-
-		switch exc {
-		case nil:
-			return Value{}, nil
-		case signalReturn:
-			return result, nil
-		default:
-			return result, exc.unwind(site)
+		*(fbr.stack[base+idx]) = arg
+	}
+	if fn.isVariadic {
+		if exc := fbr.evalVariadicTail(base, fixed, fixed, arguments); exc != nil {
+			fbr.push(fn.recyclable)
+			fbr.popStack(len(fn.locals))
+			return Value{}, exc
 		}
+	}
+
+	prevBase, prevActive := fbr.base, fbr.active
+	fbr.base, fbr.active = base, fn
+
+	result, exc := fn.code(fbr)
+
+	fbr.push(fn.recyclable)
+	fbr.popStack(len(fn.locals))
+	fbr.base, fbr.active = prevBase, prevActive
+
+	switch exc {
+	case nil:
+		return Value{}, nil
+	case signalReturn:
+		return result, nil
+	default:
+		return result, exc.unwind(site)
 	}
 }
 
@@ -422,14 +438,16 @@ func callValue(fbr *fiber, site site, value Value, arguments []instruction) (Val
 }
 
 // memberSite is one `receiver.name(args)` call site. It remembers the last
-// class type it saw and the method that resolved to, so a call site that
-// keeps seeing one type skips the lookup.
+// class type or immutable builtin kind it saw and the method that resolved to,
+// so a monomorphic call site skips the lookup.
 type memberSite struct {
-	key          fieldKey
-	name         string
-	site         site
-	cachedClass  *userClass
-	cachedMethod *userFn
+	key           fieldKey
+	name          string
+	site          site
+	cachedClass   *userClass
+	cachedMethod  *userFn
+	cachedKind    uint64
+	cachedBuiltin *GoFunc
 }
 
 func (vm *Instance) newMemberSite(iFA ast.FieldAccess) *memberSite {
@@ -472,17 +490,100 @@ func (m *memberSite) call(fbr *fiber, obj Value, arguments []instruction) (Value
 		return callValue(fbr, m.site, *value.Value, arguments)
 	}
 
+	if !isKnown(obj.pointer) && m.cachedBuiltin != nil && obj.scalar == m.cachedKind {
+		return m.cachedBuiltin.callMethod(fbr, m.site, obj, arguments)
+	}
+
 	// builtin methods and object fields
 	member := obj.dotAccess(m.key)
 	if member.IsNil() {
 		return Value{}, memberError(m.site, m.name, obj)
 	}
+	if !isKnown(obj.pointer) {
+		switch obj.scalar {
+		case kindArray, kindString, kindBuffer, kindTask, kindError:
+			if fn, ok := member.AsGoFunc(); ok && fn.isMethod {
+				m.cachedKind = obj.scalar
+				m.cachedBuiltin = fn
+				return fn.callMethod(fbr, m.site, obj, arguments)
+			}
+		}
+	}
 	return boundMethod{this: obj, fn: member}.call(fbr, m.site, arguments)
 }
 
 // emitMemberCall compiles `local.name(args)`
-func (vm *Instance) emitMemberCall(iFA ast.FieldAccess, lhs local, arguments []instruction) instruction {
+func (vm *Instance) emitMemberCall(iFA ast.FieldAccess, lhs local, argNodes []ast.Node, arguments []instruction) instruction {
 	m := vm.newMemberSite(iFA)
+	if vm.cp.inline {
+		switch {
+		case (iFA.Rhs == "push" || iFA.Rhs == "append") && len(arguments) == 1:
+			switch arg := vm.evaluate(argNodes[0]).(type) {
+			case Value:
+				return func(fbr *fiber) (Value, exception) {
+					obj := *fbr.get(lhs)
+					if arr, ok := obj.AsArray(); ok {
+						arr.Data = append(arr.Data, arg)
+						return obj, nil
+					}
+					return m.call(fbr, obj, arguments)
+				}
+			case local:
+				return func(fbr *fiber) (Value, exception) {
+					obj := *fbr.get(lhs)
+					if arr, ok := obj.AsArray(); ok {
+						arr.Data = append(arr.Data, *fbr.get(arg))
+						return obj, nil
+					}
+					return m.call(fbr, obj, arguments)
+				}
+			default:
+				arg0 := arguments[0]
+				return func(fbr *fiber) (Value, exception) {
+					obj := *fbr.get(lhs)
+					if arr, ok := obj.AsArray(); ok {
+						v, exc := arg0(fbr)
+						if exc != nil {
+							return v, exc
+						}
+						arr.Data = append(arr.Data, v)
+						return obj, nil
+					}
+					return m.call(fbr, obj, arguments)
+				}
+			}
+
+		case iFA.Rhs == "pop" && len(arguments) == 0:
+			return func(fbr *fiber) (Value, exception) {
+				obj := *fbr.get(lhs)
+				if arr, ok := obj.AsArray(); ok {
+					if len(arr.Data) == 0 {
+						return Value{}, nil
+					}
+					last := len(arr.Data) - 1
+					val := arr.Data[last]
+					arr.Data = arr.Data[:last]
+					return val, nil
+				}
+				return m.call(fbr, obj, arguments)
+			}
+
+		case iFA.Rhs == "len" && len(arguments) == 0:
+			return func(fbr *fiber) (Value, exception) {
+				obj := *fbr.get(lhs)
+				if arr, ok := obj.AsArray(); ok {
+					return BoxNumber(float64(len(arr.Data))), nil
+				}
+				if s, ok := obj.AsString(); ok {
+					return BoxNumber(float64(utf8.RuneCountInString(s))), nil
+				}
+				if buf, ok := obj.AsBuffer(); ok {
+					return BoxNumber(float64(len(buf))), nil
+				}
+				return m.call(fbr, obj, arguments)
+			}
+		}
+	}
 	return func(fbr *fiber) (Value, exception) {
 		return m.call(fbr, *fbr.get(lhs), arguments)
 	}

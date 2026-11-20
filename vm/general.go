@@ -37,6 +37,13 @@ func (cl *closure) mayEscape(name string) bool {
 	return cl.capturedNames[name]
 }
 
+// needsFreshCell reports whether declaring name right now needs a fresh heap
+// cell on each execution. Outside loops, ds.Scope assigns every declaration a
+// unique slot whose heap cell is already allocated on frame entry if it escapes.
+func (cl *closure) needsFreshCell(name string) bool {
+	return cl.loops > 0 && cl.capturedNames[name]
+}
+
 // PackageResolver resolves a package by import name or path.
 type PackageResolver func(name string) (*Package, error)
 

@@ -128,7 +128,9 @@ func assignField(fbr *fiber, site site, obj Value, name string, index fields.ID,
 		if exc != nil {
 			return v, exc
 		}
-		ci.SetField(index, v)
+		if exc := ci.SetField(site, index, name, v); exc != nil {
+			return Value{}, exc
+		}
 		return Value{}, nil
 	}
 
@@ -199,6 +201,10 @@ func (vm *Instance) emitFieldAssign(node ast.Assign, fa ast.FieldAccess) instruc
 
 		// Fast path: assigning a declared field directly on `this` inside its own class method.
 		if uclass, slot, ok := vm.thisFieldSlot(lhs, index); ok {
+			if uclass.StaticFields[slot] {
+				panic(vm.compileErrorAt(node, "cannot assign to constant field '%s' on class '%s'", fa.Rhs, uclass.Name).
+					withHint("declare it with var to allow reassignment: var " + fa.Rhs + " := ..."))
+			}
 			return func(fbr *fiber) (Value, exception) {
 				v, err := value(fbr)
 				if err != nil {
@@ -210,15 +216,40 @@ func (vm *Instance) emitFieldAssign(node ast.Assign, fa ast.FieldAccess) instruc
 						ci.Fields[slot] = v
 						return Value{}, nil
 					}
-					ci.SetField(index, v)
+					if exc := ci.SetField(site, index, fa.Rhs, v); exc != nil {
+						return Value{}, exc
+					}
 					return Value{}, nil
 				}
 				return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, thisVal.TypeOf())
 			}
 		}
 
+		var cachedClass *userClass
+		cachedSlot := -1
 		return func(fbr *fiber) (Value, exception) {
 			target := fbr.get(lhs)
+
+			if ci, ok := target.asClassInstance(); ok {
+				v, err := value(fbr)
+				if err != nil {
+					return v, err
+				}
+				if ci.InstanceOf == cachedClass && cachedSlot >= 0 {
+					ci.Fields[cachedSlot] = v
+					return Value{}, nil
+				}
+				if slot, ok := ci.InstanceOf.slot(index); ok && !ci.InstanceOf.StaticFields[slot] {
+					cachedClass = ci.InstanceOf
+					cachedSlot = slot
+					ci.Fields[slot] = v
+					return Value{}, nil
+				}
+				if exc := ci.SetField(site, index, fa.Rhs, v); exc != nil {
+					return Value{}, exc
+				}
+				return Value{}, nil
+			}
 
 			if obj, ok := target.AsObject(); ok {
 				v, err := value(fbr)
@@ -226,15 +257,6 @@ func (vm *Instance) emitFieldAssign(node ast.Assign, fa ast.FieldAccess) instruc
 					return v, err
 				}
 				obj[fa.Rhs] = v
-				return Value{}, nil
-			}
-
-			if ci, ok := target.asClassInstance(); ok {
-				v, err := value(fbr)
-				if err != nil {
-					return v, err
-				}
-				ci.SetField(index, v)
 				return Value{}, nil
 			}
 
@@ -333,7 +355,9 @@ func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) inst
 			if !ok {
 				return Value{}, errorAt(site, "class field key must be a string, got '%s'", keyVal.TypeOf())
 			}
-			ci.setFieldByName(keyStr, newVal)
+			if exc := ci.setFieldByName(site, keyStr, newVal); exc != nil {
+				return Value{}, exc
+			}
 			return Value{}, nil
 		}
 
@@ -373,7 +397,7 @@ func (vm *Instance) resolveSuper(node ast.Node) (uclass *userClass, classLocal l
 	if uclass == nil {
 		panic(vm.compileErrorAt(node, "'super' can only be used inside a class method"))
 	}
-	if !uclass.hasParent {
+	if !uclass.hasParent() {
 		panic(vm.compileErrorAt(node, "class '%s' has no parent class", uclass.Name))
 	}
 	thisBinding, err := vm.cp.reach("this")
@@ -425,14 +449,21 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 		case local:
 			// Fast path: reading a declared field directly on `this` inside its own class method.
 			if uclass, slot, ok := vm.thisFieldSlot(lhs, index); ok {
+				var subClass *userClass
+				subSlot := -1
 				return func(fbr *fiber) (Value, exception) {
 					thisVal := fbr.stack[fbr.base] // slot 0 of a method frame is `this`
 					if ci, ok := thisVal.asClassInstance(); ok {
-						if ci.InstanceOf == uclass && slot < len(ci.Fields) {
+						if ci.InstanceOf == uclass {
 							return ci.Fields[slot], nil
 						}
-						if val, exists := ci.GetField(index); exists {
-							return val, nil
+						if ci.InstanceOf == subClass && subSlot >= 0 {
+							return ci.Fields[subSlot], nil
+						}
+						if s, exists := ci.InstanceOf.slot(index); exists {
+							subClass = ci.InstanceOf
+							subSlot = s
+							return ci.Fields[s], nil
 						}
 					}
 					if field, exists := thisVal.getField(key); exists {
@@ -945,10 +976,105 @@ func (vm *Instance) compoundOperator(node ast.MutableBinOp) func(fbr *fiber, cur
 // emitCompoundFieldAssign compiles `x.field op= value`, evaluating `x` exactly once
 func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldAccess) instruction {
 	site := vm.at(node)
-	target := vm.compile(fa.Lhs)
-	rhs := vm.compile(node.Rhs)
 	apply := vm.compoundOperator(node)
 	index := fields.Get(fa.Rhs)
+
+	if lhs, ok := vm.evaluate(fa.Lhs).(local); ok {
+		rhs := vm.compile(node.Rhs)
+
+		// Fast path: compound-assigning a declared field directly on `this` inside its own class method.
+		if uclass, slot, ok := vm.thisFieldSlot(lhs, index); ok {
+			if uclass.StaticFields[slot] {
+				panic(vm.compileErrorAt(node, "cannot assign to constant field '%s' on class '%s'", fa.Rhs, uclass.Name).
+					withHint("declare it with var to allow reassignment: var " + fa.Rhs + " := ..."))
+			}
+			return func(fbr *fiber) (Value, exception) {
+				value, exc := rhs(fbr)
+				if exc != nil {
+					return value, exc
+				}
+				thisVal := fbr.stack[fbr.base]
+				if ci, ok := thisVal.asClassInstance(); ok {
+					if ci.InstanceOf == uclass && slot < len(ci.Fields) {
+						result, exc := apply(fbr, ci.Fields[slot], value)
+						if exc != nil {
+							return result, exc
+						}
+						ci.Fields[slot] = result
+						return Value{}, nil
+					}
+					return Value{}, ci.UpdateField(site, index, fa.Rhs, func(current Value) (Value, exception) {
+						return apply(fbr, current, value)
+					})
+				}
+				return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, thisVal.TypeOf())
+			}
+		}
+
+		var cachedClass *userClass
+		cachedSlot := -1
+		return func(fbr *fiber) (Value, exception) {
+			obj := *fbr.get(lhs)
+			value, exc := rhs(fbr)
+			if exc != nil {
+				return value, exc
+			}
+			if ci, ok := obj.asClassInstance(); ok {
+				if ci.InstanceOf == cachedClass && cachedSlot >= 0 {
+					result, exc := apply(fbr, ci.Fields[cachedSlot], value)
+					if exc != nil {
+						return result, exc
+					}
+					ci.Fields[cachedSlot] = result
+					return Value{}, nil
+				}
+				if slot, ok := ci.InstanceOf.slot(index); ok && !ci.InstanceOf.StaticFields[slot] {
+					cachedClass = ci.InstanceOf
+					cachedSlot = slot
+					result, exc := apply(fbr, ci.Fields[slot], value)
+					if exc != nil {
+						return result, exc
+					}
+					ci.Fields[slot] = result
+					return Value{}, nil
+				}
+				return Value{}, ci.UpdateField(site, index, fa.Rhs, func(current Value) (Value, exception) {
+					return apply(fbr, current, value)
+				})
+			}
+			if m, ok := obj.AsObject(); ok {
+				current, exists := m[fa.Rhs]
+				if !exists {
+					return Value{}, errorAt(site, "undefined key '%s' in object", fa.Rhs)
+				}
+				result, exc := apply(fbr, current, value)
+				if exc != nil {
+					return result, exc
+				}
+				m[fa.Rhs] = result
+				return Value{}, nil
+			}
+			if pkg, ok := obj.AsPackage(); ok {
+				field, exists := pkg.globals[index]
+				if !exists || !field.IsPublic {
+					return Value{}, errorAt(site, "package '%s' has no symbol '%s'", pkg.name, fa.Rhs)
+				}
+				if field.IsStatic {
+					return Value{}, errorAt(site, "cannot assign to '%s.%s' because it is a constant", pkg.name, fa.Rhs)
+				}
+				result, exc := apply(fbr, *field.Value, value)
+				if exc != nil {
+					return result, exc
+				}
+				*field.Value = result
+				return Value{}, nil
+			}
+			return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, obj.TypeOf())
+		}
+	}
+
+	target := vm.compile(fa.Lhs)
+	rhs := vm.compile(node.Rhs)
 
 	return func(fbr *fiber) (Value, exception) {
 		obj, exc := target(fbr)
@@ -962,12 +1088,9 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 		}
 
 		if ci, ok := obj.asClassInstance(); ok {
-			exists, exc := ci.UpdateField(index, func(current Value) (Value, exception) {
+			exc := ci.UpdateField(site, index, fa.Rhs, func(current Value) (Value, exception) {
 				return apply(fbr, current, value)
 			})
-			if !exists {
-				return Value{}, errorAt(site, "undefined field '%s' on %s", fa.Rhs, ci.InstanceOf.Name)
-			}
 			return Value{}, exc
 		}
 
@@ -1063,12 +1186,9 @@ func (vm *Instance) emitCompoundSubscriptAssign(node ast.MutableBinOp, sub ast.S
 			if !isString {
 				return Value{}, errorAt(site, "class field key must be a string, got '%s'", keyVal.TypeOf())
 			}
-			exists, exc := ci.updateFieldByName(keyStr, func(current Value) (Value, exception) {
+			exc := ci.updateFieldByName(site, keyStr, func(current Value) (Value, exception) {
 				return apply(fbr, current, value)
 			})
-			if !exists {
-				return Value{}, errorAt(site, "undefined field '%s' on %s", keyStr, ci.InstanceOf.Name)
-			}
 			return Value{}, exc
 		}
 

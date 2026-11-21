@@ -30,7 +30,7 @@ const replHelp = `REPL commands:
   :quit, :exit, :q             exit the REPL
 
 Tips:
-  - Standard library packages (io, fs, json, math, strings, time) auto-import on use.
+  - Standard library packages (io, fs, json, math, time) auto-import on use.
   - The last non-nil expression result is saved in _.
   - Multi-line blocks, arrays, objects, templates and => arrows continue automatically.
   - Press Ctrl+C while code is running to interrupt it without exiting the REPL.

@@ -9,7 +9,8 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
+	"encoding/json/jsontext"
+	json "encoding/json/v2"
 	"flag"
 	"fmt"
 	"math"
@@ -428,7 +429,7 @@ func writeRun(path string, run Run) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		fatal(err)
 	}
-	data, _ := json.MarshalIndent(run, "", "  ")
+	data, _ := json.Marshal(run, jsontext.WithIndent("  "))
 	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
 		fatal(err)
 	}

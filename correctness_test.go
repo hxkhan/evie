@@ -285,14 +285,14 @@ func TestCallIntRejectsInfAndMethodErrorIndex(t *testing.T) {
 		code string
 		want string
 	}{
-		{`package main imports("math", "strings")
-		fn main() => strings.repeat("a", math.inf)`, "must be an integer"},
-		{`package main imports("math", "strings")
-		fn main() => strings.repeat("a", -math.inf)`, "must be an integer"},
-		{`package main imports("math", "strings")
-		fn main() => strings.repeat("a", math.nan)`, "must be an integer"},
-		{`package main imports("math", "strings")
-		fn main() => strings.repeat("a", math.pow(10, 30))`, "must be an integer"},
+		{`package main imports("math")
+		fn main() => "a".repeat(math.inf)`, "must be an integer"},
+		{`package main imports("math")
+		fn main() => "a".repeat(-math.inf)`, "must be an integer"},
+		{`package main imports("math")
+		fn main() => "a".repeat(math.nan)`, "must be an integer"},
+		{`package main imports("math")
+		fn main() => "a".repeat(math.pow(10, 30))`, "must be an integer"},
 		{`return "hello".contains(123)`, "contains: argument 1 must be a string, got number"},
 	}
 	for _, tc := range cases {
@@ -450,10 +450,10 @@ func TestParserOperatorAndPrecedenceFixes(t *testing.T) {
 }
 
 func TestStringUTF8RuneSemantics(t *testing.T) {
-	code := `package main imports("strings")
+	code := `package main
 	fn main() {
 		s := "héllo😀"
-		if s.len() != 6 || strings.len(s) != 6 {
+		if s.len() != 6 {
 			throw error("rune length mismatch")
 		}
 		if s[0] != "h" || s[1] != "é" || s[5] != "😀" || s[-1] != "😀" || s[-5] != "é" {
@@ -828,13 +828,13 @@ func TestPerEngineIsolationIOAndStdlibSandbox(t *testing.T) {
 		t.Fatalf("unexpected redirected stdout: %q", out.String())
 	}
 
-	// Options.Stdlib allowlist blocks fs/io while allowing math/strings
-	sandboxed := evie.New(evie.Options{Stdlib: []string{"math", "strings"}})
-	if _, err := sandboxed.Eval(`package main imports("math", "strings")
-	fn ok() => strings.upper("evie") + string(math.floor(2.9))`); err != nil {
+	// Options.Stdlib allowlist blocks fs/io while allowing math/json
+	sandboxed := evie.New(evie.Options{Stdlib: []string{"math", "json"}})
+	if _, err := sandboxed.Eval(`package main imports("math", "json")
+	fn ok() => json.encode([math.floor(2.9)])`); err != nil {
 		t.Fatalf("allowed stdlib failed: %v", err)
 	}
-	if v, err := sandboxed.Call("main.ok"); err != nil || v.String() != "EVIE2" {
+	if v, err := sandboxed.Call("main.ok"); err != nil || v.String() != "[2]" {
 		t.Fatalf("sandboxed call = %v, %v", v, err)
 	}
 

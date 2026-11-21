@@ -19,7 +19,7 @@ fn main() {
 }
 ```
 
-- Standard library packages (`io`, `fs`, `math`, `strings`, `time`, `json`, see [section 12](#12-standard-library)) can be imported directly, as can packages the host registers and `.ev` files by relative path (`imports("./util")`).
+- Standard library packages (`io`, `fs`, `math`, `time`, `json`, see [section 12](#12-standard-library)) can be imported directly, as can packages the host registers and `.ev` files by relative path (`imports("./util")`).
 - Every top-level function, class and binding of a package is visible to importers under the package name (`io.println`, `time.wait`). There is no private marker; keep internal helpers in a package that is not imported. An importer always sees a package's `var` bindings as they are now and can assign them (`util.count = 0`); assigning one of its constants is a compile error.
 - Functions, classes and constants whose initializer is itself constant (`SECONDS := 60`, `MILLIS := SECONDS * 1000`) are hoisted, so they can be used before their declaration. Every other top-level binding is initialized in source order when the package loads; its initializer can call functions and build any value, and a binding read before its line has run is `nil`:
 
@@ -428,14 +428,18 @@ case 1:
 
 ## 7. Classes & Object-Oriented Programming
 
-Evie supports object-oriented programming with classes, encapsulated methods, explicit `this`, dynamic fields, first-class bound methods, and single inheritance.
+Evie supports object-oriented programming with fixed-shape classes, declared body fields (mutable or immutable), encapsulated methods, explicit `this`, first-class bound methods, and single inheritance.
 
 ### Class Definition & Instantiation
 Classes are declared with `class Name(field1, field2, ...) { ... }`.
-The body braces `{ ... }` are **mandatory** (even if empty). Constructor arguments passed during instantiation must match the number of declared fields.
+The body braces `{ ... }` are **mandatory** (even if empty). Constructor arguments passed during instantiation must match the number of constructor fields declared in parentheses.
 
 ```go
 class Person(name, age) {
+    // Body fields: immutable by default (:=) or mutable with var
+    kind := "human"
+    var email := ""
+
     // Methods are declared directly inside the class body
     fn greet(prefix) {
         return prefix + ", I am " + this.name
@@ -454,6 +458,7 @@ class Person(name, age) {
 p := Person("John", 22)
 io.println(p.name) // "John"
 io.println(p.age)  // 22
+io.println(p.kind) // "human"
 
 // Method calls:
 io.println(p.greet("Hello")) // "Hello, I am John"
@@ -464,7 +469,7 @@ io.println(p.age)            // 23
 ```
 
 ### Methods, `this`, & Bound Methods
-- **The `this` Keyword**: Inside any class method, `this` is an implicit receiver parameter referring to the instance.
+- **The `this` Keyword**: Inside any class method (and in dynamic body field initializers), `this` is an implicit receiver parameter referring to the instance.
 - **Method Calls on `this`**: Methods can invoke other methods on the same instance using `this.otherMethod()`.
 - **First-Class Bound Methods**: Accessing a method without calling it extracts a bound method holding the instance reference:
 
@@ -475,14 +480,25 @@ sayHi := greeter.greet // extracts bound method
 io.println(sayHi("Hi")) // "Hi, I am Alice"
 ```
 
-### Dynamic Fields
-Class instances are extensible. You can assign optional dynamic fields at runtime:
+### Fixed Shape & Body Fields
+Classes have a **fixed field layout** known at compile time (constructor fields + body fields + inherited body fields). Assigning to an undeclared field is a runtime error; use an `object` (`{ ... }`) when you need arbitrary dynamic keys.
+
+- **Immutable body fields (`field := expr`)**: initialized per instance and cannot be reassigned.
+- **Mutable body fields (`var field := expr`)**: initialized per instance and can be mutated via `this.field = ...` or `instance.field = ...`.
+- **Dynamic initializers**: non-constant expressions (such as `var items := []` or `full := this.first + " " + this.last`) are evaluated fresh for every new instance, so mutable defaults are never shared across instances.
 
 ```go
-p := Person("John", 22)
-p.email = "john03@gmail.com" // dynamic field assignment
+class User(first, last) {
+    full := this.first + " " + this.last // immutable, computed per instance
+    var email := ""                      // mutable with constant default
+    var tags := []                       // fresh array per instance
+}
 
-io.println(p.email)          // "john03@gmail.com"
+u := User("Ada", "Lovelace")
+u.email = "ada@example.com"
+u.tags.push("math")
+// u.full = "other"  // Error: cannot assign to constant field 'full' on class 'User'
+// u.phone = "555"   // Error: class 'User' has no field 'phone'
 ```
 
 ### Classical Single Inheritance
@@ -601,18 +617,36 @@ obj.clear()               // removes all entries
 ```
 
 ### String Methods
+Positions and lengths count characters (UTF-8 runes), not bytes:
+
 ```go
 s := "  Hello, Evie!  "
 
-s.len()                   // character (UTF-8 rune) count
-s.trim()                  // "Hello, Evie!"
-s.toUpper()               // "  HELLO, EVIE!  "
-s.toLower()               // "  hello, evie!  "
-s.contains("Evie")        // true
-s.startsWith("  He")      // true
-s.endsWith("!  ")         // true
-"a,b,c".split(",")        // ["a", "b", "c"]
-"café".slice(1, 4)        // "afé" (also s[1:4])
+s.len()                      // character (UTF-8 rune) count
+s.trim()                     // "Hello, Evie!"
+s.trimStart()                // "Hello, Evie!  "
+s.trimEnd()                  // "  Hello, Evie!"
+"v1.2".trimPrefix("v")       // "1.2"
+"a.ev".trimSuffix(".ev")     // "a"
+s.toUpper()                  // "  HELLO, EVIE!  "
+s.toLower()                  // "  hello, evie!  "
+s.contains("Evie")           // true
+s.startsWith("  He")         // true
+s.endsWith("!  ")            // true
+"héllo".index("l")           // 2 (-1 if not found)
+"hello".lastIndex("l")       // 3 (-1 if not found)
+"banana".count("a")          // 3
+"a-b-c".replace("-", "+")    // "a+b+c"
+"a-b-c".replaceFirst("-", "+") // "a+b-c"
+"ab".repeat(3)               // "ababab"
+"héllo".reverse()            // "olléh"
+"7".padStart(3, "0")         // "007"
+"ab".padEnd(5, "xy")         // "abxyx"
+"a,b,c".split(",")           // ["a", "b", "c"]
+"  a  b c ".fields()         // ["a", "b", "c"]
+"x\ny\n".lines()             // ["x", "y"]
+"héy".chars()                // ["h", "é", "y"]
+"café".slice(1, 4)           // "afé" (also s[1:4])
 ```
 
 ### Buffer Methods
@@ -850,7 +884,7 @@ if _, err := eng.RunFileContext(ctx, "main.ev"); errors.Is(err, context.Deadline
 
 ## 12. Standard Library
 
-Import a package by name: `package main imports("math", "strings")`. Functions that wait on the operating system (`fs`, `time.wait`, `io.prompt`, `io.readln`) release the instance while they wait, so other tasks keep running. Arguments of the wrong type raise an error that names the function and the argument.
+Import a package by name: `package main imports("math", "json")`. Functions that wait on the operating system (`fs`, `time.wait`, `io.prompt`, `io.readln`) release the instance while they wait, so other tasks keep running. Arguments of the wrong type raise an error that names the function and the argument.
 
 ### `io`
 Reads and writes use the engine's `Options.Stdin` and `Options.Stdout` (defaulting to `os.Stdin` and `os.Stdout`).
@@ -872,20 +906,6 @@ Reads and writes use the engine's `Options.Stdin` and `Options.Stdout` (defaulti
 | `clamp(x, lo, hi)` | `x` limited to the range |
 | `isNaN(x)`, `isInf(x)`, `isFinite(x)` | checks |
 | `random()`, `randomInt(lo, hi)` | a number in [0, 1), an integer in [lo, hi] |
-
-### `strings`
-Strings also have the methods `len`, `slice`, `trim`, `toLower`, `toUpper`, `contains`, `startsWith`, `endsWith` and `split`. Positions and lengths count characters (UTF-8 runes), not bytes.
-
-| function | does |
-| :-- | :-- |
-| `split(s, sep)`, `fields(s)`, `lines(s)`, `chars(s)` | break a string into an array |
-| `contains`, `hasPrefix`, `hasSuffix`, `count(s, sub)` | tests |
-| `index(s, sub)`, `lastIndex(s, sub)` | position of `sub`, or -1 |
-| `replace(s, old, new)`, `replaceFirst(s, old, new)` | replace every or the first occurrence |
-| `upper`, `lower`, `trim`, `trimStart`, `trimEnd`, `trimPrefix(s, p)`, `trimSuffix(s, p)` | case and trimming |
-| `padStart(s, width, pad)`, `padEnd(s, width, pad)`, `repeat(s, n)`, `reverse(s)` | building strings |
-| `len(s)` | number of characters |
-| `parseNumber(s)` | the number a string spells, or an error |
 
 ### `fs`
 | function | does |

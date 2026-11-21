@@ -1,6 +1,6 @@
 // Host calls: package natives bound with typed wrappers, a variadic native, a native through a local, and builtin methods on strings and arrays.
 // expect: 26669066695
-package main imports("math", "strings")
+package main imports("math")
 
 fn main() {
     var total := 0
@@ -31,10 +31,10 @@ fn main() {
         i += 1
     }
 
-    // natives taking strings
+    // string methods taking string arguments
     i = 0
     while i < 100000 {
-        total += strings.len(word) + strings.index(word, "i")
+        total += word.len() + word.index("i")
         i += 1
     }
     return total

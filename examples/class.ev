@@ -1,6 +1,8 @@
 package main
 
 class person(name, age) {
+    var email := ""
+
     fn greet(prefix) {
         return prefix + ", I am " + this.name
     }
@@ -14,7 +16,7 @@ fn main() {
     echo person
 
     p := person("John", 22)
-    p.email = "john03@gmail.com" // optional fields can be added
+    p.email = "john03@gmail.com" // mutable body field
 
     if p is person {
         echo "p is definitely a person"

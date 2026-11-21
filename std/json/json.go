@@ -1,7 +1,7 @@
 package json
 
 import (
-	"encoding/json"
+	json "encoding/json/v2"
 
 	"github.com/hxkhan/evie/vm"
 )
@@ -14,11 +14,11 @@ func Construct() *vm.Package {
 		if err != nil {
 			return vm.Value{}, err
 		}
-		var decoded any
-		if err := json.Unmarshal([]byte(str), &decoded); err != nil {
+		var val vm.Value
+		if err := json.Unmarshal([]byte(str), &val); err != nil {
 			return vm.Value{}, err
 		}
-		return vm.BoxAny(decoded)
+		return val, nil
 	})
 	pkg.Func("encode", 1, func(c vm.Call) (vm.Value, error) {
 		data, err := c.Arg(0).MarshalJSON()

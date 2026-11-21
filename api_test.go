@@ -63,7 +63,7 @@ func boolOf(v vm.Value) bool {
 // hosts read and write fields of objects and class instances by name
 func TestPublicFields(t *testing.T) {
 	eng := evie.New()
-	if _, err := eng.Load("shapes.ev", []byte("package shapes\nclass Point(x, y) {}\nfn make() => Point(1, 2)\nfn obj() => {a: 1}")); err != nil {
+	if _, err := eng.Load("shapes.ev", []byte("package shapes\nclass Point(x, y) {\n\tvar label := \"\"\n\ttag := \"pt\"\n}\nfn make() => Point(1, 2)\nfn obj() => {a: 1}")); err != nil {
 		t.Fatal(err)
 	}
 	p, err := eng.Call("shapes.make")
@@ -79,14 +79,20 @@ func TestPublicFields(t *testing.T) {
 	if err := p.SetField("y", vm.BoxNumber(5)); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.SetField("label", vm.BoxString("dynamic")); err != nil {
+	if err := p.SetField("label", vm.BoxString("origin")); err != nil {
 		t.Fatal(err)
+	}
+	if err := p.SetField("unknown", vm.BoxString("nope")); err == nil || !strings.Contains(err.Error(), "has no field 'unknown'") {
+		t.Fatalf("SetField on undeclared field should fail, got: %v", err)
+	}
+	if err := p.SetField("tag", vm.BoxString("other")); err == nil || !strings.Contains(err.Error(), "cannot assign to constant field 'tag'") {
+		t.Fatalf("SetField on constant field should fail, got: %v", err)
 	}
 	if y, _ := p.Field("y"); y.String() != "5" {
 		t.Fatalf("Field(y) after SetField = %v", y)
 	}
-	if l, ok := p.Field("label"); !ok || l.String() != "dynamic" {
-		t.Fatalf("dynamic field = %v, %v", l, ok)
+	if l, ok := p.Field("label"); !ok || l.String() != "origin" {
+		t.Fatalf("body field = %v, %v", l, ok)
 	}
 	o, _ := eng.Call("shapes.obj")
 	if a, ok := o.Field("a"); !ok || a.String() != "1" {

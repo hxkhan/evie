@@ -641,7 +641,7 @@ func (x Value) memberNames() []string {
 				names = append(names, fields.Lookup(id))
 			}
 		}
-		return append(names, sortedKeys(ci.Dynamic)...)
+		return names
 	}
 	return nil
 }
@@ -738,7 +738,7 @@ func (x Value) AcceptsArgs() bool {
 			}
 			return bm.fn.AcceptsArgs()
 		case kindClass:
-			return len((*userClass)(x.pointer).Fields) > 0
+			return (*userClass)(x.pointer).ParamCount > 0
 		case kindBuiltinType:
 			fn := (*builtinType)(x.pointer).Constructor
 			return fn != nil && (fn.isVariadic || fn.arguments > 0)
@@ -773,7 +773,7 @@ func (x Value) callGuarded(fbr *fiber, args ...Value) (result Value, exc excepti
 			return bm.callGuarded(fbr, args...)
 		case kindClass:
 			uc := (*userClass)(x.pointer)
-			return uc.instantiate(args)
+			return uc.instantiate(fbr, args)
 		case kindBuiltinType:
 			bt := (*builtinType)(x.pointer)
 			if bt.Constructor == nil {

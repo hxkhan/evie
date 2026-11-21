@@ -105,20 +105,25 @@ func TestSessionFunctionsClassesAndAsync(t *testing.T) {
 		t.Fatalf("fib(10): val=%v err=%v", val, err)
 	}
 
-	// Classes and cross-turn inheritance with super
+	// Classes and cross-turn inheritance with body fields and super
 	if _, _, err := s.Eval(`class Animal(name) {
+		var energy := 10
 		fn speak() => this.name
 	}`); err != nil {
 		t.Fatalf("define Animal: %v", err)
 	}
 	if _, _, err := s.Eval(`class Dog(name) : Animal {
+		kind := "canine"
 		fn speak() => super.speak() + "!"
 	}`); err != nil {
 		t.Fatalf("define Dog: %v", err)
 	}
-	val, _, err = s.Eval(`Dog("Rex").speak()`)
-	if err != nil || val.String() != "Rex!" {
-		t.Fatalf("Dog.speak: val=%v err=%v", val, err)
+	if _, _, err := s.Eval(`d := Dog("Rex")`); err != nil {
+		t.Fatalf("instantiate Dog: %v", err)
+	}
+	val, _, err = s.Eval(`[d.speak(), d.kind, d.energy]`)
+	if err != nil || val.String() != `["Rex!", "canine", 10]` {
+		t.Fatalf("Dog body fields: val=%v err=%v", val, err)
 	}
 
 	// Async task created on one turn and awaited on the next
@@ -195,8 +200,8 @@ func TestSessionAutoImportAndFSImport(t *testing.T) {
 	}
 
 	// Disallowed stdlib package is NOT auto-imported
-	if _, _, err := s.Eval(`strings.upper("hi")`); err == nil {
-		t.Fatal("expected strings to be blocked by Options.Stdlib")
+	if _, _, err := s.Eval(`json.encode([1, 2])`); err == nil {
+		t.Fatal("expected json to be blocked by Options.Stdlib")
 	}
 
 	// Explicit aliased import from virtual FS

@@ -48,9 +48,9 @@ Two tasks incrementing one global always end at the exact total, because fibers 
   - `x := 10` creates an immutable binding.
   - `var x := 10` is explicitly required for mutability.
 - **First-Class Classes & OOP**:
+  - Fixed-shape classes with declared body fields (`field := ...` immutable, `var field := ...` mutable) and per-instance initializers.
   - Encapsulated methods with implicit `this`.
   - Classical single inheritance (`class Sub : Super { ... }`) with `super.method()` calls.
-  - Dynamic instance fields (`p.email = "..."`).
   - First-class bound methods (`fnVal := p.greet`).
   - Polymorphic type checks (`p is Person`, `dog is Animal`).
 - **Modern Control Flow & Collections**:
@@ -156,7 +156,7 @@ _, err := eng.CallContext(ctx, "main.status", 42) // errors.Is(err, context.Dead
 - [x] Functions, Closures & Variadic Arguments (`...args`)
 - [x] Primitive types (`number`, `bool`, `nil`)
 - [x] Reference types (`string`, `buffer`, `array`, `object`, `function`, `task`, `error`)
-- [x] Classes & OOP (methods, `this`, single inheritance, `super`, dynamic fields, bound methods)
+- [x] Classes & OOP (fixed-shape layout, body fields, methods, `this`, single inheritance, `super`, bound methods)
 - [x] Control flow (`if`, `else`, `switch`, `while`, `break`, `continue`)
 - [x] For loops (`for item in col`, `for idx, item in col`) & slicing (`arr[a:b]`, `str[a:b]`, `buf[a:b]`)
 - [x] Operators (`+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `?`)
@@ -167,7 +167,7 @@ _, err := eng.CallContext(ctx, "main.status", 42) // errors.Is(err, context.Dead
 - [x] Scoping (global, package, function, block, captured closures)
 - [x] Error handling (`throw`, `catch(expr)`, `error` type)
 - [x] Go Host Embedding (bidirectional marshaling, function reflection, struct unmarshaling, stdlib sandboxing, custom I/O)
-- [x] Standard library (`io`, `fs`, `math`, `strings`, `time`, `json`)
+- [x] Standard library (`io`, `fs`, `math`, `time`, `json`)
 - [x] Compiler-style diagnostics (source excerpts, spans, hints, did-you-mean, stack traces)
 - [x] Interrupts and deadlines for runaway scripts (`Interrupt`, `RunFileContext`, `CallContext`)
 - [ ] Package management ⏳
@@ -208,7 +208,7 @@ Why `fib(35)`? Because micro-benchmarks measure fundamental VM metrics:
 ## Setup & Quick Start
 
 ### Prerequisites
-- Go 1.26+ installed ([go.dev/doc/install](https://go.dev/doc/install))
+- Go 1.27+ installed ([go.dev/doc/install](https://go.dev/doc/install))
 
 ### Build & Run
 ```bash
@@ -229,7 +229,7 @@ go build ./evie
 
 # Run code without a file; the standard packages it names are imported for it
 ./evie -e 'math.sqrt(2)'
-./evie -e 'for w in strings.fields("go evie go") { io.println(strings.upper(w)) }'
+./evie -e 'for w in "go evie go".fields() { io.println(w.toUpper()) }'
 
 # Inspect compiled packages, globals, classes, slots, escapes and closure captures without running main
 ./evie -dump ./examples/captures.ev

@@ -24,19 +24,17 @@ import (
 	"github.com/hxkhan/evie/std/io"
 	"github.com/hxkhan/evie/std/json"
 	"github.com/hxkhan/evie/std/math"
-	"github.com/hxkhan/evie/std/strings"
 	"github.com/hxkhan/evie/std/time"
 	"github.com/hxkhan/evie/vm"
 )
 
 // stdlib constructs a standard library package on first import
 var stdlib = map[string]func() *vm.Package{
-	"io":      io.Construct,
-	"fs":      fs.Construct,
-	"time":    time.Construct,
-	"strings": strings.Construct,
-	"json":    json.Construct,
-	"math":    math.Construct,
+	"io":   io.Construct,
+	"fs":   fs.Construct,
+	"time": time.Construct,
+	"json": json.Construct,
+	"math": math.Construct,
 }
 
 // Options configures an Engine. The zero value gives the standard library,
@@ -44,7 +42,7 @@ var stdlib = map[string]func() *vm.Package{
 type Options struct {
 	FS       iofs.FS                                // filesystem for file/project loading and relative imports; defaults to the OS filesystem (and sandboxes imports within FS)
 	NoStdlib bool                                   // do not offer the standard library packages
-	Stdlib   []string                               // when non-empty, only allow these standard library packages (e.g. "math", "strings", "json")
+	Stdlib   []string                               // when non-empty, only allow these standard library packages (e.g. "math", "json")
 	Packages []*vm.Package                          // host packages, importable by their names
 	Resolve  func(path string) (*vm.Package, error) // consulted for an import before the filesystem
 	Root     string                                 // directory that relative imports resolve against; the entry file's directory when empty

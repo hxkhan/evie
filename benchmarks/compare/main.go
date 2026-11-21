@@ -12,7 +12,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	json "encoding/json/v2"
 	"flag"
 	"fmt"
 	"math"
@@ -172,7 +173,7 @@ func main() {
 		fmt.Printf("\nwrote markdown report to %s\n", *md)
 	}
 	if *outJSON != "" {
-		data, _ := json.MarshalIndent(report, "", "  ")
+		data, _ := json.Marshal(report, jsontext.WithIndent("  "))
 		if err := os.WriteFile(*outJSON, append(data, '\n'), 0o644); err != nil {
 			fatal(err)
 		}

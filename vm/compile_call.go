@@ -275,8 +275,8 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 		}
 
 		if uc, isUserClass := value.asUserClass(); isUserClass {
-			if len(uc.Fields) != len(arguments) {
-				vm.arity(customError("class '%v' takes %v argument(s) but %v were supplied", uc.Name, len(uc.Fields), len(arguments)), node, uc.def)
+			if uc.ParamCount != len(arguments) {
+				vm.arity(customError("class '%v' takes %v argument(s) but %v were supplied", uc.Name, uc.ParamCount, len(arguments)), node, uc.def)
 			}
 			return func(fbr *fiber) (Value, exception) {
 				return uc.construct(fbr, site, arguments)
@@ -437,21 +437,53 @@ func callValue(fbr *fiber, site site, value Value, arguments []instruction) (Val
 	return Value{}, errorAt(site, "cannot call %s", article(value)).labelled("this is " + article(value))
 }
 
-// memberSite is one `receiver.name(args)` call site. It remembers the last
-// class type or immutable builtin kind it saw and the method that resolved to,
-// so a monomorphic call site skips the lookup.
+// classMemberCache holds one resolved member (either a method or a callable
+// field slot) for a fixed-shape *userClass.
+type classMemberCache struct {
+	class     *userClass
+	method    *userFn
+	fieldSlot int // >= 0 when the member is a declared field holding a callable
+}
+
+// memberSite is one `receiver.name(args)` call site. Because classes have a
+// fixed shape, it caches up to four class resolutions (monomorphic hits on the
+// first pointer compare, and 2..4-way polymorphic sites avoid map lookups) as
+// well as immutable builtin kinds.
 type memberSite struct {
 	key           fieldKey
 	name          string
 	site          site
-	cachedClass   *userClass
-	cachedMethod  *userFn
+	c0            classMemberCache
+	c1            classMemberCache
+	c2            classMemberCache
+	c3            classMemberCache
 	cachedKind    uint64
 	cachedBuiltin *GoFunc
 }
 
 func (vm *Instance) newMemberSite(iFA ast.FieldAccess) *memberSite {
-	return &memberSite{key: fieldKeyOf(iFA.Rhs), name: iFA.Rhs, site: vm.at(iFA)}
+	return &memberSite{
+		key:  fieldKeyOf(iFA.Rhs),
+		name: iFA.Rhs,
+		site: vm.at(iFA),
+		c0:   classMemberCache{fieldSlot: -1},
+		c1:   classMemberCache{fieldSlot: -1},
+		c2:   classMemberCache{fieldSlot: -1},
+		c3:   classMemberCache{fieldSlot: -1},
+	}
+}
+
+func (m *memberSite) invokeClassEntry(fbr *fiber, obj Value, ci *classInstance, e classMemberCache, arguments []instruction) (Value, exception) {
+	if e.method != nil {
+		if exc := e.method.accepts(1 + len(arguments)); exc != nil {
+			return Value{}, exc.at(m.site)
+		}
+		return e.method.invokeMethod(fbr, m.site, obj, arguments)
+	}
+	if e.fieldSlot >= 0 {
+		return callValue(fbr, m.site, ci.Fields[e.fieldSlot], arguments)
+	}
+	return Value{}, memberError(m.site, m.name, obj)
 }
 
 // call calls the member on obj. A class method is placed directly into the
@@ -459,27 +491,31 @@ func (vm *Instance) newMemberSite(iFA ast.FieldAccess) *memberSite {
 // evaluated by the callee, after the receiver.
 func (m *memberSite) call(fbr *fiber, obj Value, arguments []instruction) (Value, exception) {
 	if ci, ok := obj.asClassInstance(); ok {
-		// a field holding a callable wins over a method of the same name
-		if slot, ok := ci.InstanceOf.slot(m.key.id); ok {
-			return callValue(fbr, m.site, ci.Fields[slot], arguments)
+		cls := ci.InstanceOf
+		if cls == m.c0.class {
+			return m.invokeClassEntry(fbr, obj, ci, m.c0, arguments)
 		}
-		if ci.Dynamic != nil {
-			if field, ok := ci.Dynamic[m.key.name]; ok {
-				return callValue(fbr, m.site, field, arguments)
-			}
+		if cls == m.c1.class {
+			return m.invokeClassEntry(fbr, obj, ci, m.c1, arguments)
+		}
+		if cls == m.c2.class {
+			return m.invokeClassEntry(fbr, obj, ci, m.c2, arguments)
+		}
+		if cls == m.c3.class {
+			return m.invokeClassEntry(fbr, obj, ci, m.c3, arguments)
 		}
 
-		if ci.InstanceOf != m.cachedClass {
-			m.cachedClass = ci.InstanceOf
-			m.cachedMethod = ci.InstanceOf.lookupMethod(m.key.id)
+		entry := classMemberCache{class: cls, fieldSlot: -1}
+		if slot, ok := cls.slot(m.key.id); ok {
+			entry.fieldSlot = slot
+		} else {
+			entry.method = cls.lookupMethod(m.key.id)
 		}
-		if m.cachedMethod == nil {
-			return Value{}, memberError(m.site, m.name, obj)
-		}
-		if exc := m.cachedMethod.accepts(1 + len(arguments)); exc != nil {
-			return Value{}, exc.at(m.site)
-		}
-		return m.cachedMethod.invokeMethod(fbr, m.site, obj, arguments)
+		m.c3 = m.c2
+		m.c2 = m.c1
+		m.c1 = m.c0
+		m.c0 = entry
+		return m.invokeClassEntry(fbr, obj, ci, entry, arguments)
 	}
 
 	if pkg, ok := obj.AsPackage(); ok {

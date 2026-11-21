@@ -128,7 +128,7 @@ func dumpPackage(w io.Writer, pkg *Package) {
 
 func dumpClass(w io.Writer, uc *userClass, indent string, ancestors []*funcInfoStatic) {
 	header := "class " + uc.Name
-	if uc.hasParent {
+	if uc.hasParent() {
 		if uc.Parent != nil {
 			header += " : " + uc.Parent.Name
 		} else {
@@ -145,7 +145,15 @@ func dumpClass(w io.Writer, uc *userClass, indent string, ancestors []*funcInfoS
 	} else {
 		parts := make([]string, len(uc.Fields))
 		for i, fid := range uc.Fields {
-			parts[i] = fmt.Sprintf("[%d] %s", i, fields.Lookup(fid))
+			label := fields.Lookup(fid)
+			if i >= uc.ParamCount {
+				if uc.StaticFields[i] {
+					label += " (const)"
+				} else {
+					label += " (var)"
+				}
+			}
+			parts[i] = fmt.Sprintf("[%d] %s", i, label)
 		}
 		fmt.Fprintf(w, "%s  fields: %s\n", indent, strings.Join(parts, ", "))
 	}

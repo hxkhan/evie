@@ -249,21 +249,7 @@ func (s *Session) evalContext(ctx context.Context, src *diag.Source, node ast.No
 				panic(vm.compileErrorAt(stmt, "cannot declare a class with no name"))
 			}
 			id := claim(stmt, stmt.Name)
-			args := make([]fields.ID, len(stmt.Args))
-			offsets := make(map[fields.ID]int, len(stmt.Args))
-			for i, a := range stmt.Args {
-				fid := fields.Get(a)
-				args[i] = fid
-				offsets[fid] = i
-			}
-			boxed := boxUserClass(&userClass{
-				Name:         stmt.Name,
-				def:          vm.at(stmt),
-				hasParent:    stmt.Parent != "",
-				Fields:       args,
-				FieldOffsets: offsets,
-				Methods:      make(map[fields.ID]*userFn),
-			})
+			boxed := boxUserClass(newUserClass(stmt.Name, vm.at(stmt), stmt.Args))
 			pkg.globals[id] = pkgGlobal{Value: &boxed, IsPublic: true, IsStatic: true}
 		}
 	}
@@ -298,7 +284,9 @@ func (s *Session) evalContext(ctx context.Context, src *diag.Source, node ast.No
 		vm.compileFunction(ufn.funcInfoStatic, fn.Args, fn.Action, nil)
 	}
 
-	// 3b. Compile hoisted class inheritance and methods.
+	// 3b. Link class inheritance first, then compile class bodies ancestor-first.
+	classByPtr := map[*userClass]ast.ClassDefinition{}
+	var classOrder []*userClass
 	for _, stmt := range stmts {
 		cls, ok := stmt.(ast.ClassDefinition)
 		if !ok {
@@ -323,22 +311,27 @@ func (s *Session) evalContext(ctx context.Context, src *diag.Source, node ast.No
 			}
 			uclass.Parent = parentClass
 		}
-
-		if block, ok := cls.Action.(ast.Block); ok {
-			for _, mStmt := range block.Code {
-				mFn, isFn := mStmt.(ast.Fn)
-				if !isFn {
-					panic(vm.compileErrorAt(mStmt, "only methods ('fn') are allowed inside a class body"))
-				}
-				if mFn.Name == "" {
-					panic(vm.compileErrorAt(mFn, "a class method needs a name"))
-				}
-				if _, exists := uclass.Methods[fields.Get(mFn.Name)]; exists {
-					panic(vm.compileErrorAt(mFn, "method '%s' is declared twice on %s", mFn.Name, cls.Name))
-				}
-				uclass.Methods[fields.Get(mFn.Name)] = vm.compileClassMethod(uclass, mFn)
-			}
+		classByPtr[uclass] = cls
+		classOrder = append(classOrder, uclass)
+	}
+	compiledClasses := map[*userClass]bool{}
+	var ensureCompiled func(uc *userClass)
+	ensureCompiled = func(uc *userClass) {
+		if uc == nil || compiledClasses[uc] {
+			return
 		}
+		cls, inTurn := classByPtr[uc]
+		if !inTurn {
+			return
+		}
+		if uc.Parent != nil {
+			ensureCompiled(uc.Parent)
+		}
+		compiledClasses[uc] = true
+		vm.compileClassBody(uc, cls)
+	}
+	for _, uc := range classOrder {
+		ensureCompiled(uc)
 	}
 
 	// 4. Compile remaining statements in source order, capturing the last

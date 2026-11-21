@@ -4,13 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/internal/ds"
-	"github.com/hxkhan/evie/token"
 	"github.com/hxkhan/evie/internal/fields"
+	"github.com/hxkhan/evie/token"
 )
 
 type instruction func(fbr *fiber) (Value, exception)
@@ -413,25 +414,8 @@ func (vm *Instance) runPackage(moduleID string, units []unit) (res Value, exc ex
 				panic(vm.compileErrorAt(cls, "'%s' is declared twice in this package", cls.Name))
 			}
 
-			args := make([]fields.ID, len(cls.Args))
-			for i, a := range cls.Args {
-				args[i] = fields.Get(a)
-			}
-
-			offsets := make(map[fields.ID]int, len(args))
-			for i, fid := range args {
-				offsets[fid] = i
-			}
-
 			// create a stub for now
-			v := boxUserClass(&userClass{
-				Name:         cls.Name,
-				def:          vm.at(cls),
-				hasParent:    cls.Parent != "",
-				Fields:       args,
-				FieldOffsets: offsets,
-				Methods:      make(map[fields.ID]*userFn),
-			})
+			v := boxUserClass(newUserClass(cls.Name, vm.at(cls), cls.Args))
 			this.globals[index] = pkgGlobal{Value: &v, IsPublic: true, IsStatic: true, IsConstant: true}
 		}
 	}
@@ -492,48 +476,61 @@ func (vm *Instance) runPackage(moduleID string, units []unit) (res Value, exc ex
 		}
 	}
 
-	// 3b. initialize class methods and inheritance
+	// 3b. link class inheritance first, then compile class bodies ancestor-first
+	// so subclasses inherit parent body fields regardless of declaration order.
+	type classWork struct {
+		src *diag.Source
+		cls ast.ClassDefinition
+		uc  *userClass
+	}
+	classByPtr := map[*userClass]classWork{}
+	var classOrder []*userClass
 	for _, it := range code {
 		vm.cp.src = it.src
-		node := it.node
-		if cls, isClass := node.(ast.ClassDefinition); isClass {
-			global := this.globals[fields.Get(cls.Name)]
-			uclass := (*userClass)(global.pointer)
-
-			if cls.Parent != "" {
-				parentGlobal, exists := this.globals[fields.Get(cls.Parent)]
-				if !exists {
-					panic(vm.compileErrorAt(cls, "cannot find the parent class '%v'", cls.Parent))
-				}
-				parentClass, ok := parentGlobal.Value.asUserClass()
-				if !ok {
-					panic(vm.compileErrorAt(cls, "'%v' is %s, not a class", cls.Parent, article(*parentGlobal.Value)))
-				}
-				for p := parentClass; p != nil; p = p.Parent {
-					if p == uclass {
-						panic(vm.compileErrorAt(cls, "'%v' and '%v' inherit from each other", cls.Name, cls.Parent))
-					}
-				}
-				uclass.Parent = parentClass
-			}
-
-			if block, ok := cls.Action.(ast.Block); ok {
-				for _, stmt := range block.Code {
-					mFn, isFn := stmt.(ast.Fn)
-					if !isFn {
-						panic(vm.compileErrorAt(stmt, "only methods ('fn') are allowed inside a class body"))
-					}
-					if mFn.Name == "" {
-						panic(vm.compileErrorAt(mFn, "a class method needs a name"))
-					}
-					if _, exists := uclass.Methods[fields.Get(mFn.Name)]; exists {
-						panic(vm.compileErrorAt(mFn, "method '%s' is declared twice on %s", mFn.Name, cls.Name))
-					}
-					methodFn := vm.compileClassMethod(uclass, mFn)
-					uclass.Methods[fields.Get(mFn.Name)] = methodFn
-				}
-			}
+		cls, isClass := it.node.(ast.ClassDefinition)
+		if !isClass {
+			continue
 		}
+		global := this.globals[fields.Get(cls.Name)]
+		uclass := (*userClass)(global.pointer)
+		if cls.Parent != "" {
+			parentGlobal, exists := this.globals[fields.Get(cls.Parent)]
+			if !exists {
+				panic(vm.compileErrorAt(cls, "cannot find the parent class '%v'", cls.Parent))
+			}
+			parentClass, ok := parentGlobal.Value.asUserClass()
+			if !ok {
+				panic(vm.compileErrorAt(cls, "'%v' is %s, not a class", cls.Parent, article(*parentGlobal.Value)))
+			}
+			for p := parentClass; p != nil; p = p.Parent {
+				if p == uclass {
+					panic(vm.compileErrorAt(cls, "'%v' and '%v' inherit from each other", cls.Name, cls.Parent))
+				}
+			}
+			uclass.Parent = parentClass
+		}
+		classByPtr[uclass] = classWork{src: it.src, cls: cls, uc: uclass}
+		classOrder = append(classOrder, uclass)
+	}
+	compiledClasses := map[*userClass]bool{}
+	var ensureClassCompiled func(uc *userClass)
+	ensureClassCompiled = func(uc *userClass) {
+		if uc == nil || compiledClasses[uc] {
+			return
+		}
+		work, inPkg := classByPtr[uc]
+		if !inPkg {
+			return
+		}
+		if uc.Parent != nil {
+			ensureClassCompiled(uc.Parent)
+		}
+		compiledClasses[uc] = true
+		vm.cp.src = work.src
+		vm.compileClassBody(uc, work.cls)
+	}
+	for _, uc := range classOrder {
+		ensureClassCompiled(uc)
 	}
 
 	// 4. run the remaining initializers and statements in source order
@@ -725,6 +722,163 @@ func (vm *Instance) compileInit(pkg *Package, code []ast.Node, deferred map[stri
 	return &userFn{funcInfoStatic: info}
 }
 
+// inheritParentFields copies any body fields declared on parent (and its
+// ancestors) that are not already declared on uc, along with their constant
+// defaults and dynamic field initializers.
+func inheritParentFields(uc, parent *userClass) {
+	if parent == nil {
+		return
+	}
+	if len(uc.Defaults) < len(uc.Fields)-uc.ParamCount {
+		grown := make([]Value, len(uc.Fields)-uc.ParamCount)
+		copy(grown, uc.Defaults)
+		uc.Defaults = grown
+	}
+	for i := parent.ParamCount; i < len(parent.Fields); i++ {
+		fid := parent.Fields[i]
+		if _, exists := uc.FieldOffsets[fid]; exists {
+			continue
+		}
+		slot := len(uc.Fields)
+		uc.Fields = append(uc.Fields, fid)
+		uc.StaticFields = append(uc.StaticFields, parent.StaticFields[i])
+		uc.FieldOffsets[fid] = slot
+		var def Value
+		if di := i - parent.ParamCount; di < len(parent.Defaults) {
+			def = parent.Defaults[di]
+		}
+		uc.Defaults = append(uc.Defaults, def)
+	}
+	if len(parent.FieldInits) > 0 {
+		uc.FieldInits = append(uc.FieldInits, parent.FieldInits...)
+	}
+}
+
+// compileClassBody registers body field declarations, inherits parent body
+// fields, compiles any dynamic body field initializers, and compiles methods.
+func (vm *Instance) compileClassBody(uclass *userClass, cls ast.ClassDefinition) (hasCaptures bool) {
+	var bodyDecls []ast.Decl
+	var methodNodes []ast.Fn
+
+	if block, ok := cls.Action.(ast.Block); ok {
+		for _, stmt := range block.Code {
+			switch s := stmt.(type) {
+			case ast.Decl:
+				fid := fields.Get(s.Name)
+				if _, exists := uclass.FieldOffsets[fid]; exists {
+					panic(vm.compileErrorAt(s, "field '%s' is declared twice on %s", s.Name, cls.Name))
+				}
+				slot := len(uclass.Fields)
+				uclass.Fields = append(uclass.Fields, fid)
+				uclass.StaticFields = append(uclass.StaticFields, s.IsStatic)
+				uclass.FieldOffsets[fid] = slot
+				bodyDecls = append(bodyDecls, s)
+			case ast.Fn:
+				if s.Name == "" {
+					panic(vm.compileErrorAt(s, "a class method needs a name"))
+				}
+				methodNodes = append(methodNodes, s)
+			default:
+				panic(vm.compileErrorAt(stmt, "only methods ('fn') and field declarations are allowed inside a class body"))
+			}
+		}
+	}
+
+	// Ensure Defaults has one entry per own body field before inheriting parent fields.
+	uclass.Defaults = make([]Value, len(uclass.Fields)-uclass.ParamCount)
+	inheritParentFields(uclass, uclass.Parent)
+
+	// Separate constant body field defaults from dynamic per-instance initializers.
+	// Evaluate inside the <fields> closure so `this` resolves cleanly when checking
+	// whether a body field initializer is a compile-time constant.
+	if len(bodyDecls) > 0 {
+		var captured map[string]bool
+		for _, decl := range bodyDecls {
+			collectCapturedNames(decl.Value, &captured)
+		}
+		info := vm.newFuncInfo("<fields>", []string{"this"}, false, true)
+		info.def = uclass.def
+		cl := &closure{freeVars: ds.Set[int]{}, info: info, uclass: uclass, capturedNames: captured}
+		cl.scope.TrackSlots = vm.cp.debugInfo
+		vm.cp.closures.Push(cl)
+		cl.scope.OpenBlock()
+		cl.scope.Declare("this", true)
+
+		parentUnknown := uclass.declClosure != nil
+		parentHasDyn := uclass.Parent != nil && len(uclass.Parent.FieldInits) > 0
+
+		var steps []instruction
+		for _, decl := range bodyDecls {
+			fid := fields.Get(decl.Name)
+			slot := uclass.FieldOffsets[fid]
+			_, parentHadField := func() (int, bool) {
+				if uclass.Parent == nil {
+					return 0, false
+				}
+				return uclass.Parent.slot(fid)
+			}()
+			if !parentUnknown && (!parentHasDyn || !parentHadField) {
+				if val, ok := vm.evaluate(decl.Value).(Value); ok && val.isImmutableConstant() {
+					uclass.Defaults[slot-uclass.ParamCount] = val
+					continue
+				}
+			}
+			valInst := vm.compile(decl.Value)
+			ownSlot := slot
+			steps = append(steps, func(fbr *fiber) (Value, exception) {
+				v, exc := valInst(fbr)
+				if exc != nil {
+					return v, exc
+				}
+				ci, _ := fbr.stack[fbr.base].asClassInstance()
+				if ci.InstanceOf == uclass {
+					ci.Fields[ownSlot] = v
+					return Value{}, nil
+				}
+				if subSlot, ok := ci.InstanceOf.slot(fid); ok && subSlot >= ci.InstanceOf.ParamCount {
+					ci.Fields[subSlot] = v
+				}
+				return Value{}, nil
+			})
+		}
+
+		closed := vm.cp.closures.Pop()
+		if len(steps) > 0 {
+			info.code = func(fbr *fiber) (Value, exception) {
+				for _, step := range steps {
+					if v, exc := step(fbr); exc != nil {
+						return v, exc
+					}
+				}
+				return Value{}, nil
+			}
+			vm.closeFunction(info, closed)
+			fieldInit := &userFn{funcInfoStatic: info}
+			if len(fieldInit.captures) > 0 {
+				hasCaptures = true
+			}
+			uclass.FieldInit = fieldInit
+			uclass.FieldInits = append(uclass.FieldInits, fieldInit)
+		}
+	}
+
+	for _, mFn := range methodNodes {
+		fid := fields.Get(mFn.Name)
+		if _, isField := uclass.FieldOffsets[fid]; isField {
+			panic(vm.compileErrorAt(mFn, "cannot declare method '%s' on %s: a field with that name already exists", mFn.Name, cls.Name))
+		}
+		if _, exists := uclass.Methods[fid]; exists {
+			panic(vm.compileErrorAt(mFn, "method '%s' is declared twice on %s", mFn.Name, cls.Name))
+		}
+		methodFn := vm.compileClassMethod(uclass, mFn)
+		if len(methodFn.captures) > 0 {
+			hasCaptures = true
+		}
+		uclass.Methods[fid] = methodFn
+	}
+	return hasCaptures
+}
+
 func (vm *Instance) emitClass(cls ast.ClassDefinition) instruction {
 	if cls.Name == "" {
 		panic(vm.compileErrorAt(cls, "cannot declare a class with no name"))
@@ -736,22 +890,7 @@ func (vm *Instance) emitClass(cls ast.ClassDefinition) instruction {
 		panic(vm.compileErrorAt(cls, "double declaration of %s", cls.Name))
 	}
 
-	args := make([]fields.ID, len(cls.Args))
-	offsets := make(map[fields.ID]int, len(cls.Args))
-	for i, a := range cls.Args {
-		fid := fields.Get(a)
-		args[i] = fid
-		offsets[fid] = i
-	}
-
-	uclass := &userClass{
-		Name:         cls.Name,
-		def:          vm.at(cls),
-		hasParent:    cls.Parent != "",
-		Fields:       args,
-		FieldOffsets: offsets,
-		Methods:      make(map[fields.ID]*userFn),
-	}
+	uclass := newUserClass(cls.Name, vm.at(cls), cls.Args)
 	if vm.cp.debugInfo {
 		enclosing.info.ensureDebug().classes = append(enclosing.info.ensureDebug().classes, uclass)
 	}
@@ -778,26 +917,7 @@ func (vm *Instance) emitClass(cls ast.ClassDefinition) instruction {
 		}
 	}
 
-	hasCaptures := false
-	if block, ok := cls.Action.(ast.Block); ok {
-		for _, stmt := range block.Code {
-			mFn, isFn := stmt.(ast.Fn)
-			if !isFn {
-				panic(vm.compileErrorAt(stmt, "only methods ('fn') are allowed inside a class body"))
-			}
-			if mFn.Name == "" {
-				panic(vm.compileErrorAt(mFn, "a class method needs a name"))
-			}
-			if _, exists := uclass.Methods[fields.Get(mFn.Name)]; exists {
-				panic(vm.compileErrorAt(mFn, "method '%s' is declared twice on %s", mFn.Name, cls.Name))
-			}
-			methodFn := vm.compileClassMethod(uclass, mFn)
-			if len(methodFn.captures) > 0 {
-				hasCaptures = true
-			}
-			uclass.Methods[fields.Get(mFn.Name)] = methodFn
-		}
-	}
+	hasCaptures := vm.compileClassBody(uclass, cls)
 
 	site := vm.at(cls)
 	escapes := enclosing.needsFreshCell(cls.Name)
@@ -813,6 +933,21 @@ func (vm *Instance) emitClass(cls ast.ClassDefinition) instruction {
 			fbr.setLocal(index, boxed)
 			return Value{}, nil
 		}
+	}
+
+	bindCaptures := func(fbr *fiber, tmpl *userFn) *userFn {
+		if len(tmpl.captures) == 0 {
+			return tmpl
+		}
+		captured := make([]*Value, len(tmpl.captures))
+		for i, ref := range tmpl.captures {
+			if ref.isLocal {
+				captured[i] = fbr.getLocalByRef(ref.index)
+			} else {
+				captured[i] = fbr.getCapturedByRef(ref.index)
+			}
+		}
+		return &userFn{funcInfoStatic: tmpl.funcInfoStatic, references: captured}
 	}
 
 	return func(fbr *fiber) (Value, exception) {
@@ -832,11 +967,21 @@ func (vm *Instance) emitClass(cls ast.ClassDefinition) instruction {
 		runtimeClass := &userClass{
 			Name:         uclass.Name,
 			def:          uclass.def,
-			hasParent:    uclass.hasParent,
 			Parent:       parent,
-			Fields:       uclass.Fields,
-			FieldOffsets: uclass.FieldOffsets,
+			ParamCount:   uclass.ParamCount,
+			Fields:       slices.Clone(uclass.Fields),
+			StaticFields: slices.Clone(uclass.StaticFields),
+			Defaults:     slices.Clone(uclass.Defaults),
+			FieldOffsets: make(map[fields.ID]int, len(uclass.FieldOffsets)),
 			Methods:      make(map[fields.ID]*userFn, len(uclass.Methods)),
+		}
+		for k, v := range uclass.FieldOffsets {
+			runtimeClass.FieldOffsets[k] = v
+		}
+		if parentInst != nil && parent != nil {
+			inheritParentFields(runtimeClass, parent)
+		} else if parent != nil && len(parent.FieldInits) > 0 {
+			runtimeClass.FieldInits = append(runtimeClass.FieldInits, parent.FieldInits...)
 		}
 
 		var cell *Value
@@ -847,20 +992,13 @@ func (vm *Instance) emitClass(cls ast.ClassDefinition) instruction {
 		}
 		*cell = boxUserClass(runtimeClass)
 
+		if uclass.FieldInit != nil {
+			boundInit := bindCaptures(fbr, uclass.FieldInit)
+			runtimeClass.FieldInit = boundInit
+			runtimeClass.FieldInits = append(runtimeClass.FieldInits, boundInit)
+		}
 		for id, tmpl := range uclass.Methods {
-			if len(tmpl.captures) == 0 {
-				runtimeClass.Methods[id] = tmpl
-				continue
-			}
-			captured := make([]*Value, len(tmpl.captures))
-			for i, ref := range tmpl.captures {
-				if ref.isLocal {
-					captured[i] = fbr.getLocalByRef(ref.index)
-				} else {
-					captured[i] = fbr.getCapturedByRef(ref.index)
-				}
-			}
-			runtimeClass.Methods[id] = &userFn{funcInfoStatic: tmpl.funcInfoStatic, references: captured}
+			runtimeClass.Methods[id] = bindCaptures(fbr, tmpl)
 		}
 
 		return Value{}, nil

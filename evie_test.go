@@ -999,10 +999,13 @@ func TestClassConcurrency(t *testing.T) {
 	`
 	assertNumber(t, run(t, codeSyncedMethod), 1000)
 
-	// 4. Concurrent dynamic field and subscript assignments
+	// 4. Concurrent body field and subscript assignments
 	codeDynamicSubscript := `
 	package main
-	class Item(name) {}
+	class Item(name) {
+		var fieldA := 0
+		var fieldB := 0
+	}
 	fn worker(item, key, n) {
 		var i := 0
 		var v := 0

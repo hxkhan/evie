@@ -1,4 +1,4 @@
-package main imports("strings")
+package main
 
 fn main() {
 	base := "alpha,beta,gamma,delta,epsilon"
@@ -8,7 +8,7 @@ fn main() {
 		s := base + "," + string(i)
 		parts := s.split(",")
 		joined := parts.join("-")
-		replaced := strings.replace(joined, "beta", "BETA")
+		replaced := joined.replace("beta", "BETA")
 		if replaced.contains("gamma") {
 			total += replaced.len()
 		}

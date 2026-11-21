@@ -216,15 +216,17 @@ func (x Value) Field(name string) (Value, bool) {
 	return Value{}, false
 }
 
-// SetField sets a field of an object or of a class instance by name; a name
-// a class does not declare becomes a dynamic field, as in scripts
+// SetField sets a field of an object or a declared mutable field of a class
+// instance by name.
 func (x Value) SetField(name string, v Value) error {
 	if obj, ok := x.AsObject(); ok {
 		obj[name] = v
 		return nil
 	}
 	if ci, ok := x.asClassInstance(); ok {
-		ci.setFieldByName(name, v)
+		if exc := ci.setFieldByName(unknownSite, name, v); exc != nil {
+			return exc
+		}
 		return nil
 	}
 	return fmt.Errorf("cannot set field '%s' on %s", name, article(x))

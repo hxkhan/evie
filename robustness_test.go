@@ -236,6 +236,7 @@ func TestMemberCalls(t *testing.T) {
 		fn speak() => this.name + " makes a sound"
 	}
 	class Dog(name, trick) : Animal {
+		var extra := nil
 		fn speak() => this.name + " barks"
 	}
 	class Holder(cb) {}
@@ -275,9 +276,7 @@ func TestMemberCallsOnComputedReceivers(t *testing.T) {
 	class Other(v) {
 		fn get() => this.v * 100
 	}
-	class Wrap(get) {
-		fn get() => "method"
-	}
+	class Wrap(get) : Box {}
 	class Plain(v) {}
 	class Holder(b) {
 		fn viaField() => this.b.get()
@@ -329,6 +328,7 @@ func TestMemberCallsOnComputedReceivers(t *testing.T) {
 func TestFieldAssignmentOnComputedReceivers(t *testing.T) {
 	prelude := `package main
 	class P(v, child) {
+		var extra := 0
 		fn setChild(x) {
 			this.child.v = x
 		}
@@ -359,6 +359,7 @@ func TestFieldAssignmentOnComputedReceivers(t *testing.T) {
 	for body, want := range map[string]string{
 		`o := {a: nil}; o.a.b = 1`:          "cannot assign field 'b' on nil",
 		`o := {a: 5}; o.a.b = note("v", 1)`: "cannot assign field 'b' on number",
+		`p := P(1, P(2, nil)); p.child.nope = 9`: "class 'P' has no field 'nope'",
 	} {
 		_, err := runCode(prelude + "fn main() {\n" + strings.ReplaceAll(body, "; ", "\n") + "\n}")
 		if err == nil || !strings.Contains(err.Error(), want) {
@@ -926,11 +927,11 @@ func TestCompilerAndGrammarEdgeCases(t *testing.T) {
 		t.Fatalf("expected unary '+' type error, got %v", err)
 	}
 
-	// 4. Compile errors on invalid '?' target and non-method in class body
+	// 4. Compile errors on invalid '?' target and non-method/non-field in class body
 	for src, want := range map[string]string{
-		"package main\nfn main() { x := 1\n return x? }":       "'?' can only check a field or index access",
-		"package main\nclass Bad() { x := 1 }\nfn main() {}":  "only methods ('fn') are allowed inside a class body",
-		"package main\nclass Dup() { fn f() {}\n fn f() {} }": "method 'f' is declared twice on Dup",
+		"package main\nfn main() { x := 1\n return x? }":             "'?' can only check a field or index access",
+		"package main\nclass Bad() { return 1 }\nfn main() {}":       "only methods ('fn') and field declarations are allowed inside a class body",
+		"package main\nclass Dup() { fn f() {}\n fn f() {} }":       "method 'f' is declared twice on Dup",
 	} {
 		_, err := runCode(src)
 		if err == nil || !strings.Contains(err.Error(), want) {
@@ -1236,5 +1237,195 @@ func TestClassSuperCalls(t *testing.T) {
 		if _, err := runCode(src); err == nil || !strings.Contains(err.Error(), wantErr) {
 			t.Errorf("%q: want error containing %q, got %v", src, wantErr, err)
 		}
+	}
+}
+
+// fixed-shape classes support mutable (var) and constant (:=) body fields,
+// per-instance dynamic initializers, ancestor-first inheritance, and reject
+// undeclared or constant field mutations
+func TestFixedShapeClassesAndBodyFields(t *testing.T) {
+	// 1. Mutable & constant body fields, dynamic per-instance initializers, compound assignment, subscript access, ?
+	val := run(t, `package main
+	var seq := 0
+	fn nextId() {
+		seq += 1
+		return seq
+	}
+	class User(first, last) {
+		role := "member"
+		full := this.first + " " + this.last
+		id := nextId()
+		var email := ""
+		var score := 0
+		var tags := []
+
+		fn addScore(n) {
+			this.score += n
+		}
+		fn tag(t) {
+			this.tags.push(t)
+		}
+	}
+	fn main() {
+		a := User("Ada", "Lovelace")
+		b := User("Alan", "Turing")
+		a.email = "ada@example.com"
+		a.addScore(10)
+		a.score += 5
+		a["score"] += 2
+		a.tag("math")
+		b.tag("cs")
+		b["email"] = "alan@example.com"
+		return [
+			a.role, a.full, a.id, a.email, a.score, a.tags,
+			b.role, b.full, b.id, b.email, b.score, b.tags,
+			a.email?, a.missing?, a["role"]?, a["nope"]?,
+		]
+	}`)
+	want := `["member", "Ada Lovelace", 1, "ada@example.com", 17, ["math"], "member", "Alan Turing", 2, "alan@example.com", 0, ["cs"], true, false, true, false]`
+	if val.String() != want {
+		t.Fatalf("body fields:\ngot  %s\nwant %s", val, want)
+	}
+
+	// 2. Inheritance: parent declared after child, multi-level, overrides (constant & constructor param), and local runtime parent
+	val = run(t, `package main
+	class Child(name, tag) : Base {
+		kind := "child"
+		var extra := this.name + ":" + this.tag
+	}
+	class GrandChild(name) : Child {
+		tag := "fixed"
+		var items := [this.name]
+	}
+	class Base(name) {
+		kind := "base"
+		var tag := "dyn-" + this.name
+		var baseList := []
+		fn describe() => this.kind + "/" + this.tag + "/" + string(this.baseList.len())
+	}
+	fn makeLocal(ParentClass, prefix) {
+		class LocalSub(name) : ParentClass {
+			tag := "override"
+			var note := prefix + ":" + this.name
+		}
+		return LocalSub("Zed")
+	}
+	fn main() {
+		c := Child("A", "custom")
+		c.baseList.push(1)
+		g := GrandChild("B")
+		l := makeLocal(Base, "local")
+		l.baseList.push(9)
+		return [
+			c.describe(), c.extra,
+			g.describe(), g.kind, g.tag, g.items, g.baseList.len(),
+			l.describe(), l.note,
+		]
+	}`)
+	want = `["child/custom/1", "A:custom", "child/fixed/0", "child", "fixed", ["B"], 0, "base/override/1", "local:Zed"]`
+	if val.String() != want {
+		t.Fatalf("inheritance body fields:\ngot  %s\nwant %s", val, want)
+	}
+
+	// 3. Polymorphic 2-entry & megamorphic member call sites (methods + callable fields)
+	val = run(t, `package main
+	class A(v) { fn f(x) => this.v + x }
+	class B(v) { fn f(x) => this.v * x }
+	class C(f) {}
+	fn main() {
+		pair := [A(10), B(10), A(20), B(20)]
+		var sum2 := 0
+		for item in pair {
+			sum2 += item.f(3)
+		}
+		trio := [A(1), B(2), C(fn(x) => x + 100), A(3), B(4)]
+		var sum3 := 0
+		for item in trio {
+			sum3 += item.f(5)
+		}
+		return [sum2, sum3]
+	}`)
+	if val.String() != "[126, 149]" {
+		t.Fatalf("polymorphic memberSite: got %s, want [126, 149]", val)
+	}
+
+	// 4. Runtime errors: undeclared field (with did-you-mean) and constant field mutation
+	for src, wants := range map[string][]string{
+		`package main
+		class Person(name) { var email := "" }
+		fn main() { p := Person("A"); p.emial = "x" }`: {"class 'Person' has no field 'emial'", "did you mean 'email'?"},
+		`package main
+		class Person(name) {}
+		fn main() { p := Person("A"); p["extra"] = 1 }`: {"class 'Person' has no field 'extra'"},
+		`package main
+		class Person(name) {}
+		fn main() { p := Person("A"); p.extra += 1 }`: {"class 'Person' has no field 'extra'"},
+		`package main
+		class Person(name) { role := "user" }
+		fn main() { p := Person("A"); p.role = "admin" }`: {"cannot assign to constant field 'role' on class 'Person'"},
+		`package main
+		class Person(name) { role := "user" }
+		fn main() { p := Person("A"); p.role += "!" }`: {"cannot assign to constant field 'role' on class 'Person'"},
+		`package main
+		class Person(name) { role := "user" }
+		fn main() { p := Person("A"); p["role"] = "admin" }`: {"cannot assign to constant field 'role' on class 'Person'"},
+		`package main
+		class Person(name) { role := "user" }
+		fn main() { p := Person("A"); p["role"] += "!" }`: {"cannot assign to constant field 'role' on class 'Person'"},
+		`package main
+		class Person(name) {
+			role := "user"
+			fn promote() { this.role = "admin" }
+		}
+		fn main() { Person("A").promote() }`: {"cannot assign to constant field 'role' on class 'Person'"},
+		`package main
+		class Person(name) {
+			role := "user"
+			fn promote() { this.role += "!" }
+		}
+		fn main() { Person("A").promote() }`: {"cannot assign to constant field 'role' on class 'Person'"},
+	} {
+		code := strings.ReplaceAll(src, "; ", "\n")
+		_, err := runCode(code)
+		if err == nil {
+			t.Errorf("%q: expected error, got nil", src)
+			continue
+		}
+		formatted := evie.Format(err, false)
+		for _, w := range wants {
+			if !strings.Contains(formatted, w) {
+				t.Errorf("%q: want error containing %q, got:\n%s", src, w, formatted)
+			}
+		}
+	}
+
+	// 5. Compile errors: duplicate fields, field/param clash, field/method clash
+	for src, wantErr := range map[string]string{
+		"package main\nclass A() { var x := 1\n var x := 2 }\nfn main() {}": "field 'x' is declared twice on A",
+		"package main\nclass A(x) { var x := 1 }\nfn main() {}":            "field 'x' is declared twice on A",
+		"package main\nclass A(x) { fn x() {} }\nfn main() {}":             "cannot declare method 'x' on A: a field with that name already exists",
+		"package main\nclass A() { var x := 1\n fn x() {} }\nfn main() {}": "cannot declare method 'x' on A: a field with that name already exists",
+	} {
+		if _, err := runCode(src); err == nil || !strings.Contains(err.Error(), wantErr) {
+			t.Errorf("%q: want error containing %q, got %v", src, wantErr, err)
+		}
+	}
+
+	// 6. ToGo() and MarshalJSON() reflect declared constructor + body fields
+	v := run(t, `package main
+	class Item(name) {
+		kind := "book"
+		var qty := 3
+	}
+	fn main() => Item("Go")`)
+	raw, err := v.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `{"name":"Go","kind":"book","qty":3}` {
+		t.Fatalf("MarshalJSON = %s", raw)
+	}
+	if m, ok := v.ToGo().(map[string]any); !ok || m["__class"] != "Item" || m["name"] != "Go" || m["kind"] != "book" || m["qty"] != float64(3) || len(m) != 4 {
+		t.Fatalf("ToGo = %#v", v.ToGo())
 	}
 }

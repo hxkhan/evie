@@ -1,13 +1,19 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/hxkhan/evie/internal/fields"
 )
+
+// maxStringAllocBytes caps single-call string expansion in repeat/padStart/padEnd
+// to prevent untrusted scripts from triggering an out-of-memory crash.
+const maxStringAllocBytes = 64 << 20
 
 // builtinType is a type known to the runtime: it constructs values when called
 // and holds the methods of the values it describes
@@ -98,6 +104,26 @@ var typeString = newBuiltinType("string", NewFunc("string", 1, func(c Call) (Val
 	newMethod("trim", 0, func(c Call) (Value, error) {
 		return BoxString(strings.TrimSpace(c.This().mustString())), nil
 	}),
+	newMethod("trimStart", 0, func(c Call) (Value, error) {
+		return BoxString(strings.TrimLeftFunc(c.This().mustString(), unicode.IsSpace)), nil
+	}),
+	newMethod("trimEnd", 0, func(c Call) (Value, error) {
+		return BoxString(strings.TrimRightFunc(c.This().mustString(), unicode.IsSpace)), nil
+	}),
+	newMethod("trimPrefix", 1, func(c Call) (Value, error) {
+		prefix, err := c.String(1)
+		if err != nil {
+			return Value{}, err
+		}
+		return BoxString(strings.TrimPrefix(c.This().mustString(), prefix)), nil
+	}),
+	newMethod("trimSuffix", 1, func(c Call) (Value, error) {
+		suffix, err := c.String(1)
+		if err != nil {
+			return Value{}, err
+		}
+		return BoxString(strings.TrimSuffix(c.This().mustString(), suffix)), nil
+	}),
 	newMethod("toLower", 0, func(c Call) (Value, error) {
 		return BoxString(strings.ToLower(c.This().mustString())), nil
 	}),
@@ -125,17 +151,129 @@ var typeString = newBuiltinType("string", NewFunc("string", 1, func(c Call) (Val
 		}
 		return BoxBool(strings.HasSuffix(c.This().mustString(), suffix)), nil
 	}),
+	newMethod("index", 1, func(c Call) (Value, error) {
+		sub, err := c.String(1)
+		if err != nil {
+			return Value{}, err
+		}
+		s := c.This().mustString()
+		return BoxNumber(float64(runeIndex(s, strings.Index(s, sub)))), nil
+	}),
+	newMethod("lastIndex", 1, func(c Call) (Value, error) {
+		sub, err := c.String(1)
+		if err != nil {
+			return Value{}, err
+		}
+		s := c.This().mustString()
+		return BoxNumber(float64(runeIndex(s, strings.LastIndex(s, sub)))), nil
+	}),
+	newMethod("count", 1, func(c Call) (Value, error) {
+		sub, err := c.String(1)
+		if err != nil {
+			return Value{}, err
+		}
+		return BoxNumber(float64(strings.Count(c.This().mustString(), sub))), nil
+	}),
+	newMethod("replace", 2, func(c Call) (Value, error) {
+		oldStr, err := c.String(1)
+		if err != nil {
+			return Value{}, err
+		}
+		newStr, err := c.String(2)
+		if err != nil {
+			return Value{}, err
+		}
+		return BoxString(strings.ReplaceAll(c.This().mustString(), oldStr, newStr)), nil
+	}),
+	newMethod("replaceFirst", 2, func(c Call) (Value, error) {
+		oldStr, err := c.String(1)
+		if err != nil {
+			return Value{}, err
+		}
+		newStr, err := c.String(2)
+		if err != nil {
+			return Value{}, err
+		}
+		return BoxString(strings.Replace(c.This().mustString(), oldStr, newStr, 1)), nil
+	}),
+	newMethod("repeat", 1, func(c Call) (Value, error) {
+		n, err := c.Int(1)
+		if err != nil {
+			return Value{}, err
+		}
+		if n < 0 {
+			return Value{}, errors.New("repeat: the count must not be negative")
+		}
+		s := c.This().mustString()
+		if len(s) > 0 && n > maxStringAllocBytes/len(s) {
+			return Value{}, fmt.Errorf("repeat: result exceeds maximum string size (%d bytes)", maxStringAllocBytes)
+		}
+		return BoxString(strings.Repeat(s, n)), nil
+	}),
+	newMethod("reverse", 0, func(c Call) (Value, error) {
+		runes := []rune(c.This().mustString())
+		for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+			runes[i], runes[j] = runes[j], runes[i]
+		}
+		return BoxString(string(runes)), nil
+	}),
+	newMethod("padStart", 2, func(c Call) (Value, error) {
+		width, err := c.Int(1)
+		if err != nil {
+			return Value{}, err
+		}
+		pad, err := c.String(2)
+		if err != nil {
+			return Value{}, err
+		}
+		s := c.This().mustString()
+		p, err := stringPadding(s, width, pad)
+		if err != nil {
+			return Value{}, err
+		}
+		return BoxString(p + s), nil
+	}),
+	newMethod("padEnd", 2, func(c Call) (Value, error) {
+		width, err := c.Int(1)
+		if err != nil {
+			return Value{}, err
+		}
+		pad, err := c.String(2)
+		if err != nil {
+			return Value{}, err
+		}
+		s := c.This().mustString()
+		p, err := stringPadding(s, width, pad)
+		if err != nil {
+			return Value{}, err
+		}
+		return BoxString(s + p), nil
+	}),
 	newMethod("split", 1, func(c Call) (Value, error) {
 		sep, err := c.String(1)
 		if err != nil {
 			return Value{}, err
 		}
-		parts := strings.Split(c.This().mustString(), sep)
-		result := make([]Value, len(parts))
-		for i, part := range parts {
-			result[i] = BoxString(part)
+		return BoxArray(boxStrings(strings.Split(c.This().mustString(), sep))), nil
+	}),
+	newMethod("fields", 0, func(c Call) (Value, error) {
+		return BoxArray(boxStrings(strings.Fields(c.This().mustString()))), nil
+	}),
+	newMethod("lines", 0, func(c Call) (Value, error) {
+		s := c.This().mustString()
+		if s == "" {
+			return BoxArray(NewArray()), nil
 		}
-		return BoxArray(NewArray(result...)), nil
+		s = strings.TrimSuffix(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+		return BoxArray(boxStrings(strings.Split(s, "\n"))), nil
+	}),
+	newMethod("chars", 0, func(c Call) (Value, error) {
+		s := c.This().mustString()
+		chars := make([]Value, 0, len(s))
+		for _, r := range s {
+			chars = append(chars, BoxString(string(r)))
+		}
+		return BoxArray(NewArray(chars...)), nil
 	}),
 	newVariadicMethod("slice", 1, func(c Call) (Value, error) {
 		str := c.This().mustString()
@@ -147,6 +285,37 @@ var typeString = newBuiltinType("string", NewFunc("string", 1, func(c Call) (Val
 		return BoxString(sliceStringRunes(str, n, s, e)), nil
 	}),
 ))
+
+func boxStrings(parts []string) *Array {
+	values := make([]Value, len(parts))
+	for i, part := range parts {
+		values[i] = BoxString(part)
+	}
+	return NewArray(values...)
+}
+
+func runeIndex(s string, byteIndex int) int {
+	if byteIndex < 0 {
+		return -1
+	}
+	return utf8.RuneCountInString(s[:byteIndex])
+}
+
+func stringPadding(s string, width int, pad string) (string, error) {
+	missing := width - utf8.RuneCountInString(s)
+	if missing <= 0 || pad == "" {
+		return "", nil
+	}
+	if missing > maxStringAllocBytes/utf8.UTFMax {
+		return "", fmt.Errorf("pad: target width %d exceeds maximum string size", width)
+	}
+	padRunes := []rune(pad)
+	out := make([]rune, missing)
+	for i := range out {
+		out[i] = padRunes[i%len(padRunes)]
+	}
+	return string(out), nil
+}
 
 func sliceArgs(c Call, n int) (int, int, error) {
 	if c.Len() > 3 {

@@ -12,7 +12,7 @@ import (
 // compares the printed result
 func stdCase(t *testing.T, expr, want string) {
 	t.Helper()
-	script := fmt.Sprintf("package main imports(\"math\", \"strings\", \"fs\", \"time\")\nfn main() {\n\treturn %s\n}", expr)
+	script := fmt.Sprintf("package main imports(\"math\", \"fs\", \"time\")\nfn main() {\n\treturn %s\n}", expr)
 	got, err := runCode(script)
 	if err != nil {
 		t.Errorf("%s: %v", expr, err)
@@ -25,7 +25,7 @@ func stdCase(t *testing.T, expr, want string) {
 
 func stdFails(t *testing.T, expr, wantInError string) {
 	t.Helper()
-	script := fmt.Sprintf("package main imports(\"math\", \"strings\", \"fs\", \"time\")\nfn main() {\n\treturn %s\n}", expr)
+	script := fmt.Sprintf("package main imports(\"math\", \"fs\", \"time\")\nfn main() {\n\treturn %s\n}", expr)
 	_, err := runCode(script)
 	if err == nil {
 		t.Errorf("%s: expected an error", expr)
@@ -64,42 +64,42 @@ func TestStdMath(t *testing.T) {
 	stdFails(t, `math.randomInt(5, 1)`, "upper bound")
 }
 
-func TestStdStrings(t *testing.T) {
+func TestStringMethods(t *testing.T) {
 	for expr, want := range map[string]string{
-		`strings.split("a,b,c", ",").len()`:       "3",
-		`strings.fields("  a  b c ").len()`:       "3",
-		`strings.lines("x\ny\n").len()`:           "2",
-		`strings.contains("hello", "ell")`:        "true",
-		`strings.hasPrefix("hello", "he")`:        "true",
-		`strings.hasSuffix("hello", "lo")`:        "true",
-		`strings.index("héllo", "l")`:             "2",
-		`strings.lastIndex("hello", "l")`:         "3",
-		`strings.index("hello", "z")`:             "-1",
-		`strings.count("banana", "a")`:            "3",
-		`strings.replace("a-b-c", "-", "+")`:      "a+b+c",
-		`strings.replaceFirst("a-b-c", "-", "+")`: "a+b-c",
-		`strings.repeat("ab", 3)`:                 "ababab",
-		`strings.reverse("héllo")`:                "olléh",
-		`strings.upper("abc")`:                    "ABC",
-		`strings.lower("ABC")`:                    "abc",
-		`strings.trim("  x  ")`:                   "x",
-		`strings.trimStart("  x  ")`:              "x  ",
-		`strings.trimEnd("  x  ")`:                "  x",
-		`strings.trimPrefix("v1.2", "v")`:         "1.2",
-		`strings.trimSuffix("a.ev", ".ev")`:       "a",
-		`strings.padStart("7", 3, "0")`:           "007",
-		`strings.padEnd("ab", 5, "xy")`:           "abxyx",
-		`strings.chars("héy").len()`:              "3",
-		`strings.len("héy")`:                      "3",
-		`strings.slice("héllo", 1, 4)`:            "éll",
-		`strings.slice("héllo", 2)`:               "llo",
-		`strings.slice("héllo", -3, -1)`:          "ll",
-		`strings.parseNumber(" 2.5 ") * 2`:        "5",
+		`"a,b,c".split(",").len()`:       "3",
+		`"  a  b c ".fields().len()`:     "3",
+		`"x\ny\n".lines().len()`:         "2",
+		`"hello".contains("ell")`:        "true",
+		`"hello".startsWith("he")`:       "true",
+		`"hello".endsWith("lo")`:         "true",
+		`"héllo".index("l")`:             "2",
+		`"hello".lastIndex("l")`:         "3",
+		`"hello".index("z")`:             "-1",
+		`"banana".count("a")`:            "3",
+		`"a-b-c".replace("-", "+")`:      "a+b+c",
+		`"a-b-c".replaceFirst("-", "+")`: "a+b-c",
+		`"ab".repeat(3)`:                 "ababab",
+		`"héllo".reverse()`:              "olléh",
+		`"abc".toUpper()`:                "ABC",
+		`"ABC".toLower()`:                "abc",
+		`"  x  ".trim()`:                 "x",
+		`"  x  ".trimStart()`:            "x  ",
+		`"  x  ".trimEnd()`:              "  x",
+		`"v1.2".trimPrefix("v")`:         "1.2",
+		`"a.ev".trimSuffix(".ev")`:       "a",
+		`"7".padStart(3, "0")`:           "007",
+		`"ab".padEnd(5, "xy")`:           "abxyx",
+		`"héy".chars().len()`:            "3",
+		`"héy".len()`:                    "3",
+		`"héllo".slice(1, 4)`:            "éll",
+		`"héllo".slice(2)`:               "llo",
+		`"héllo".slice(-3, -1)`:          "ll",
+		`number(" 2.5 ") * 2`:            "5",
 	} {
 		stdCase(t, expr, want)
 	}
-	stdFails(t, `strings.parseNumber("abc")`, "not a number")
-	stdFails(t, `strings.repeat("a", -1)`, "negative")
+	stdFails(t, `number("abc")`, "cannot convert")
+	stdFails(t, `"a".repeat(-1)`, "negative")
 }
 
 func TestStdFs(t *testing.T) {
@@ -224,20 +224,33 @@ func TestStdJSON(t *testing.T) {
 		`json.encode(math.inf)`,
 		`a := []; a.push(a); json.encode(a)`,
 		`o := {}; o.self = o; json.encode(o)`,
+		`json.decode("{bad")`,
+		`json.decode("{\"a\":1,\"a\":2}")`,
+		`json.decode("1 2")`,
 	} {
 		script := "package main imports(\"json\", \"math\")\nfn main() {\n\t" + bad + "\n}"
 		if _, err := runCode(script); err == nil {
-			t.Errorf("%s: expected json.encode error, got nil", bad)
+			t.Errorf("%s: expected json error, got nil", bad)
 		}
+	}
+
+	// Verify nested decode types (booleans, floats, empty containers, null, escapes)
+	val, err = runCode(`package main imports("json")
+	fn main() {
+		d := json.decode("{\"n\":null,\"f\":false,\"pi\":3.5,\"s\":\"a\\nb\",\"empty\":[],\"obj\":{}}")
+		return [d.n == nil, d.f, d.pi * 2, d.s == "a\nb", d.empty.len(), d.obj.len()]
+	}`)
+	if err != nil || val.String() != "[true, false, 7, true, 0, 0]" {
+		t.Fatalf("json.decode types = %v, %v", val, err)
 	}
 }
 
 func TestStdHardeningGuards(t *testing.T) {
 	stdCase(t, `math.isInf(math.inf) && math.isInf(-math.inf) && !math.isInf(1)`, "true")
-	stdCase(t, "strings.trimStart(\"\u00a0hi\")", "hi")
-	stdCase(t, "strings.trimEnd(\"hi\u00a0\")", "hi")
-	stdCase(t, `strings.lines("\n").len()`, "1")
-	stdCase(t, `strings.lines("").len()`, "0")
+	stdCase(t, "\"\u00a0hi\".trimStart()", "hi")
+	stdCase(t, "\"hi\u00a0\".trimEnd()", "hi")
+	stdCase(t, `"\n".lines().len()`, "1")
+	stdCase(t, `"".lines().len()`, "0")
 
 	// Wide randomInt must not overflow/panic
 	val, err := runCode(`package main imports("math")
@@ -250,6 +263,6 @@ func TestStdHardeningGuards(t *testing.T) {
 	}
 
 	stdFails(t, `math.clamp(5, 10, 0)`, "lower bound exceeds")
-	stdFails(t, `strings.repeat("a", 100000000)`, "maximum string size")
-	stdFails(t, `strings.padStart("a", 100000000, "x")`, "maximum string size")
+	stdFails(t, `"a".repeat(100000000)`, "maximum string size")
+	stdFails(t, `"a".padStart(100000000, "x")`, "maximum string size")
 }

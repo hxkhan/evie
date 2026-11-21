@@ -1,7 +1,9 @@
 package vm
 
 import (
-	"encoding/json"
+	"bytes"
+	"encoding/json/jsontext"
+	json "encoding/json/v2"
 	"fmt"
 	"math"
 	"reflect"
@@ -691,7 +693,7 @@ func (v Value) toGo(seen map[unsafe.Pointer]any) any {
 		if seen == nil {
 			seen = make(map[unsafe.Pointer]any)
 		}
-		res := make(map[string]any, len(inst.Fields)+len(inst.Dynamic)+1)
+		res := make(map[string]any, len(inst.Fields)+1)
 		seen[ptr] = res
 		defer delete(seen, ptr)
 		if inst.InstanceOf != nil {
@@ -701,9 +703,6 @@ func (v Value) toGo(seen map[unsafe.Pointer]any) any {
 					res[fields.Lookup(fid)] = inst.Fields[i].toGo(seen)
 				}
 			}
-		}
-		for f, val := range inst.Dynamic {
-			res[f] = val.toGo(seen)
 		}
 		return res
 	}
@@ -733,46 +732,37 @@ func (v Value) toGo(seen map[unsafe.Pointer]any) any {
 // synthetic metadata keys) and rejects cycles, NaN/Inf, and non-JSON values
 // such as functions, tasks, packages, errors and buffers.
 func (v Value) MarshalJSON() ([]byte, error) {
-	var b strings.Builder
-	if err := v.writeJSON(&b, nil); err != nil {
+	var buf bytes.Buffer
+	enc := jsontext.NewEncoder(&buf)
+	if err := v.encodeJSON(enc, nil); err != nil {
 		return nil, err
 	}
-	return []byte(b.String()), nil
+	return bytes.TrimSuffix(buf.Bytes(), []byte{'\n'}), nil
 }
 
-func (v Value) writeJSON(b *strings.Builder, seen map[unsafe.Pointer]bool) error {
+// MarshalJSONTo implements encoding/json/v2.MarshalerTo, streaming Evie values
+// directly into a jsontext.Encoder without intermediate Go map/slice copies.
+func (v Value) MarshalJSONTo(enc *jsontext.Encoder) error {
+	return v.encodeJSON(enc, nil)
+}
+
+func (v Value) encodeJSON(enc *jsontext.Encoder, seen map[unsafe.Pointer]bool) error {
 	switch v.pointer {
 	case nil:
-		b.WriteString("null")
-		return nil
+		return enc.WriteToken(jsontext.Null)
 	case boolType:
-		if v.scalar == 0 {
-			b.WriteString("false")
-		} else {
-			b.WriteString("true")
-		}
-		return nil
+		return enc.WriteToken(jsontext.Bool(v.scalar != 0))
 	case f64Type:
 		f := math.Float64frombits(v.scalar)
 		if math.IsNaN(f) || math.IsInf(f, 0) {
 			return fmt.Errorf("cannot encode non-finite number (%v) as JSON", f)
 		}
-		data, err := json.Marshal(f)
-		if err != nil {
-			return err
-		}
-		b.Write(data)
-		return nil
+		return enc.WriteToken(jsontext.Float(f))
 	}
 
 	switch v.scalar {
 	case kindString:
-		data, err := json.Marshal(*(*string)(v.pointer))
-		if err != nil {
-			return err
-		}
-		b.Write(data)
-		return nil
+		return enc.WriteToken(jsontext.String(*(*string)(v.pointer)))
 
 	case kindArray:
 		arr := (*Array)(v.pointer)
@@ -786,17 +776,15 @@ func (v Value) writeJSON(b *strings.Builder, seen map[unsafe.Pointer]bool) error
 		seen[ptr] = true
 		defer delete(seen, ptr)
 
-		b.WriteByte('[')
-		for i, elem := range arr.Data {
-			if i > 0 {
-				b.WriteByte(',')
-			}
-			if err := elem.writeJSON(b, seen); err != nil {
+		if err := enc.WriteToken(jsontext.BeginArray); err != nil {
+			return err
+		}
+		for _, elem := range arr.Data {
+			if err := elem.encodeJSON(enc, seen); err != nil {
 				return err
 			}
 		}
-		b.WriteByte(']')
-		return nil
+		return enc.WriteToken(jsontext.EndArray)
 
 	case kindObject:
 		obj := *(*map[string]Value)(v.pointer)
@@ -811,23 +799,18 @@ func (v Value) writeJSON(b *strings.Builder, seen map[unsafe.Pointer]bool) error
 			seen[ptr] = true
 			defer delete(seen, ptr)
 		}
-		b.WriteByte('{')
-		for i, k := range sortedKeys(obj) {
-			if i > 0 {
-				b.WriteByte(',')
-			}
-			keyJSON, err := json.Marshal(k)
-			if err != nil {
+		if err := enc.WriteToken(jsontext.BeginObject); err != nil {
+			return err
+		}
+		for _, k := range sortedKeys(obj) {
+			if err := enc.WriteToken(jsontext.String(k)); err != nil {
 				return err
 			}
-			b.Write(keyJSON)
-			b.WriteByte(':')
-			if err := obj[k].writeJSON(b, seen); err != nil {
+			if err := obj[k].encodeJSON(enc, seen); err != nil {
 				return err
 			}
 		}
-		b.WriteByte('}')
-		return nil
+		return enc.WriteToken(jsontext.EndObject)
 
 	case kindClassInstance:
 		inst := (*classInstance)(v.pointer)
@@ -841,50 +824,109 @@ func (v Value) writeJSON(b *strings.Builder, seen map[unsafe.Pointer]bool) error
 		seen[ptr] = true
 		defer delete(seen, ptr)
 
-		b.WriteByte('{')
-		first := true
-		writeEntry := func(name string, val Value) error {
-			if !first {
-				b.WriteByte(',')
-			}
-			first = false
-			keyJSON, err := json.Marshal(name)
-			if err != nil {
-				return err
-			}
-			b.Write(keyJSON)
-			b.WriteByte(':')
-			return val.writeJSON(b, seen)
+		if err := enc.WriteToken(jsontext.BeginObject); err != nil {
+			return err
 		}
 		if inst.InstanceOf != nil {
 			for i, fid := range inst.InstanceOf.Fields {
 				if i < len(inst.Fields) {
-					if err := writeEntry(fields.Lookup(fid), inst.Fields[i]); err != nil {
+					if err := enc.WriteToken(jsontext.String(fields.Lookup(fid))); err != nil {
+						return err
+					}
+					if err := inst.Fields[i].encodeJSON(enc, seen); err != nil {
 						return err
 					}
 				}
 			}
 		}
-		for _, name := range sortedKeys(inst.Dynamic) {
-			if err := writeEntry(name, inst.Dynamic[name]); err != nil {
-				return err
-			}
-		}
-		b.WriteByte('}')
-		return nil
+		return enc.WriteToken(jsontext.EndObject)
 
 	case kindHost:
+		if m, ok := v.host().val.(json.MarshalerTo); ok {
+			return m.MarshalJSONTo(enc)
+		}
 		if m, ok := v.host().val.(json.Marshaler); ok {
 			data, err := m.MarshalJSON()
 			if err != nil {
 				return err
 			}
-			b.Write(data)
-			return nil
+			return enc.WriteValue(jsontext.Value(data))
 		}
 	}
 
 	return fmt.Errorf("cannot encode value of type %s as JSON", v.TypeOf())
+}
+
+// UnmarshalJSON implements json.Unmarshaler for Evie values.
+func (v *Value) UnmarshalJSON(data []byte) error {
+	return json.Unmarshal(data, v)
+}
+
+// UnmarshalJSONFrom implements encoding/json/v2.UnmarshalerFrom, decoding JSON
+// directly into Evie values without intermediate Go map/slice allocations.
+func (v *Value) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	decoded, err := decodeJSONValue(dec)
+	if err != nil {
+		return err
+	}
+	*v = decoded
+	return nil
+}
+
+func decodeJSONValue(dec *jsontext.Decoder) (Value, error) {
+	tok, err := dec.ReadToken()
+	if err != nil {
+		return Value{}, err
+	}
+	switch tok.Kind() {
+	case 'n':
+		return Value{}, nil
+	case 't':
+		return BoxBool(true), nil
+	case 'f':
+		return BoxBool(false), nil
+	case '"':
+		return BoxString(tok.String()), nil
+	case '0':
+		f, err := tok.Float()
+		if err != nil {
+			return Value{}, err
+		}
+		return BoxNumber(f), nil
+	case '[':
+		var elems []Value
+		for dec.PeekKind() != ']' {
+			elem, err := decodeJSONValue(dec)
+			if err != nil {
+				return Value{}, err
+			}
+			elems = append(elems, elem)
+		}
+		if _, err := dec.ReadToken(); err != nil {
+			return Value{}, err
+		}
+		return BoxArray(NewArray(elems...)), nil
+	case '{':
+		obj := make(map[string]Value)
+		for dec.PeekKind() != '}' {
+			keyTok, err := dec.ReadToken()
+			if err != nil {
+				return Value{}, err
+			}
+			key := keyTok.String()
+			val, err := decodeJSONValue(dec)
+			if err != nil {
+				return Value{}, err
+			}
+			obj[key] = val
+		}
+		if _, err := dec.ReadToken(); err != nil {
+			return Value{}, err
+		}
+		return BoxObject(obj), nil
+	default:
+		return Value{}, fmt.Errorf("unexpected JSON token %v", tok.Kind())
+	}
 }
 
 // Unmarshal decodes the Evie Value into a Go target pointer.
@@ -893,5 +935,5 @@ func (v Value) Unmarshal(target any) error {
 	if err != nil {
 		return fmt.Errorf("evie unmarshal error: %w", err)
 	}
-	return json.Unmarshal(data, target)
+	return json.Unmarshal(data, target, json.MatchCaseInsensitiveNames(true))
 }

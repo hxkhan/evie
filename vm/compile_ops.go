@@ -151,6 +151,38 @@ func (vm *Instance) emitEcho(node ast.Echo) instruction {
 }
 
 func (vm *Instance) emitIsInstanceOf(node ast.IsInstanceOf) instruction {
+	if rhsVal, ok := vm.evaluate(node.Rhs).(Value); ok {
+		if uc, isUserClass := rhsVal.asUserClass(); isUserClass {
+			if lhsLocal, ok := vm.evaluate(node.Lhs).(local); ok {
+				return func(fbr *fiber) (Value, exception) {
+					if ci, isClassInstance := fbr.get(lhsLocal).asClassInstance(); isClassInstance {
+						for cur := ci.InstanceOf; cur != nil; cur = cur.Parent {
+							if cur == uc {
+								return BoxBool(true), nil
+							}
+						}
+					}
+					return BoxBool(false), nil
+				}
+			}
+			lhs := vm.compile(node.Lhs)
+			return func(fbr *fiber) (Value, exception) {
+				lhsVal, exc := lhs(fbr)
+				if exc != nil {
+					return lhsVal, exc
+				}
+				if ci, isClassInstance := lhsVal.asClassInstance(); isClassInstance {
+					for cur := ci.InstanceOf; cur != nil; cur = cur.Parent {
+						if cur == uc {
+							return BoxBool(true), nil
+						}
+					}
+				}
+				return BoxBool(false), nil
+			}
+		}
+	}
+
 	lhs := vm.compile(node.Lhs)
 	rhs := vm.compile(node.Rhs)
 

@@ -12,7 +12,7 @@ import (
 	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/internal/ds"
 	"github.com/hxkhan/evie/parser"
-	"github.com/hxkhan/evie/vm/fields"
+	"github.com/hxkhan/evie/internal/fields"
 )
 
 type Instance struct {
@@ -238,16 +238,6 @@ func (vm *Instance) EvalParsedSourceContext(ctx context.Context, pu ParsedUnit) 
 	vm.cp.src = pu.Source
 	defer func() { vm.cp.src = prev }()
 	return vm.evalNode(pu.Node, s)
-}
-
-// CompileSource parses and compiles a bare script (without a package header)
-// without executing it. Intended for inspection tools such as Dump.
-func (vm *Instance) CompileSource(src *diag.Source) error {
-	node, err := parser.ParseSource(src)
-	if err != nil {
-		return err
-	}
-	return vm.CompileParsedSource(ParsedUnit{Source: src, Node: node})
 }
 
 // CompileParsedSource compiles an already-parsed bare script without executing

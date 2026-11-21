@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hxkhan/evie/vm/fields"
+	"github.com/hxkhan/evie/internal/fields"
 )
 
 // Dump writes a human-readable summary of every compiled package, global,

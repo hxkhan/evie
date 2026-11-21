@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/hxkhan/evie/vm/fields"
+	"github.com/hxkhan/evie/internal/fields"
 )
 
 // Package is a namespace of symbols: the globals of a compiled evie file, or

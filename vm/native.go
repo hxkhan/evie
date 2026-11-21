@@ -6,7 +6,7 @@ import (
 	"math"
 
 	"github.com/hxkhan/evie/diag"
-	"github.com/hxkhan/evie/vm/fields"
+	"github.com/hxkhan/evie/internal/fields"
 )
 
 // NativeFn is a Go function exposed to evie code. It receives its arguments

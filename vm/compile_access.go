@@ -4,7 +4,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/hxkhan/evie/ast"
-	"github.com/hxkhan/evie/vm/fields"
+	"github.com/hxkhan/evie/internal/fields"
 )
 
 func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
@@ -604,7 +604,7 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 			return val, nil
 		}
 
-		// 4. String indexing (UTF-8 runes): "héllo"[1] -> "é"
+		// 4. String indexing (UTF-8 runes): "hÃ©llo"[1] -> "Ã©"
 		if str, ok := target.AsString(); ok {
 			idxFloat, ok := indexVal.AsFloat64()
 			if !ok {

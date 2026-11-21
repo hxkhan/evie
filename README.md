@@ -219,6 +219,9 @@ cd evie
 # Build the CLI executable
 go build ./evie
 
+# Start an interactive REPL (multi-line input, persistent state, :help for commands)
+./evie
+
 # Run an example
 ./evie ./examples/fib.ev
 

@@ -201,21 +201,3 @@ func (t *Task) Result() (Value, error) {
 	}
 	return v, nil
 }
-
-// Async runs fn on its own goroutine and returns a task scripts can await,
-// for natives whose work takes a while. An error or panic from fn becomes what
-// awaiting the task throws. Prefer Call.Async inside a native so the task is
-// tied to the engine's lifecycle and cancellation context.
-func Async(fn func() (Value, error)) Value {
-	task := newTaskInstance()
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				task.reject(recovered(r))
-			}
-		}()
-		res, err := fn()
-		task.finish(res, toException(err))
-	}()
-	return boxTask(task)
-}

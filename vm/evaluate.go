@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/hxkhan/evie/ast"
-	"github.com/hxkhan/evie/vm/fields"
+	"github.com/hxkhan/evie/internal/fields"
 )
 
 // evaluate folds constants and resolves names while compiling. It returns a

@@ -10,7 +10,7 @@ import (
 	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/internal/ds"
 	"github.com/hxkhan/evie/token"
-	"github.com/hxkhan/evie/vm/fields"
+	"github.com/hxkhan/evie/internal/fields"
 )
 
 type instruction func(fbr *fiber) (Value, exception)

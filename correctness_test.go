@@ -749,21 +749,14 @@ func TestMarshalingAndReflectionSafety(t *testing.T) {
 }
 
 func TestAsyncPanicRecoveryAndCallAsync(t *testing.T) {
-	// vm.Async panic must become a catchable task error
-	panicTask := vm.Async(func() (vm.Value, error) {
-		panic("async boom")
-	})
-	eng := evie.New()
-	eng.SetStatic("pt", panicTask)
-	val, err := eng.Eval(`e := catch(await pt)
-	return e is error`)
-	if err != nil || val.String() != "true" {
-		t.Fatalf("expected caught panic error from vm.Async, got %v, %v", val, err)
-	}
-
-	// Call.Async cancels on task.cancel()
+	// Call.Async panic must become a catchable task error, and cancel must cancel ctx
 	cancelled := make(chan struct{}, 1)
 	asyncPkg := vm.NewPackage("async")
+	asyncPkg.Func("panicTask", 0, func(c vm.Call) (vm.Value, error) {
+		return c.Async(func(ctx context.Context) (vm.Value, error) {
+			panic("async boom")
+		}), nil
+	})
 	asyncPkg.Func("waitCancel", 0, func(c vm.Call) (vm.Value, error) {
 		return c.Async(func(ctx context.Context) (vm.Value, error) {
 			<-ctx.Done()
@@ -771,27 +764,29 @@ func TestAsyncPanicRecoveryAndCallAsync(t *testing.T) {
 			return vm.Value{}, context.Cause(ctx)
 		}), nil
 	})
-	eng2 := evie.New(evie.Options{Packages: []*vm.Package{asyncPkg}})
-	_, err = eng2.Eval(`package main imports("async")
+	eng := evie.New(evie.Options{Packages: []*vm.Package{asyncPkg}})
+	defer eng.Close()
+
+	_, err := eng.Eval(`package main imports("async")
 	fn main() {
+		pe := catch(await async.panicTask())
 		t := async.waitCancel()
 		t.cancel()
-		e := catch(await t)
-		return e is error
+		ce := catch(await t)
+		return [pe is error, ce is error]
 	}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := eng2.Call("main.main")
-	if err != nil || res.String() != "true" {
-		t.Fatalf("Call.Async cancel failed: %v, %v", res, err)
+	res, err := eng.Call("main.main")
+	if err != nil || res.String() != "[true, true]" {
+		t.Fatalf("Call.Async panic/cancel failed: %v, %v", res, err)
 	}
 	select {
 	case <-cancelled:
 	case <-time.After(time.Second):
 		t.Fatal("Call.Async context was not cancelled by task.cancel()")
 	}
-	eng2.Close()
 }
 
 func TestPerEngineIsolationIOAndStdlibSandbox(t *testing.T) {

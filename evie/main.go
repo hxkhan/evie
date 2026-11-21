@@ -1,5 +1,6 @@
-// Command evie runs Evie programs.
+// Command evie runs Evie programs or starts an interactive REPL.
 //
+//	evie                  start an interactive REPL
 //	evie file.ev          run a file's main function
 //	evie project/         run a project directory's main.ev
 //	evie -e 'code'        run code given on the command line
@@ -17,18 +18,15 @@ import (
 	"os/signal"
 	"runtime"
 	"runtime/debug"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/hxkhan/evie"
-	"github.com/hxkhan/evie/ast"
-	"github.com/hxkhan/evie/diag"
-	"github.com/hxkhan/evie/parser"
 	"github.com/hxkhan/evie/vm"
 )
 
 const usage = `Usage:
+  evie [flags]                         start an interactive REPL
   evie [flags] <file.ev | directory> [args...]
   evie [flags] -e <code> [args...]
 
@@ -67,8 +65,12 @@ func main() {
 	case flag.NArg() >= 1:
 		scriptArgs = flag.Args()[1:]
 	default:
-		flag.Usage()
-		os.Exit(2)
+		if *dump {
+			fmt.Fprintln(os.Stderr, "error: -dump requires a file, directory, or -e code (or use :dump inside the REPL)")
+			os.Exit(2)
+		}
+		startREPL(*inline, *timing)
+		return
 	}
 
 	eng := evie.New(evie.Options{
@@ -128,127 +130,47 @@ func main() {
 	}
 }
 
-// standard lists the standard packages -e imports when the code references them
-var standard = map[string]bool{
-	"fs":      true,
-	"io":      true,
-	"json":    true,
-	"math":    true,
-	"strings": true,
-	"time":    true,
-}
-
-// prepareInline wraps bare -e code into package main with auto-detected stdlib imports.
-func prepareInline(code string) (string, error) {
-	if parser.PeekPackageName(diag.NewSource("-e", []byte(code))) != "" {
-		return code, nil
-	}
-
-	// parse the code alone first, on the line it will have inside main, so a
-	// syntax error points into it rather than at the wrapper
-	node, err := parser.ParseSource(diag.NewSource("-e", []byte("\n"+code)))
-	if err != nil {
-		return "", err
-	}
-
-	used := collectStdImports(node)
-	imports := make([]string, 0, len(used))
-	for name := range used {
-		imports = append(imports, fmt.Sprintf("%q", name))
-	}
-	sort.Strings(imports)
-
-	// the user's code starts on line 2, column 1 or 8, so positions in errors
-	// point into it
-	header := "package main"
-	if len(imports) > 0 {
-		header += " imports(" + strings.Join(imports, ", ") + ")"
-	}
-	header += " fn main() {\n"
-
-	if block, ok := node.(ast.Block); ok && len(block.Code) == 1 && isExpression(block.Code[0]) {
-		return header + "return " + code + "\n}", nil
-	}
-	return header + code + "\n}", nil
-}
-
 // runInline runs code from the command line. A program that declares its own
-// package runs as written; anything else becomes the body of main, returning
-// its value when it is a single expression.
+// package runs as written (calling main.main with scriptArgs); anything else
+// runs in a session with automatic stdlib imports and prints its trailing
+// expression value.
 func runInline(eng *evie.Engine, code string, scriptArgs []string) (vm.Value, error) {
-	src, err := prepareInline(code)
-	if err != nil {
-		return vm.Value{}, err
+	if hasPackageHeader(code) {
+		return runSource(eng, code, scriptArgs)
 	}
-	return runSource(eng, src, scriptArgs)
+	val, _, err := eng.NewSession().Eval(code)
+	eng.Close()
+	return val, err
 }
 
 func dumpInline(eng *evie.Engine, code string) error {
-	src, err := prepareInline(code)
-	if err != nil {
+	if hasPackageHeader(code) {
+		_, err := eng.Load("-e", []byte(code))
 		return err
 	}
-	_, err = eng.Load("-e", []byte(src))
-	return err
+	return eng.NewSession().Compile(code)
 }
 
-// collectStdImports walks the parsed AST to find standard library packages
-// referenced as `pkg.member`, ignoring strings, comments, field names and
-// locally shadowed bindings.
-func collectStdImports(root ast.Node) map[string]bool {
-	used := map[string]bool{}
-	declared := map[string]bool{}
-
-	var collectDecls func(n ast.Node)
-	collectDecls = func(n ast.Node) {
-		switch n := n.(type) {
-		case ast.Block:
-			for _, s := range n.Code {
-				collectDecls(s)
+// hasPackageHeader reports whether code starts with a `package <name>` header
+// after skipping leading whitespace and line comments.
+func hasPackageHeader(code string) bool {
+	s := code
+	for {
+		s = strings.TrimLeft(s, " \t\r\n")
+		if strings.HasPrefix(s, "//") {
+			if nl := strings.IndexByte(s, '\n'); nl >= 0 {
+				s = s[nl+1:]
+				continue
 			}
-		case ast.Decl:
-			declared[n.Name] = true
-		case ast.Fn:
-			if n.Name != "" {
-				declared[n.Name] = true
-			}
-		case ast.ClassDefinition:
-			if n.Name != "" {
-				declared[n.Name] = true
-			}
-		case ast.For:
-			if n.IndexVar != "" {
-				declared[n.IndexVar] = true
-			}
-			if n.ItemVar != "" {
-				declared[n.ItemVar] = true
-			}
+			return false
 		}
+		break
 	}
-	collectDecls(root)
-
-	ast.Walk(root, func(n ast.Node) bool {
-		if fa, ok := n.(ast.FieldAccess); ok {
-			if id, ok := fa.Lhs.(ast.Ident); ok && standard[id.Name] && !declared[id.Name] {
-				used[id.Name] = true
-				return false
-			}
-		}
-		return true
-	})
-	return used
-}
-
-// isExpression reports whether a parsed top-level node has a value to print
-func isExpression(node ast.Node) bool {
-	switch node := node.(type) {
-	case ast.Decl, ast.Assign, ast.MutableBinOp, ast.Return, ast.Throw, ast.Block, ast.Echo,
-		ast.Conditional, ast.While, ast.For, ast.Switch, ast.Break, ast.Continue, ast.ClassDefinition:
+	if !strings.HasPrefix(s, "package") {
 		return false
-	case ast.Fn:
-		return node.UsedAsExpr
 	}
-	return true
+	rest := s[len("package"):]
+	return len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t' || rest[0] == '\r' || rest[0] == '\n')
 }
 
 func runSource(eng *evie.Engine, src string, scriptArgs []string) (vm.Value, error) {

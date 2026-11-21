@@ -828,7 +828,7 @@ The pieces, from most to least convenient:
 | parse a multi-file program once and run in many engines | `evie.ParseFile`, `ParseProject`, `ParseFileFS`, `ParseProjectFS` → `*evie.Bundle` with `bundle.Run(opts...)`, `eng.LoadBundle(b)`, `eng.RunBundle(b)` |
 | symbols visible without an import | `eng.SetStatic` or `evie.Options.Prelude` |
 | lend a Go value to scripts as it is | `vm.NewHostType[T]("Name")` with `Method`, `Constructor`, `Wrap` |
-| a native whose work takes a while | return `c.Async(func(ctx context.Context) (vm.Value, error) { ... })` (lifecycle-bound task), or `vm.Async` outside a native |
+| a native whose work takes a while | return `c.Async(func(ctx context.Context) (vm.Value, error) { ... })` (lifecycle-bound task) |
 | call a script function | `eng.Call("pkg.fn", goArgs...)`, or `value.Call(evieArgs...)` on a value from `eng.Lookup("pkg.fn")` |
 | run a file or a project directory | `eng.RunFile`, `eng.RunProject`, or `evie.RunFile` for a one-off |
 | read a result | `AsFloat64`, `AsString`, `AsArray`, `AsObject` and the other `As` methods, `Field(name)` / `ClassName()` on objects and class instances, `ToGo`, `Unmarshal(&target)`, `json.Marshal(val)` |

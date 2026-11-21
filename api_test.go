@@ -2,6 +2,7 @@ package evie_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -104,7 +105,7 @@ func TestPublicCallsAndTasks(t *testing.T) {
 		if err != nil {
 			return vm.Value{}, err
 		}
-		return vm.Async(func() (vm.Value, error) {
+		return c.Async(func(ctx context.Context) (vm.Value, error) {
 			if n < 0 {
 				return vm.Value{}, errors.New("negative")
 			}
@@ -112,7 +113,8 @@ func TestPublicCallsAndTasks(t *testing.T) {
 		}), nil
 	})
 	eng := evie.New(evie.Options{Packages: []*vm.Package{slow}})
-	if _, err := eng.Load("main.ev", []byte("package main imports(\"slow\")\nfn run(n) => await slow.double(n)\nfn bad() => 1 + \"x\"")); err != nil {
+	defer eng.Close()
+	if _, err := eng.Load("main.ev", []byte("package main imports(\"slow\")\nfn run(n) => await slow.double(n)\nfn start(n) => slow.double(n)\nfn bad() => 1 + \"x\"")); err != nil {
 		t.Fatal(err)
 	}
 	run, _ := eng.Lookup("main.run")
@@ -128,20 +130,24 @@ func TestPublicCallsAndTasks(t *testing.T) {
 	if err == nil {
 		t.Fatal("bad() should fail")
 	}
-	if out := evie.Format(err, false); !strings.Contains(out, "cannot apply '+'") || !strings.Contains(out, "--> main.ev:3:") {
+	if out := evie.Format(err, false); !strings.Contains(out, "cannot apply '+'") || !strings.Contains(out, "--> main.ev:4:") {
 		t.Fatalf("Format did not render the report:\n%s", out)
 	}
 	if out := evie.Format(errors.New("plain"), false); out != "error: plain\n" {
 		t.Fatalf("Format of a plain error = %q", out)
 	}
 
-	task := vm.Async(func() (vm.Value, error) { return vm.BoxString("done"), nil })
+	start, _ := eng.Lookup("main.start")
+	task, err := start.Call(vm.BoxNumber(7))
+	if err != nil {
+		t.Fatal(err)
+	}
 	tk, ok := task.AsTask()
 	if !ok {
-		t.Fatal("Async did not return a task")
+		t.Fatal("Call.Async did not return a task")
 	}
 	<-tk.Done()
-	if v, err := tk.Result(); err != nil || v.String() != "done" {
+	if v, err := tk.Result(); err != nil || v.String() != "14" {
 		t.Fatalf("Result = %v, %v", v, err)
 	}
 }

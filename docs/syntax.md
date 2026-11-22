@@ -858,7 +858,7 @@ The pieces, from most to least convenient:
 | expose a Go function | `vm.Func0`..`Func3` and the `E` variants for `(R, error)`; `vm.Reflect` for any other signature |
 | full control of arguments and errors | `pkg.Func(name, arity, func(c vm.Call) (vm.Value, error))`; mark it `Blocking` if it sleeps or waits on I/O, and watch `c.Context()` so it wakes when the script is stopped |
 | a group of functions scripts import by name | `vm.NewPackage("name")` passed in `evie.Options.Packages` |
-| sandbox stdlib, filesystem imports, or I/O per engine | `evie.Options.FS` (`embed.FS` / `io/fs.FS`, sandboxes imports), `Options.Stdlib` (allowlist), `Options.NoStdlib`, `Options.Stdin`, `Options.Stdout` |
+| sandbox stdlib, filesystem imports, or I/O per engine | `evie.Options.FS` (`embed.FS` / `io/fs.FS`; confines imports, and `fs` reads only from it and cannot write), `Options.Stdlib` (allowlist), `Options.NoStdlib`, `Options.Stdin`, `Options.Stdout` |
 | parse a multi-file program once and run in many engines | `evie.ParseFile`, `ParseProject`, `ParseFileFS`, `ParseProjectFS` → `*evie.Bundle` with `bundle.Run(opts...)`, `eng.LoadBundle(b)`, `eng.RunBundle(b)` |
 | symbols visible without an import | `eng.SetStatic` or `evie.Options.Prelude` |
 | lend a Go value to scripts as it is | `vm.NewHostType[T]("Name")` with `Method`, `Constructor`, `Wrap` |

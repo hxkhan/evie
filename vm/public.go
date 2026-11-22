@@ -45,8 +45,15 @@ func (pkg *Package) Clone() *Package {
 		origin:  pkg.origin,
 	}
 	for id, g := range pkg.globals {
+		// each global gets its own cell, so setting it in the clone leaves the
+		// original and every other clone alone
+		if g.Value != nil {
+			v := *g.Value
+			g.Value = &v
+		}
 		cp.globals[id] = g
 	}
+	cp.memberHint = pkg.memberHint
 	return cp
 }
 
@@ -112,7 +119,11 @@ func (pkg *Package) Variadic(name string, min int, fn NativeFn) *GoFunc {
 
 // Get returns a symbol's value
 func (pkg *Package) Get(name string) (value Value, exists bool) {
-	v, exists := pkg.globals[fields.Get(name)]
+	id, known := fields.Find(name) // a lookup must not intern arbitrary host strings
+	if !known {
+		return Value{}, false
+	}
+	v, exists := pkg.globals[id]
 	if !exists || v.Value == nil {
 		return Value{}, false
 	}
@@ -121,7 +132,11 @@ func (pkg *Package) Get(name string) (value Value, exists bool) {
 
 // Has reports whether a symbol exists
 func (pkg *Package) Has(name string) bool {
-	_, exists := pkg.globals[fields.Get(name)]
+	id, known := fields.Find(name)
+	if !known {
+		return false
+	}
+	_, exists := pkg.globals[id]
 	return exists
 }
 

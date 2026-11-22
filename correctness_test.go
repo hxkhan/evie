@@ -811,6 +811,7 @@ func TestPerEngineIsolationIOAndStdlibSandbox(t *testing.T) {
 		b := io.readln()
 		c := io.readln()
 		io.println("hi", a, b)
+		echo "echoed"
 		return [a, b, c == nil]
 	}`)
 	if err != nil {
@@ -824,7 +825,7 @@ func TestPerEngineIsolationIOAndStdlibSandbox(t *testing.T) {
 	if res.String() != `["Alice", "last line", true]` {
 		t.Fatalf("unexpected io result: %s", res.String())
 	}
-	if out.String() != "Name: hi Alice last line\n" {
+	if out.String() != "Name: hi Alice last line\nechoed\n" {
 		t.Fatalf("unexpected redirected stdout: %q", out.String())
 	}
 

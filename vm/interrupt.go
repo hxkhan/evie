@@ -178,10 +178,12 @@ func (st *stops) forLoading() *stopper {
 }
 
 // loadingUnder makes s the stopper of the load in progress until the returned
-// function restores the previous one; a nil s keeps the current one. The
-// runner must be held.
+// function restores the previous one. A nil s keeps the current one, and so
+// does the instance's plain stopper, which is what a load bound to a context
+// that is never done gets: a package imported by a load with a deadline must
+// stop with that deadline. The runner must be held.
 func (st *stops) loadingUnder(s *stopper) (restore func()) {
-	if s == nil {
+	if s == nil || (st.loading != nil && s == st.current.Load()) {
 		return func() {}
 	}
 	prev := st.loading

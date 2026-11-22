@@ -40,7 +40,7 @@ var stdlib = map[string]func() *vm.Package{
 // Options configures an Engine. The zero value gives the standard library,
 // relative imports resolved against the entry file, and no host packages.
 type Options struct {
-	FS       iofs.FS                                // filesystem for file/project loading and relative imports; defaults to the OS filesystem (and sandboxes imports within FS)
+	FS       iofs.FS                                // filesystem for file/project loading, relative imports and the fs package, which can then only read from it; defaults to the OS filesystem
 	NoStdlib bool                                   // do not offer the standard library packages
 	Stdlib   []string                               // when non-empty, only allow these standard library packages (e.g. "math", "json")
 	Packages []*vm.Package                          // host packages, importable by their names
@@ -49,7 +49,7 @@ type Options struct {
 	Prelude  *vm.Package                            // symbols visible to every script without an import
 	Args     []string                               // arguments passed to main when it accepts parameters
 	Stdin    goio.Reader                            // standard input for the io package; defaults to os.Stdin
-	Stdout   goio.Writer                            // standard output for the io package; defaults to os.Stdout
+	Stdout   goio.Writer                            // standard output for the io package and echo; defaults to os.Stdout
 
 	Debug Debug // switches for working on Evie itself
 }
@@ -107,6 +107,7 @@ func New(opts ...Options) *Engine {
 	e.vm = vm.New(vm.Options{
 		Resolver:        e.resolve,
 		Prelude:         opt.Prelude,
+		Stdout:          opt.Stdout,
 		DebugInfo:       opt.Debug.DebugInfo,
 		DisableInlining: opt.Debug.NoFastPaths || testWithoutFastPaths,
 	})

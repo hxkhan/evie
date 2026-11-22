@@ -138,6 +138,7 @@ func (vm *Instance) emitStringTemplate(node ast.StringTemplate) instruction {
 
 func (vm *Instance) emitEcho(node ast.Echo) instruction {
 	what := vm.compile(node.Value)
+	out := vm.rt.stdout // the engine's standard output, not the process's
 
 	return func(fbr *fiber) (Value, exception) {
 		v, err := what(fbr)
@@ -145,7 +146,7 @@ func (vm *Instance) emitEcho(node ast.Echo) instruction {
 			return v, err
 		}
 
-		fmt.Println(v)
+		fmt.Fprintln(out, v)
 		return Value{}, nil
 	}
 }

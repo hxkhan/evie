@@ -122,3 +122,18 @@ func FuzzParse(f *testing.F) {
 		}
 	})
 }
+
+// the parsed program does not share memory with the caller's buffer, so the
+// caller may reuse it
+func TestParseDoesNotAliasInput(t *testing.T) {
+	buf := []byte(`hello := "world"`)
+	node, err := parser.Parse(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := node.(interface{ String() string }).String()
+	copy(buf, `HELLO := "WORLD"`)
+	if after := node.(interface{ String() string }).String(); after != before {
+		t.Fatalf("changing the input buffer changed the parsed program: %q became %q", before, after)
+	}
+}

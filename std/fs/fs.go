@@ -5,15 +5,41 @@ package fs
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	iofs "io/fs"
 	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/hxkhan/evie/vm"
 )
 
-// Construct builds the fs package
+// Construct builds the fs package on the operating system's file system
 func Construct() *vm.Package {
+	return build(osFiles{})
+}
+
+// ConstructFS builds an fs package confined to fsys: scripts can read what fsys
+// holds and nothing else, and every function that writes fails. Paths are
+// slash-separated and relative to the root of fsys.
+func ConstructFS(fsys iofs.FS) *vm.Package {
+	return build(fsFiles{fsys})
+}
+
+// files is where the package reads and writes
+type files interface {
+	readFile(name string) ([]byte, error)
+	stat(name string) (iofs.FileInfo, error)
+	readDir(name string) ([]iofs.DirEntry, error)
+	writeFile(name string, data []byte) error
+	appendFile(name string, data []byte) error
+	mkdir(name string) error
+	remove(name string) error
+	rename(from, to string) error
+}
+
+func build(files files) *vm.Package {
 	pkg := vm.NewPackage("fs")
 	blocking := func(name string, arity int, fn vm.NativeFn) {
 		pkg.Func(name, arity, func(c vm.Call) (vm.Value, error) {
@@ -23,81 +49,57 @@ func Construct() *vm.Package {
 			return fn(c)
 		}).Blocking = true
 	}
+	// onPath binds a function of one path argument
+	onPath := func(name string, fn func(path string) (vm.Value, error)) {
+		blocking(name, 1, func(c vm.Call) (vm.Value, error) {
+			p, err := c.String(0)
+			if err != nil {
+				return vm.Value{}, err
+			}
+			return fn(p)
+		})
+	}
+	// withContent binds a function of a path and a string or buffer
+	withContent := func(name string, fn func(path string, data []byte) error) {
+		blocking(name, 2, func(c vm.Call) (vm.Value, error) {
+			p, err := c.String(0)
+			if err != nil {
+				return vm.Value{}, err
+			}
+			data, err := bytesOf(name, c.Arg(1))
+			if err != nil {
+				return vm.Value{}, err
+			}
+			return vm.Value{}, fn(p, data)
+		})
+	}
 
-	blocking("readFile", 1, func(c vm.Call) (vm.Value, error) {
-		name, err := c.String(0)
-		if err != nil {
-			return vm.Value{}, err
-		}
-		data, err := os.ReadFile(name)
+	onPath("readFile", func(p string) (vm.Value, error) {
+		data, err := files.readFile(p)
 		if err != nil {
 			return vm.Value{}, err
 		}
 		return vm.BoxBuffer(data), nil
 	})
-	blocking("readText", 1, func(c vm.Call) (vm.Value, error) {
-		name, err := c.String(0)
-		if err != nil {
-			return vm.Value{}, err
-		}
-		data, err := os.ReadFile(name)
+	onPath("readText", func(p string) (vm.Value, error) {
+		data, err := files.readFile(p)
 		if err != nil {
 			return vm.Value{}, err
 		}
 		return vm.BoxString(string(data)), nil
 	})
-	blocking("writeFile", 2, func(c vm.Call) (vm.Value, error) {
-		name, err := c.String(0)
-		if err != nil {
-			return vm.Value{}, err
-		}
-		data, err := bytesOf("writeFile", c.Arg(1))
-		if err != nil {
-			return vm.Value{}, err
-		}
-		return vm.Value{}, os.WriteFile(name, data, 0o644)
-	})
-	blocking("appendFile", 2, func(c vm.Call) (vm.Value, error) {
-		name, err := c.String(0)
-		if err != nil {
-			return vm.Value{}, err
-		}
-		data, err := bytesOf("appendFile", c.Arg(1))
-		if err != nil {
-			return vm.Value{}, err
-		}
-		f, err := os.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-		if err != nil {
-			return vm.Value{}, err
-		}
-		if _, err := f.Write(data); err != nil {
-			f.Close()
-			return vm.Value{}, err
-		}
-		return vm.Value{}, f.Close()
-	})
-	blocking("exists", 1, func(c vm.Call) (vm.Value, error) {
-		name, err := c.String(0)
-		if err != nil {
-			return vm.Value{}, err
-		}
-		_, err = os.Stat(name)
+	withContent("writeFile", files.writeFile)
+	withContent("appendFile", files.appendFile)
+	onPath("exists", func(p string) (vm.Value, error) {
+		_, err := files.stat(p)
 		return vm.BoxBool(err == nil), nil
 	})
-	blocking("isDir", 1, func(c vm.Call) (vm.Value, error) {
-		name, err := c.String(0)
-		if err != nil {
-			return vm.Value{}, err
-		}
-		info, err := os.Stat(name)
+	onPath("isDir", func(p string) (vm.Value, error) {
+		info, err := files.stat(p)
 		return vm.BoxBool(err == nil && info.IsDir()), nil
 	})
-	blocking("list", 1, func(c vm.Call) (vm.Value, error) {
-		dir, err := c.String(0)
-		if err != nil {
-			return vm.Value{}, err
-		}
-		entries, err := os.ReadDir(dir)
+	onPath("list", func(p string) (vm.Value, error) {
+		entries, err := files.readDir(p)
 		if err != nil {
 			return vm.Value{}, err
 		}
@@ -107,20 +109,8 @@ func Construct() *vm.Package {
 		}
 		return vm.BoxArray(vm.NewArray(values...)), nil
 	})
-	blocking("mkdir", 1, func(c vm.Call) (vm.Value, error) {
-		dir, err := c.String(0)
-		if err != nil {
-			return vm.Value{}, err
-		}
-		return vm.Value{}, os.MkdirAll(dir, 0o755)
-	})
-	blocking("remove", 1, func(c vm.Call) (vm.Value, error) {
-		name, err := c.String(0)
-		if err != nil {
-			return vm.Value{}, err
-		}
-		return vm.Value{}, os.RemoveAll(name)
-	})
+	onPath("mkdir", func(p string) (vm.Value, error) { return vm.Value{}, files.mkdir(p) })
+	onPath("remove", func(p string) (vm.Value, error) { return vm.Value{}, files.remove(p) })
 	blocking("rename", 2, func(c vm.Call) (vm.Value, error) {
 		from, err := c.String(0)
 		if err != nil {
@@ -130,7 +120,7 @@ func Construct() *vm.Package {
 		if err != nil {
 			return vm.Value{}, err
 		}
-		return vm.Value{}, os.Rename(from, to)
+		return vm.Value{}, files.rename(from, to)
 	})
 
 	// path helpers touch no files and do not block
@@ -150,6 +140,75 @@ func Construct() *vm.Package {
 	pkg.Native("ext", vm.Func1(func(name string) string { return filepath.Ext(filepath.FromSlash(name)) }))
 	return pkg
 }
+
+// osFiles is the operating system's file system, relative to the working directory
+type osFiles struct{}
+
+func (osFiles) readFile(name string) ([]byte, error)         { return os.ReadFile(name) }
+func (osFiles) stat(name string) (iofs.FileInfo, error)      { return os.Stat(name) }
+func (osFiles) readDir(name string) ([]iofs.DirEntry, error) { return os.ReadDir(name) }
+func (osFiles) writeFile(name string, data []byte) error     { return os.WriteFile(name, data, 0o644) }
+func (osFiles) mkdir(name string) error                      { return os.MkdirAll(name, 0o755) }
+func (osFiles) remove(name string) error                     { return os.RemoveAll(name) }
+func (osFiles) rename(from, to string) error                 { return os.Rename(from, to) }
+
+func (osFiles) appendFile(name string, data []byte) error {
+	f, err := os.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// fsFiles is a read-only view of a host-supplied file system
+type fsFiles struct{ fsys iofs.FS }
+
+// errReadOnly is what every write gets from an engine confined to a file system
+var errReadOnly = errors.New("the file system of this engine is read-only")
+
+// clean turns a script's path into a name fsys accepts: slash-separated, with
+// no leading slash and no '..' that would step outside the root
+func clean(name string) (string, error) {
+	p := path.Clean(filepath.ToSlash(name))
+	if !iofs.ValidPath(p) {
+		return "", fmt.Errorf("'%s' is outside the file system of this engine", name)
+	}
+	return p, nil
+}
+
+func (f fsFiles) readFile(name string) ([]byte, error) {
+	p, err := clean(name)
+	if err != nil {
+		return nil, err
+	}
+	return iofs.ReadFile(f.fsys, p)
+}
+
+func (f fsFiles) stat(name string) (iofs.FileInfo, error) {
+	p, err := clean(name)
+	if err != nil {
+		return nil, err
+	}
+	return iofs.Stat(f.fsys, p)
+}
+
+func (f fsFiles) readDir(name string) ([]iofs.DirEntry, error) {
+	p, err := clean(name)
+	if err != nil {
+		return nil, err
+	}
+	return iofs.ReadDir(f.fsys, p)
+}
+
+func (fsFiles) writeFile(string, []byte) error  { return errReadOnly }
+func (fsFiles) appendFile(string, []byte) error { return errReadOnly }
+func (fsFiles) mkdir(string) error              { return errReadOnly }
+func (fsFiles) remove(string) error             { return errReadOnly }
+func (fsFiles) rename(string, string) error     { return errReadOnly }
 
 // bytesOf accepts a string or a buffer as file content
 func bytesOf(fn string, content vm.Value) ([]byte, error) {

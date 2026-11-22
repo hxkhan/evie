@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
+	"os"
 	"slices"
 	"sync"
 
@@ -60,6 +62,7 @@ type runtime struct {
 	fibers       sync.Pool           // pooled fibers for this vm
 	runner       sync.Mutex          // held by the fiber that is executing evie code
 	wg           sync.WaitGroup      // wait for all fibers to complete
+	stdout       io.Writer           // where echo writes
 	stops                            // when running code has to stop
 }
 
@@ -74,6 +77,7 @@ type pkgGlobal struct {
 type Options struct {
 	Resolver PackageResolver // finds a package by import path when it is not loaded yet
 	Prelude  *Package        // symbols visible everywhere without an import; the builtin types are added to it
+	Stdout   io.Writer       // where echo writes; defaults to os.Stdout
 
 	DebugInfo       bool // record slot names, local classes and nested closures during compilation for Dump
 	DisableInlining bool // compile without the fast paths for constants, locals and known callees; for debugging the compiler
@@ -103,9 +107,13 @@ func New(opts Options) (vm *Instance) {
 		rt: runtime{
 			packages: make(map[string]*Package),
 			byName:   make(map[string]*Package),
+			stdout:   opts.Stdout,
 		},
 	}
 
+	if vm.rt.stdout == nil {
+		vm.rt.stdout = os.Stdout
+	}
 	vm.rt.fibers = sync.Pool{
 		New: func() any {
 			return newFiber(vm)
@@ -467,16 +475,17 @@ func (cp *compiler) reach(name string) (binding, error) {
 		}
 	}
 
-	// 2. check package globals
-	if cp.pkg != nil {
-		if ref, exists := cp.pkg.globals[fields.Get(name)]; exists {
+	// 2. check package globals, then 3. the prelude; a name nobody interned is in neither,
+	// and looking it up must not intern it
+	if id, known := fields.Find(name); known {
+		if cp.pkg != nil {
+			if ref, exists := cp.pkg.globals[id]; exists {
+				return ref, nil
+			}
+		}
+		if ref, exists := cp.prelude.globals[id]; exists {
 			return ref, nil
 		}
-	}
-
-	// 3. check the prelude
-	if ref, exists := cp.prelude.globals[fields.Get(name)]; exists {
-		return ref, nil
 	}
 
 	ce := compileErrorf("cannot find '%v' in this scope", name)

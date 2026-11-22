@@ -65,7 +65,7 @@ Two tasks incrementing one global always end at the exact total, because fibers 
 - **Seamless Go Host Embedding**:
   - Go functions become natives through typed wrappers (`vm.Func1(goFunc)`) or reflection (`vm.Reflect(goFunc)`).
   - Bidirectional marshaling and unmarshaling into native Go structs (`val.Unmarshal(&struct)`, `json.Marshal(val)`).
-  - Per-engine stdlib sandboxing (`Options.Stdlib`, `Options.NoStdlib`), virtual/embedded filesystems (`Options.FS` with import sandboxing), and custom I/O streams (`Options.Stdin`, `Options.Stdout`).
+  - Per-engine stdlib sandboxing (`Options.Stdlib`, `Options.NoStdlib`), virtual/embedded filesystems (`Options.FS` confines imports and the `fs` package, which can then only read from it), and custom I/O streams (`Options.Stdin`, `Options.Stdout`).
   - Parse once, run anywhere: `evie.ParseProject` / `ParseProjectFS` produces an immutable `*evie.Bundle` that can be instantiated concurrently across independent engines.
   - One-line script execution (`evie.Eval(...)`).
   - Stopping runaway scripts with `Interrupt()` or a context deadline, without the script being able to catch it.

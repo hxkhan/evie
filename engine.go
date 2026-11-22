@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/hxkhan/evie/diag"
+	"github.com/hxkhan/evie/std/fs"
 	"github.com/hxkhan/evie/std/io"
 	"github.com/hxkhan/evie/vm"
 )
@@ -152,9 +153,13 @@ func (e *Engine) resolve(importPath string) (*vm.Package, error) {
 			return pkg, nil
 		}
 		var pkg *vm.Package
-		if importPath == "io" && (e.opts.Stdin != nil || e.opts.Stdout != nil) {
+		switch {
+		case importPath == "io" && (e.opts.Stdin != nil || e.opts.Stdout != nil):
 			pkg = io.ConstructWith(e.opts.Stdin, e.opts.Stdout)
-		} else {
+		case importPath == "fs" && e.opts.FS != nil:
+			// an engine confined to a file system reads only from it and writes nowhere
+			pkg = fs.ConstructFS(e.opts.FS)
+		default:
 			pkg = constructor()
 		}
 		pkg.SetID(stdID)

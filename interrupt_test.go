@@ -288,6 +288,26 @@ func TestEvalContext(t *testing.T) {
 	}
 }
 
+// a package that evaluated source imports by path, outside any bundle, runs
+// its initializers under the same context
+func TestEvalContextStopsPathImports(t *testing.T) {
+	dir := t.TempDir()
+	lib := "package lib\nfn forever() {\n\twhile true {}\n}\nvar value := forever()\n"
+	if err := os.WriteFile(filepath.Join(dir, "lib.ev"), []byte(lib), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	var err error
+	within(t, 5*time.Second, "eval", func() {
+		_, err = evie.New(evie.Options{Root: dir}).EvalContext(ctx, `package main imports("./lib")
+fn main() => lib.value`)
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected a deadline error, got %v", err)
+	}
+}
+
 // io.readln and io.prompt stop when the engine is interrupted or the call context expires
 func TestInterruptAndContextStopReadln(t *testing.T) {
 	r, w, err := os.Pipe()

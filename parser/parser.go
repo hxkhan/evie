@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"bytes"
 	"fmt"
 	"runtime"
 	"slices"
@@ -80,7 +81,7 @@ func PeekPackageName(src *diag.Source) string {
 	if name.Type != token.Word || slices.Contains(keywords, name.Literal) {
 		return ""
 	}
-	return name.Literal
+	return strings.Clone(name.Literal) // not a view into the caller's buffer
 }
 
 // Parse parses a script whose source has no name
@@ -90,7 +91,10 @@ func Parse(input []byte) (ast.Node, error) {
 
 // ParseSource parses a script; errors name the source and show its text
 func ParseSource(src *diag.Source) (node ast.Node, err error) {
-	ps := parser{Lexer: lexer.New(src.Text), src: src}
+	// the lexer hands out strings that share memory with its input, and they end up
+	// in the AST and in compiled constants; lex a private copy, so a caller reusing
+	// its buffer cannot change names or strings of the parsed program
+	ps := parser{Lexer: lexer.New(bytes.Clone(src.Text)), src: src}
 
 	defer func() {
 		if r := recover(); r != nil {

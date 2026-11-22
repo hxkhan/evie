@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -88,6 +90,48 @@ func TestFSImportSandboxBlocksEscape(t *testing.T) {
 		t.Fatalf("expected escape error for ../main.ev, got %v", err)
 	}
 }
+
+// with Options.FS the fs package reads only from that file system and cannot
+// write; it used to go straight to the host's disk
+func TestFSConfinesTheFsPackage(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(dir, "secret.txt")
+	if err := os.WriteFile(secret, []byte("TOP SECRET"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir) // the OS fs package would find secret.txt here
+
+	fsys := fstest.MapFS{
+		"main.ev":       &fstest.MapFile{Data: []byte(mainSrc)},
+		"data/note.txt": &fstest.MapFile{Data: []byte("hello")},
+	}
+	v, err := evie.New(evie.Options{FS: fsys}).RunFile("main.ev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `["hello", ["note.txt"], true, false, true, ` +
+		`"'../secret.txt' is outside the file system of this engine", ` +
+		`"the file system of this engine is read-only", "the file system of this engine is read-only"]`
+	if v.String() != want {
+		t.Fatalf("got  %s\nwant %s", v, want)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "out.txt")); data != nil {
+		t.Fatal("a confined script wrote to the host's disk")
+	}
+}
+
+const mainSrc = `package main imports("fs")
+fn main() => [
+	fs.readText("data/note.txt"),
+	fs.list("data"),
+	fs.isDir("data"),
+	fs.exists("secret.txt"),
+	catch(fs.readText("secret.txt")) is error,
+	catch(fs.readText("../secret.txt")).message,
+	catch(fs.writeFile("out.txt", "x")).message,
+	catch(fs.remove("data")).message,
+]
+`
 
 func TestBundleParseOnceRunConcurrently(t *testing.T) {
 	fsys := fstest.MapFS{

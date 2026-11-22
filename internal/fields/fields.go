@@ -1,6 +1,9 @@
 package fields
 
-import "sync"
+import (
+	"strings"
+	"sync"
+)
 
 type ID int
 
@@ -22,6 +25,9 @@ func Get(name string) ID {
 	defer mu.Unlock()
 	index, exists = registryA[name]
 	if !exists {
+		// the table lives as long as the process; keep a copy, not a string that
+		// may share memory with a whole source file or a buffer the caller reuses
+		name = strings.Clone(name)
 		id := ID(len(registryA))
 		registryA[name] = id
 		registryB[id] = name

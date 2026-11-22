@@ -1,0 +1,16 @@
+package main imports("io", "time")
+
+class Greeter(name) {
+    fn greet() {
+        time.sleep(10)
+        return `Hello, {this.name}!`
+    }
+}
+
+fn main() {
+    names := ["Ada", "Grace", "Linus"]
+    tasks := names.map(fn(n) => go Greeter(n).greet())
+    for t in tasks {
+        io.println(await t)
+    }
+}

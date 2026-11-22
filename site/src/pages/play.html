@@ -1,0 +1,37 @@
+<main class="play">
+  <div class="play__toolbar" role="toolbar" aria-label="Playground">
+    <label class="select">
+      <span class="visually-hidden">Example</span>
+      <select id="example"></select>
+    </label>
+    <button id="run" class="button button--primary" type="button" disabled>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z"/></svg>
+      Run <kbd>Ctrl ↵</kbd>
+    </button>
+    <button id="stop" class="button" type="button" hidden>Stop</button>
+    <button id="share" class="button button--quiet" type="button">Share</button>
+    <span id="status" class="status" role="status">Loading Evie…</span>
+  </div>
+
+  <div class="play__panes">
+    <section class="pane pane--editor" aria-label="Code">
+      <div id="editor" class="editor"></div>
+    </section>
+
+    <section class="pane pane--output" aria-label="Output">
+      <div class="tabs" role="tablist">
+        <button id="tab-output" role="tab" aria-selected="true" aria-controls="panel-output" type="button">Output</button>
+        <button id="tab-input" role="tab" aria-selected="false" aria-controls="panel-input" type="button">Input</button>
+        <button id="clear" class="tabs__action" type="button">Clear</button>
+      </div>
+      <div id="panel-output" class="output" role="tabpanel" aria-labelledby="tab-output">
+        <p class="output__hint">Press <kbd>Ctrl ↵</kbd> or <b>Run</b>. Output, the program's result and any errors appear here.</p>
+      </div>
+      <div id="panel-input" class="input" role="tabpanel" aria-labelledby="tab-input" hidden>
+        <label for="stdin">Lines that <code>io.readln()</code> and <code>io.prompt()</code> read, in order</label>
+        <textarea id="stdin" spellcheck="false" placeholder="Ada&#10;42"></textarea>
+        <p class="small">The <code>fs</code> package reads a small file system that holds <code>hello.txt</code> and <code>data/nums.json</code>, and cannot write.</p>
+      </div>
+    </section>
+  </div>
+</main>

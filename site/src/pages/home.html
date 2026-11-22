@@ -1,0 +1,77 @@
+<main class="home">
+  <section class="hero">
+    <div class="hero__text">
+      <p class="eyebrow">A scripting language for Go programs</p>
+      <h1>Small, fast, and safe by default.</h1>
+      <p class="lede">Evie is a dynamically typed language written in pure Go. Bindings are immutable unless you say otherwise, tasks run as cooperative fibers you can await, and a Go program can embed it in a few lines.</p>
+      <div class="actions">
+        <a class="button button--primary" href="{{base}}play/">Open the playground</a>
+        <a class="button" href="{{base}}docs/">Read the guide</a>
+      </div>
+      <p class="install"><span class="install__label">Install the CLI</span><code>go install github.com/hxkhan/evie/evie@latest</code></p>
+    </div>
+    <figure class="hero__code code-card">
+      <figcaption><span>greet.ev</span><a href="{{base}}play/#example=hero">Run it</a></figcaption>
+      <pre class="code" data-sample="hero.ev"></pre>
+    </figure>
+  </section>
+
+  <section class="features" aria-labelledby="features-title">
+    <h2 id="features-title" class="section-title">What it feels like</h2>
+    <div class="feature-grid">
+      <article class="feature">
+        <h3>Immutable unless you ask</h3>
+        <p><code>x := 10</code> can never change. <code>var x := 10</code> can. Mistakes surface at compile time, not three calls later.</p>
+      </article>
+      <article class="feature">
+        <h3>Tasks you can await</h3>
+        <p><code>go</code> starts a fiber and hands back a task. <code>await</code>, <code>await.all</code>, <code>await.race</code>, timeouts and cancellation are built in. One fiber runs at a time, so shared state needs no locks.</p>
+      </article>
+      <article class="feature">
+        <h3>Classes with a fixed shape</h3>
+        <p>Fields are known when the program compiles, so <code>this.x</code> is a slot, not a lookup. Single inheritance, <code>super</code>, bound methods and <code>is</code> checks.</p>
+      </article>
+      <article class="feature">
+        <h3>Errors that point at the line</h3>
+        <p>Every error shows the source with the span underlined, the call trace, and a suggestion when a name is almost right.</p>
+      </article>
+      <article class="feature">
+        <h3>Made to be embedded</h3>
+        <p>Typed wrappers turn Go functions into natives. Host types, sandboxed files, context deadlines and <code>Interrupt</code> keep scripts on a leash.</p>
+      </article>
+      <article class="feature">
+        <h3>Fast, in pure Go</h3>
+        <p>No cgo, no JIT, a closure compiler over a 16-byte value. It runs on par with Lua 5.4 and about twice as fast as V8's interpreter.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="bench" aria-labelledby="bench-title">
+    <div class="bench__text">
+      <h2 id="bench-title" class="section-title">How fast</h2>
+      <p>Geometric mean of eight checksum-verified workloads, from recursion and closures to strings and matrix math, process start included. Lower is better.</p>
+      <p class="small"><a href="{{repo}}/tree/main/benchmarks/compare">The suite and how it was measured</a></p>
+    </div>
+    <ol class="bars" aria-label="Geomean time per runtime, in milliseconds">
+      <li class="bar bar--evie" style="--v:56.8"><span class="bar__name">Evie</span><span class="bar__value">56.8 ms</span></li>
+      <li class="bar" style="--v:56.5"><span class="bar__name">Lua 5.4</span><span class="bar__value">56.5 ms</span></li>
+      <li class="bar" style="--v:83.8"><span class="bar__name">QuickJS</span><span class="bar__value">83.8 ms</span></li>
+      <li class="bar" style="--v:115.9"><span class="bar__name">Python 3</span><span class="bar__value">115.9 ms</span></li>
+      <li class="bar" style="--v:124.2"><span class="bar__name">V8 jitless</span><span class="bar__value">124.2 ms</span></li>
+      <li class="bar" style="--v:160.8"><span class="bar__name">Wren</span><span class="bar__value">160.8 ms</span></li>
+      <li class="bar" style="--v:249.9"><span class="bar__name">Tengo</span><span class="bar__value">249.9 ms</span></li>
+    </ol>
+  </section>
+
+  <section class="embed" aria-labelledby="embed-title">
+    <div class="embed__text">
+      <h2 id="embed-title" class="section-title">A few lines of Go</h2>
+      <p>Hand scripts a package of Go functions, load a program, and call into it. Arguments and results convert on the way in and out.</p>
+      <a class="button" href="{{base}}docs/go-host-embedding/">Embedding guide</a>
+    </div>
+    <figure class="code-card">
+      <figcaption><span>main.go</span></figcaption>
+      <pre class="code" data-sample="embed.go.txt"></pre>
+    </figure>
+  </section>
+</main>

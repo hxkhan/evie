@@ -2,7 +2,7 @@
 
 Evie is a lightweight, dynamically typed scripting language written in pure Go without CGO. Combining the dynamic ergonomics of JavaScript and Python with Go's simplicity and Rust's safe-by-default immutability, Evie features cooperative fibers with `go` and `await`, first-class OOP with classes and inheritance, and seamless Go host embedding.
 
-Preliminary micro-benchmarks show Evie to be faster than PUC [Lua 5.4.2](https://lua.org/) and Google's [V8 Ignition](https://v8.dev/docs/ignition) JavaScript interpreter. See [here](#benchmarks).
+On an eight-workload cross-language suite, Evie runs on par with PUC [Lua 5.4](https://lua.org/), within 1% of it overall, and about twice as fast as Google's [V8 Ignition](https://v8.dev/docs/ignition) JavaScript interpreter. See [here](#benchmarks).
 
 ---
 
@@ -27,7 +27,7 @@ Tasks spawned with `go` run as fibers of the instance and return stateful, memoi
 
 To test this program, run `go run ./evie -t ./examples/go.ev`.
 
-> The flag `-t` prints the execution time of just Evie, i.e. total time minus the time it took to compile Evie itself.
+> The flag `-t` prints how long the program took, parsing and compiling included.
 
 #### Shared state without locks ([examples/race.ev](./examples/race.ev))
 
@@ -188,16 +188,16 @@ Across the 8-workload checksum-verified [cross-language suite](./benchmarks/comp
 
 | Benchmark | **Evie** (Go) | Lua 5.4 (C) | QuickJS (C) | Python 3 (C) | V8 `--jitless` (C++) | Wren (C) | Tengo (Go) |
 | :- | -: | -: | -: | -: | -: | -: | -: |
-| `classes` | **30.1ms** | 40.5ms | 61.2ms | 72.7ms | 78.7ms | 50.9ms | 151.4ms |
-| `closures` | **33.6ms** | 36.0ms | 52.0ms | 93.1ms | 81.6ms | 78.6ms | 136.1ms |
-| `fib` | **413.3ms** | 479.6ms | 687.8ms | 926.2ms | 701.1ms | 973.5ms | 1.81s |
-| `mandelbrot` | 90.9ms | **61.5ms** | 151.8ms | 232.6ms | 179.6ms | 244.5ms | 569.0ms |
-| `matmul` | 40.4ms | **27.0ms** | 66.1ms | 85.5ms | 109.0ms | 136.7ms | 209.4ms |
-| `objects` | 37.1ms | **21.3ms** | 39.6ms | 49.8ms | 75.0ms | 64.4ms | 118.8ms |
-| `sieve` | 82.0ms | **55.1ms** | 109.7ms | 132.2ms | 129.3ms | 154.9ms | 488.6ms |
-| `strings` | **46.8ms** | 106.2ms | 54.3ms | 51.7ms | 99.8ms | 409.5ms | 101.6ms |
-| **Geomean** | **62.0ms** | **58.9ms** | **92.1ms** | **119.8ms** | **130.7ms** | **164.3ms** | **267.5ms** |
-| **vs Evie** | **1.00x** | **0.95x** | **1.49x** | **1.93x** | **2.11x** | **2.65x** | **4.31x** |
+| `classes` | **30.1ms** | 36.0ms | 46.5ms | 70.5ms | 78.2ms | 50.4ms | 140.9ms |
+| `closures` | **33.1ms** | 34.5ms | 51.1ms | 87.5ms | 82.2ms | 79.1ms | 131.0ms |
+| `fib` | **343.5ms** | 454.4ms | 646.7ms | 924.5ms | 673.6ms | 972.8ms | 1.80s |
+| `mandelbrot` | 80.3ms | **61.7ms** | 151.5ms | 231.0ms | 173.5ms | 240.9ms | 566.6ms |
+| `matmul` | 37.2ms | **26.1ms** | 59.7ms | 83.2ms | 96.2ms | 135.4ms | 205.2ms |
+| `objects` | 42.9ms | **22.2ms** | 39.3ms | 53.3ms | 72.8ms | 61.9ms | 110.6ms |
+| `sieve` | 62.1ms | **56.3ms** | 102.4ms | 134.3ms | 126.4ms | 156.4ms | 422.7ms |
+| `strings` | **39.8ms** | 91.2ms | 43.6ms | 41.5ms | 84.9ms | 364.8ms | 83.9ms |
+| **Geomean** | **56.8ms** | **56.5ms** | **83.8ms** | **115.9ms** | **124.2ms** | **160.8ms** | **249.9ms** |
+| **vs Evie** | **1.00x** | **0.99x** | **1.48x** | **2.04x** | **2.19x** | **2.83x** | **4.40x** |
 
 > Measured on an Intel i5-13400F under Windows 11 (`.\benchmarks\compare\bench.ps1 -Runs 5 -Warmup 1 -Affinity 0x0FFF`). `>1.00x` means Evie is faster.
 

@@ -15,6 +15,7 @@ package evie
 
 import (
 	"errors"
+	"fmt"
 	goio "io"
 	iofs "io/fs"
 	"path/filepath"
@@ -42,10 +43,10 @@ var stdlib = map[string]func() *vm.Package{
 type Options struct {
 	FS       iofs.FS                                // filesystem for file/project loading, relative imports and the fs package, which can then only read from it; defaults to the OS filesystem
 	NoStdlib bool                                   // do not offer the standard library packages
-	Stdlib   []string                               // when non-empty, only allow these standard library packages (e.g. "math", "json")
+	Stdlib   []string                               // when non-empty, only allow these standard library packages (e.g. "math", "json"); New panics on a name that is not one
 	Packages []*vm.Package                          // host packages, importable by their names
-	Resolve  func(path string) (*vm.Package, error) // consulted for an import before the filesystem
-	Root     string                                 // directory that relative imports resolve against; the entry file's directory when empty
+	Resolve  func(path string) (*vm.Package, error) // consulted last, for an import by name that no host, standard or loaded package answers; path imports never reach it
+	Root     string                                 // where an import that is not relative to its file, such as "lib/x", and a path import in Eval start from; the entry file's directory when empty
 	Prelude  *vm.Package                            // symbols visible to every script without an import
 	Args     []string                               // arguments passed to main when it accepts parameters
 	Stdin    goio.Reader                            // standard input for the io package; defaults to os.Stdin
@@ -83,6 +84,9 @@ func New(opts ...Options) *Engine {
 	if len(opt.Stdlib) > 0 {
 		stdAllow = make(map[string]bool, len(opt.Stdlib))
 		for _, name := range opt.Stdlib {
+			if _, ok := stdlib[name]; !ok {
+				panic(fmt.Sprintf("evie.New: Options.Stdlib names '%s', which is not a standard package", name))
+			}
 			stdAllow[name] = true
 		}
 	}

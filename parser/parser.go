@@ -215,7 +215,7 @@ func (ps *parser) parsePackage() ast.Package {
 // parseImportList parses a comma-separated list of `"path"` or `"path" as alias` entries.
 func (ps *parser) parseImportList(open token.Token) []ast.ImportSpec {
 	var imports []ast.ImportSpec
-	for {
+	ps.list(open, ")", "the import list", func() {
 		next := ps.PeekToken()
 		if next.Type != token.String {
 			ps.expected("a package name in quotes", open, "in this import list")
@@ -233,18 +233,29 @@ func (ps *parser) parseImportList(open token.Token) []ast.ImportSpec {
 			spec.Pos = next.Pos.To(alias.Pos)
 		}
 		imports = append(imports, spec)
+	})
+	return imports
+}
 
-		if ps.consume(")") {
-			break
+// list parses the comma-separated items of a list whose opening token was just
+// consumed, up to and including close; a trailing comma is allowed. what names
+// the list in errors, as in "this '(' opens the argument list".
+func (ps *parser) list(open token.Token, close, what string, item func()) {
+	if ps.consume(close) {
+		return
+	}
+	for {
+		item()
+		if ps.consume(close) {
+			return
 		}
 		if !ps.consume(",") {
-			ps.expected("',' or ')'", open, "this '(' opens the import list")
+			ps.expected(fmt.Sprintf("',' or '%s'", close), open, fmt.Sprintf("this '%s' opens %s", open.Literal, what))
 		}
-		if ps.consume(")") {
-			break
+		if ps.consume(close) {
+			return
 		}
 	}
-	return imports
 }
 
 func (ps *parser) parseFloat(tok token.Token) float64 {
@@ -663,33 +674,18 @@ func (ps *parser) parseNamesList(main token.Token, what string) ([]string, bool)
 	open := ps.last
 
 	var args []string
-	if ps.consume(")") {
-		return args, false
-	}
-
 	isVariadic := false
-	for {
+	ps.list(open, ")", what, func() {
 		if ps.consume("...") {
 			isVariadic = true
 			args = append(args, ps.name("a parameter name after '...'").Literal)
-			if !ps.consume(")") {
+			if !ps.PeekToken().IsSimple(")") {
 				ps.expected("')' after the variadic parameter", open, "this '(' opens "+what)
 			}
-			break
+			return
 		}
-
 		args = append(args, ps.name("a name").Literal)
-
-		if ps.consume(")") {
-			break
-		}
-		if !ps.consume(",") {
-			ps.expected("',' or ')'", open, "this '(' opens "+what)
-		}
-		if ps.consume(")") {
-			break
-		}
-	}
+	})
 	return args, isVariadic
 }
 
@@ -697,81 +693,36 @@ func (ps *parser) parseArgsList() []ast.Node {
 	if !ps.consume("(") {
 		ps.expected("'('", ps.last, "")
 	}
-	open := ps.last
+	return ps.parseArgs(ps.last, "the argument list")
+}
 
+// parseArgs parses call arguments after the '(' open
+func (ps *parser) parseArgs(open token.Token, what string) []ast.Node {
 	var args []ast.Node
-	if !ps.PeekToken().IsSimple(")") {
-		for {
-			args = append(args, ps.parse(0, true))
-			if !ps.consume(",") || ps.PeekToken().IsSimple(")") {
-				break
-			}
-		}
-	}
-
-	if !ps.consume(")") {
-		ps.expected("',' or ')'", open, "this '(' opens the argument list")
-	}
-
+	ps.list(open, ")", what, func() {
+		args = append(args, ps.parse(0, true))
+	})
 	return args
 }
 
 func (ps *parser) parseObject(main token.Token) ast.Node {
 	obj := ast.Object{Pos: main.Pos}
-
-	// empty object {}
-	if ps.consume("}") {
-		obj.Pos = main.Pos.To(ps.last.Pos)
-		return obj
-	}
-
-	for {
+	ps.list(main, "}", "the object", func() {
 		key := ps.name("a field name")
 		if !ps.consume(":") {
 			ps.expected(fmt.Sprintf("':' after the field name '%s'", key.Literal), main, "in this object")
 		}
-
-		value := ps.parse(0, true)
-		obj.Fields = append(obj.Fields, ast.ObjectField{Key: key.Literal, Value: value})
-
-		if ps.consume("}") {
-			break
-		}
-		if !ps.consume(",") {
-			ps.expected("',' or '}'", main, "this '{' opens the object")
-		}
-		if ps.consume("}") {
-			break
-		}
-	}
-
+		obj.Fields = append(obj.Fields, ast.ObjectField{Key: key.Literal, Value: ps.parse(0, true)})
+	})
 	obj.Pos = main.Pos.To(ps.last.Pos)
 	return obj
 }
 
 func (ps *parser) parseArrayLiteral(main token.Token) ast.Node {
 	arr := ast.ArrayLiteral{Pos: main.Pos}
-
-	// empty array []
-	if ps.consume("]") {
-		arr.Pos = main.Pos.To(ps.last.Pos)
-		return arr
-	}
-
-	for {
+	ps.list(main, "]", "the array", func() {
 		arr.Elements = append(arr.Elements, ps.parse(0, true))
-
-		if ps.consume("]") {
-			break
-		}
-		if !ps.consume(",") {
-			ps.expected("',' or ']'", main, "this '[' opens the array")
-		}
-		if ps.consume("]") {
-			break
-		}
-	}
-
+	})
 	arr.Pos = main.Pos.To(ps.last.Pos)
 	return arr
 }
@@ -992,21 +943,7 @@ func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) ast.N
 		// function call
 		if next.IsSimple("(") {
 			ps.NextToken() // consume '('
-
-			var args []ast.Node
-			// parse arguments if any
-			if !ps.PeekToken().IsSimple(")") {
-				for {
-					args = append(args, ps.parse(0, true))
-					if !ps.consume(",") || ps.PeekToken().IsSimple(")") {
-						break
-					}
-				}
-			}
-
-			if !ps.consume(")") {
-				ps.expected("',' or ')'", next, "this '(' opens the call")
-			}
+			args := ps.parseArgs(next, "the call")
 			left = ast.Call{Pos: left.Where().To(ps.last.Pos), Fn: left, Args: args}
 			continue
 		}

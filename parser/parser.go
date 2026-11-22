@@ -360,7 +360,7 @@ func (ps *parser) handleWords(main token.Token, asExpr bool, precedenceLevel int
 }
 
 func (ps *parser) parseStringTemplate(main token.Token) (st ast.StringTemplate) {
-	format := strings.Builder{}
+	var part strings.Builder // the literal text since the last interpolation
 	st.Pos = main.Pos
 
 	for {
@@ -368,22 +368,22 @@ func (ps *parser) parseStringTemplate(main token.Token) (st ast.StringTemplate) 
 			break
 		} else if ps.consume("{") {
 			lb := ps.last
+			st.Parts = append(st.Parts, part.String())
+			part.Reset()
 			st.Args = append(st.Args, ps.parse(0, true))
 			if !ps.consume("}") {
 				ps.expected("'}'", lb, "this '{' opens an interpolation")
 			}
-			format.WriteString("%s")
 		} else if ps.PeekToken().Type == token.String {
-			part := ps.NextToken()
-			text := ps.unescape(part.Literal, part.Pos, "`{}")
-			format.WriteString(strings.ReplaceAll(text, "%", "%%"))
+			text := ps.NextToken()
+			part.WriteString(ps.unescape(text.Literal, text.Pos, "`{}"))
 		} else {
 			ps.expected("the closing '`'", main, "this template string is unterminated")
 		}
 	}
 
 	st.Pos = main.Pos.To(ps.last.Pos)
-	st.Format = format.String()
+	st.Parts = append(st.Parts, part.String())
 	return st
 }
 

@@ -48,17 +48,18 @@ func (node Input[T]) String() string {
 
 type StringTemplate struct {
 	diag.Pos
-	Format string // e.g. 'Hello %s, how are you!'
-	Args   []Node
+	Parts []string // the literal text around the interpolations; one more than Args
+	Args  []Node
 }
 
 func (node StringTemplate) String() string {
-	args := make([]any, len(node.Args))
+	var b strings.Builder
+	b.WriteString(node.Parts[0])
 	for i, a := range node.Args {
-		args[i] = fmt.Sprintf("{%v}", a)
+		fmt.Fprintf(&b, "{%v}", a)
+		b.WriteString(node.Parts[i+1])
 	}
-
-	return fmt.Sprintf(node.Format, args...)
+	return b.String()
 }
 
 type Block struct {

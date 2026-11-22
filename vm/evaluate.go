@@ -1,7 +1,7 @@
 package vm
 
 import (
-	"fmt"
+	"strings"
 
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/internal/fields"
@@ -61,15 +61,17 @@ func (vm *Instance) evaluate(node ast.Node) operand {
 		}
 
 	case ast.StringTemplate:
-		params := make([]any, len(node.Args))
+		var b strings.Builder
+		b.WriteString(node.Parts[0])
 		for i, arg := range node.Args {
 			val, ok := vm.evaluate(arg).(Value)
 			if !ok {
 				return nil
 			}
-			params[i] = val
+			writeInterpolated(&b, val)
+			b.WriteString(node.Parts[i+1])
 		}
-		return BoxString(fmt.Sprintf(node.Format, params...))
+		return BoxString(b.String())
 
 	case ast.BinOp:
 		if lhs, ok := vm.evaluate(node.Lhs).(Value); ok {

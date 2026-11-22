@@ -4,6 +4,9 @@ package vm
 
 import (
 	"fmt"
+	"math"
+	"strconv"
+	"strings"
 
 	"github.com/hxkhan/evie/ast"
 )
@@ -120,19 +123,38 @@ func (vm *Instance) emitStringTemplate(node ast.StringTemplate) instruction {
 		args[i] = vm.compile(arg)
 	}
 
+	parts := node.Parts
+	size := 0
+	for _, p := range parts {
+		size += len(p)
+	}
+
 	return func(fbr *fiber) (Value, exception) {
-		params := make([]any, len(args))
-
-		for i, param := range args {
-			res, err := param(fbr)
+		var b strings.Builder
+		b.Grow(size + 8*len(args))
+		b.WriteString(parts[0])
+		for i, arg := range args {
+			v, err := arg(fbr)
 			if err != nil {
-				return res, err
+				return v, err
 			}
-
-			params[i] = res
+			writeInterpolated(&b, v)
+			b.WriteString(parts[i+1])
 		}
+		return BoxString(b.String()), nil
+	}
+}
 
-		return BoxString(fmt.Sprintf(node.Format, params...)), nil
+// writeInterpolated writes a value the way a template shows it: as its String
+func writeInterpolated(b *strings.Builder, v Value) {
+	switch {
+	case v.pointer == f64Type:
+		var buf [32]byte
+		b.Write(strconv.AppendFloat(buf[:0], math.Float64frombits(v.scalar), 'f', -1, 64))
+	case !isKnown(v.pointer) && v.scalar == kindString:
+		b.WriteString(*(*string)(v.pointer))
+	default:
+		b.WriteString(v.String())
 	}
 }
 

@@ -291,7 +291,7 @@ func handleREPLCommand(eng *evie.Engine, sess *evie.Session, line string, out, e
 }
 
 // isIncompleteInput reports whether src appears to be an unfinished multi-line
-// construct (an unclosed `{`, `(`, `[`, template string `` `...` ``, or a
+// construct (an unclosed `{`, `(`, `[`, template string between backticks, or a
 // trailing `=>` arrow). Mismatched closing delimiters return false so the
 // parser reports the syntax error immediately.
 func isIncompleteInput(src string) bool {

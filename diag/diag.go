@@ -16,8 +16,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 	"sync"
+	"unicode/utf8"
 )
 
 // Source is a script's text and the name it is reported under

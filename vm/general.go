@@ -14,8 +14,8 @@ import (
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/internal/ds"
-	"github.com/hxkhan/evie/parser"
 	"github.com/hxkhan/evie/internal/fields"
+	"github.com/hxkhan/evie/parser"
 )
 
 type Instance struct {
@@ -44,11 +44,11 @@ func (cl *closure) mayEscape(name string) bool {
 type PackageResolver func(name string) (*Package, error)
 
 type compiler struct {
-	inline    bool         // use dispatch inlining (combining instructions into one)
-	debugInfo bool         // record slot names and nested closures for Dump
-	prelude   *Package     // symbols visible to every package without an import
+	inline    bool          // use dispatch inlining (combining instructions into one)
+	debugInfo bool          // record slot names and nested closures for Dump
+	prelude   *Package      // symbols visible to every package without an import
 	registry  *sync.RWMutex // the runtime's registry lock, which also guards the prelude
-	src       *diag.Source // the source being compiled, for error positions
+	src       *diag.Source  // the source being compiled, for error positions
 
 	pkg      *Package           // the package being compiled right now
 	closures ds.Slice[*closure] // currently open closures

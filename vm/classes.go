@@ -12,13 +12,13 @@ type userClass struct {
 	Name         string
 	def          site
 	Parent       *userClass
-	ParamCount   int                // required constructor arguments (Fields[:ParamCount])
-	Fields       []fields.ID        // fixed layout: [0..ParamCount-1] constructor args, [ParamCount..] body & inherited fields
-	StaticFields []bool             // parallel to Fields: true for immutable (:=) body fields
-	Defaults     []Value            // parallel to Fields[ParamCount:]: constant default values
-	FieldInit    *userFn            // initializer for this class's own non-constant body fields (nil if all constant)
-	FieldInits   []*userFn          // ancestor-first chain of non-nil FieldInit functions to run on construction
-	FieldOffsets map[fields.ID]int  // field id -> fixed slot index
+	ParamCount   int               // required constructor arguments (Fields[:ParamCount])
+	Fields       []fields.ID       // fixed layout: [0..ParamCount-1] constructor args, [ParamCount..] body & inherited fields
+	StaticFields []bool            // parallel to Fields: true for immutable (:=) body fields
+	Defaults     []Value           // parallel to Fields[ParamCount:]: constant default values
+	FieldInit    *userFn           // initializer for this class's own non-constant body fields (nil if all constant)
+	FieldInits   []*userFn         // ancestor-first chain of non-nil FieldInit functions to run on construction
+	FieldOffsets map[fields.ID]int // field id -> fixed slot index
 	Methods      map[fields.ID]*userFn
 	declClosure  *closure // non-nil only for local classes with a runtime-resolved parent
 	declIndex    int

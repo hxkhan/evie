@@ -918,6 +918,3 @@ func TestLoaderHardening(t *testing.T) {
 		t.Fatalf("expected DeadlineExceeded on time.wait(+Inf), got %v", err)
 	}
 }
-
-
-

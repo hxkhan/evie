@@ -110,11 +110,11 @@ func TestFibersAreResetBetweenUses(t *testing.T) {
 // a function stored in an object field is called as a plain function
 func TestFunctionsInObjectFieldsAreNotMethods(t *testing.T) {
 	cases := map[string]string{
-		"fn id(this) => this\nfn main() { o := { f: id }\n return o.f(7) }":                     "7",
-		"fn main() { o := { f: fn(a, b) => a + b }\n return o.f(1, 2) }":                        "3",
-		"fn main() { o := { s: string }\n return o.s(42) }":                                     "42",
-		"fn main() { o := { k: {}.keys }\n return o.k().len() }":                                "0",
-		"class P(n) { fn get() => this.n }\nfn main() { o := { g: P(5).get }\n return o.g() }":  "5",
+		"fn id(this) => this\nfn main() { o := { f: id }\n return o.f(7) }":                    "7",
+		"fn main() { o := { f: fn(a, b) => a + b }\n return o.f(1, 2) }":                       "3",
+		"fn main() { o := { s: string }\n return o.s(42) }":                                    "42",
+		"fn main() { o := { k: {}.keys }\n return o.k().len() }":                               "0",
+		"class P(n) { fn get() => this.n }\nfn main() { o := { g: P(5).get }\n return o.g() }": "5",
 	}
 	for code, want := range cases {
 		val, err := runCode("package main\n" + code)
@@ -399,8 +399,8 @@ func TestFieldAssignmentOnComputedReceivers(t *testing.T) {
 	}
 
 	for body, want := range map[string]string{
-		`o := {a: nil}; o.a.b = 1`:          "cannot assign field 'b' on nil",
-		`o := {a: 5}; o.a.b = note("v", 1)`: "cannot assign field 'b' on number",
+		`o := {a: nil}; o.a.b = 1`:               "cannot assign field 'b' on nil",
+		`o := {a: 5}; o.a.b = note("v", 1)`:      "cannot assign field 'b' on number",
 		`p := P(1, P(2, nil)); p.child.nope = 9`: "class 'P' has no field 'nope'",
 	} {
 		_, err := runCode(prelude + "fn main() {\n" + strings.ReplaceAll(body, "; ", "\n") + "\n}")
@@ -1141,11 +1141,11 @@ func TestBareScriptAndInitLoopCaptures(t *testing.T) {
 // break and continue outside a loop or across a function boundary are rejected at compile time
 func TestBreakAndContinueValidation(t *testing.T) {
 	cases := map[string]string{
-		"package main\nfn main() { break }":                                      "break outside of a loop or switch",
-		"package main\nfn main() { continue }":                                   "continue outside of a loop",
-		"package main\nfn main() { switch 1 { case 1: continue } }":              "continue outside of a loop",
-		"package main\nfn f() { break }\nfn main() { while true { f() } }":       "break outside of a loop or switch",
-		"package main\nfn main() { while true { f := fn() { break }\n f() } }":   "break outside of a loop or switch",
+		"package main\nfn main() { break }":                                         "break outside of a loop or switch",
+		"package main\nfn main() { continue }":                                      "continue outside of a loop",
+		"package main\nfn main() { switch 1 { case 1: continue } }":                 "continue outside of a loop",
+		"package main\nfn f() { break }\nfn main() { while true { f() } }":          "break outside of a loop or switch",
+		"package main\nfn main() { while true { f := fn() { break }\n f() } }":      "break outside of a loop or switch",
 		"package main\nfn main() { for x in [1] { f := fn() { continue }\n f() } }": "continue outside of a loop",
 	}
 	for src, want := range cases {
@@ -1193,9 +1193,9 @@ func TestCompilerAndGrammarEdgeCases(t *testing.T) {
 
 	// 4. Compile errors on invalid '?' target and non-method/non-field in class body
 	for src, want := range map[string]string{
-		"package main\nfn main() { x := 1\n return x? }":             "'?' can only check a field or index access",
-		"package main\nclass Bad() { return 1 }\nfn main() {}":       "only methods ('fn') and field declarations are allowed inside a class body",
-		"package main\nclass Dup() { fn f() {}\n fn f() {} }":       "method 'f' is declared twice on Dup",
+		"package main\nfn main() { x := 1\n return x? }":       "'?' can only check a field or index access",
+		"package main\nclass Bad() { return 1 }\nfn main() {}": "only methods ('fn') and field declarations are allowed inside a class body",
+		"package main\nclass Dup() { fn f() {}\n fn f() {} }":  "method 'f' is declared twice on Dup",
 	} {
 		_, err := runCode(src)
 		if err == nil || !strings.Contains(err.Error(), want) {
@@ -1495,8 +1495,8 @@ func TestClassSuperCalls(t *testing.T) {
 
 	for src, wantErr := range map[string]string{
 		"package main\nfn main() => super.foo()":                               "'super' can only be used inside a class method",
-		"package main\nclass A() { fn f() => super.f() }\nfn main() {}":       "class 'A' has no parent class",
-		"package main\nfn main() { x := super }":                              "expected '.' and a method name after 'super'",
+		"package main\nclass A() { fn f() => super.f() }\nfn main() {}":        "class 'A' has no parent class",
+		"package main\nfn main() { x := super }":                               "expected '.' and a method name after 'super'",
 		"package main\nclass A() {}\nclass B() : A { fn f() { super.g = 1 } }": "cannot assign to 'super.g'",
 	} {
 		if _, err := runCode(src); err == nil || !strings.Contains(err.Error(), wantErr) {
@@ -1667,9 +1667,9 @@ func TestFixedShapeClassesAndBodyFields(t *testing.T) {
 	// 5. Compile errors: duplicate fields, field/param clash, field/method clash
 	for src, wantErr := range map[string]string{
 		"package main\nclass A() { var x := 1\n var x := 2 }\nfn main() {}": "field 'x' is declared twice on A",
-		"package main\nclass A(x) { var x := 1 }\nfn main() {}":            "field 'x' is declared twice on A",
-		"package main\nclass A(x) { fn x() {} }\nfn main() {}":             "cannot declare method 'x' on A: a field with that name already exists",
-		"package main\nclass A() { var x := 1\n fn x() {} }\nfn main() {}": "cannot declare method 'x' on A: a field with that name already exists",
+		"package main\nclass A(x) { var x := 1 }\nfn main() {}":             "field 'x' is declared twice on A",
+		"package main\nclass A(x) { fn x() {} }\nfn main() {}":              "cannot declare method 'x' on A: a field with that name already exists",
+		"package main\nclass A() { var x := 1\n fn x() {} }\nfn main() {}":  "cannot declare method 'x' on A: a field with that name already exists",
 	} {
 		if _, err := runCode(src); err == nil || !strings.Contains(err.Error(), wantErr) {
 			t.Errorf("%q: want error containing %q, got %v", src, wantErr, err)

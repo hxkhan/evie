@@ -2,9 +2,9 @@ package vm
 
 import (
 	"fmt"
-	"slices"
 	goruntime "runtime"
 	"runtime/debug"
+	"slices"
 	"strings"
 
 	"github.com/hxkhan/evie/ast"

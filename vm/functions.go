@@ -30,20 +30,20 @@ type fnDebugInfo struct {
 
 // funcInfoStatic holds static function information
 type funcInfoStatic struct {
-	name       string       // name of the function
-	args       []string     // argument names, including the receiver of a method
-	isVariadic bool         // variadic function (...args)
-	isMethod   bool         // declared inside a class; args[0] is the receiver
-	minArgs    int          // fewest arguments a call may pass, receiver included
-	maxArgs    int          // most arguments a call may pass; unbounded when variadic
+	name           string       // name of the function
+	args           []string     // argument names, including the receiver of a method
+	isVariadic     bool         // variadic function (...args)
+	isMethod       bool         // declared inside a class; args[0] is the receiver
+	minArgs        int          // fewest arguments a call may pass, receiver included
+	maxArgs        int          // most arguments a call may pass; unbounded when variadic
 	locals         []bool       // all locals & true for those that escape
 	escapingParams []int        // parameter indices (0..len(args)-1) that escape into nested closures
 	captures       []capture    // captured references
 	recyclable     int          // number of non-escaping locals
-	code       instruction  // the actual function code
-	def        site         // where the function was declared
-	vm         *Instance    // the corresponding vm
-	debug      *fnDebugInfo // populated only when Options.DebugInfo is true
+	code           instruction  // the actual function code
+	def            site         // where the function was declared
+	vm             *Instance    // the corresponding vm
+	debug          *fnDebugInfo // populated only when Options.DebugInfo is true
 }
 
 func (fn *funcInfoStatic) ensureDebug() *fnDebugInfo {

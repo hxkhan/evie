@@ -770,7 +770,13 @@ t.cancel()     // requests cooperative cancellation of the task
 ```
 
 ### Shared State
-Only one fiber of an instance executes Evie code at a time. A fiber hands over to the others when it awaits a task and while it is inside a blocking host function such as `time.wait`. Between those points a fiber runs uninterrupted, so shared variables, arrays, objects and classes never need locks:
+Only one fiber of an instance executes Evie code at a time. The rule for when it hands over is short: **a fiber yields only when it waits**. That happens in exactly three places:
+
+- it **awaits** a task, in any form (`await t`, `await.all`, `await.any`, `await.race`, `await.timeout`, `t.await()`);
+- it **finishes**, by returning or throwing;
+- it calls a function that **waits on the outside world**: `time.wait`, `io.prompt`, `io.readln` and the `fs` functions that touch the disk. The Standard Library tables mark these **yields**; no other standard function yields. A Go host can add its own (see `Blocking` under Go Host Embedding).
+
+Nothing else hands over: arithmetic, assignments, method calls, `go` itself, `io.println`, `json`, `math`. A call to one of your own functions yields only if it reaches one of the three places, as a helper that calls `time.wait` does. Between those points a fiber runs uninterrupted, so shared variables, arrays, objects and classes never need locks:
 
 ```go
 var counter := 0
@@ -789,7 +795,7 @@ fn main() {
 ```
 
 - **No data races**: a script cannot corrupt memory or crash the host by sharing values between tasks.
-- **Cooperative handover**: a task spawned with `go` starts running when the current fiber awaits, finishes, or enters a blocking host call.
+- **Cooperative handover**: a task spawned with `go` starts running when the current fiber yields: it awaits, finishes, or calls a function that waits.
 - **Parallelism across instances**: to use several cores, a host runs several `vm.Instance`s. Each has its own heap; nothing is shared between them.
 
 ---
@@ -885,7 +891,7 @@ if _, err := eng.RunFileContext(ctx, "main.ev"); errors.Is(err, context.Deadline
 
 ## 12. Standard Library
 
-Import a package by name: `package main imports("math", "json")`. Functions that wait on the operating system (`fs`, `time.wait`, `io.prompt`, `io.readln`) release the instance while they wait, so other tasks keep running. Arguments of the wrong type raise an error that names the function and the argument.
+Import a package by name: `package main imports("math", "json")`. Functions marked **yields** wait on the outside world and let other tasks run while they wait (see Shared State under Concurrency); no other standard function yields. Arguments of the wrong type raise an error that names the function and the argument.
 
 ### `io`
 Reads and writes use the engine's `Options.Stdin` and `Options.Stdout` (defaulting to `os.Stdin` and `os.Stdout`).
@@ -893,8 +899,8 @@ Reads and writes use the engine's `Options.Stdin` and `Options.Stdout` (defaulti
 | function | does |
 | :-- | :-- |
 | `print(...values)`, `println(...values)` | write the values separated by spaces |
-| `prompt(message)` | print a message and read a line (`nil` at EOF) |
-| `readln()` | read a line (`nil` at EOF) |
+| `prompt(message)` | print a message and read a line (`nil` at EOF); **yields** |
+| `readln()` | read a line (`nil` at EOF); **yields** |
 
 ### `math`
 | function | does |
@@ -911,13 +917,13 @@ Reads and writes use the engine's `Options.Stdin` and `Options.Stdout` (defaulti
 ### `fs`
 | function | does |
 | :-- | :-- |
-| `readFile(path)`, `readText(path)` | a file as a buffer or as a string |
-| `writeFile(path, content)`, `appendFile(path, content)` | write or append a string or buffer |
-| `exists(path)`, `isDir(path)` | tests |
-| `list(dir)` | sorted names in a directory |
-| `mkdir(dir)` | create a directory and its parents |
-| `remove(path)`, `rename(from, to)` | remove a file or directory tree, move it |
-| `join(...parts)`, `base(path)`, `dir(path)`, `ext(path)` | path helpers; these do not touch the disk |
+| `readFile(path)`, `readText(path)` | a file as a buffer or as a string; **yields** |
+| `writeFile(path, content)`, `appendFile(path, content)` | write or append a string or buffer; **yields** |
+| `exists(path)`, `isDir(path)` | tests; **yields** |
+| `list(dir)` | sorted names in a directory; **yields** |
+| `mkdir(dir)` | create a directory and its parents; **yields** |
+| `remove(path)`, `rename(from, to)` | remove a file or directory tree, move it; **yields** |
+| `join(...parts)`, `base(path)`, `dir(path)`, `ext(path)` | path helpers; these do not touch the disk and do not yield |
 
 ### `time`
 Times are milliseconds since the Unix epoch, so they compare and subtract like any number.
@@ -926,7 +932,7 @@ Times are milliseconds since the Unix epoch, so they compare and subtract like a
 | :-- | :-- |
 | `now()`, `since(t)` | the current time, milliseconds elapsed since `t` |
 | `clock()` | a monotonic clock in milliseconds, for measuring |
-| `wait(ms)` (also `sleep`, `timer`) | pause the current task |
+| `wait(ms)` (also `sleep`, `timer`) | pause the current task; **yields** |
 | `format(t)`, `format(t, layout)` | UTC RFC 3339 text, or a [Go layout](https://pkg.go.dev/time#pkg-constants) such as `"2006-01-02"` |
 | `parse(text)`, `parse(text, layout)` | parse an RFC 3339 time or a custom Go layout |
 | `second`, `minute`, `hour`, `day` | durations in milliseconds |

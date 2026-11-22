@@ -8,7 +8,7 @@ import (
 // The conversion for each parameter and result type is chosen once, when the
 // wrapper is built, so a call costs a direct Go call plus the boxing of its
 // result. Supported parameter types are Value, float64, int, int64, string,
-// bool, []byte, *Array, map[string]Value and any; results may also be an
+// bool, []byte, *Array, *Object and any; results may also be an
 // Evie-boxable Go value through BoxAny.
 
 // same reinterprets u as T; callers only use it when T and U are the same type
@@ -38,7 +38,7 @@ func argOf[T any]() argConv[T] {
 		return func(c Call, i int) (T, error) { b, err := c.Buffer(i); return same[T](b), err }
 	case *Array:
 		return func(c Call, i int) (T, error) { a, err := c.Array(i); return same[T](a), err }
-	case map[string]Value:
+	case *Object:
 		return func(c Call, i int) (T, error) { o, err := c.Object(i); return same[T](o), err }
 	}
 	if _, isAny := any(&zero).(*any); isAny {
@@ -75,8 +75,8 @@ func retOf[T any]() retConv[T] {
 		return func(r T) (Value, error) { return BoxBuffer(same[[]byte](r)), nil }
 	case *Array:
 		return func(r T) (Value, error) { return BoxArray(same[*Array](r)), nil }
-	case map[string]Value:
-		return func(r T) (Value, error) { return BoxObject(same[map[string]Value](r)), nil }
+	case *Object:
+		return func(r T) (Value, error) { return BoxObject(same[*Object](r)), nil }
 	}
 	return func(r T) (Value, error) { return BoxAny(r) }
 }

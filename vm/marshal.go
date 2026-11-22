@@ -70,8 +70,10 @@ func boxAny(v any, seen map[uintptr]bool) (Value, error) {
 		return BoxArray(val), nil
 	case Array:
 		return BoxArray(&val), nil
-	case map[string]Value:
+	case *Object:
 		return BoxObject(val), nil
+	case map[string]Value:
+		return BoxObject(ObjectOf(val)), nil
 	case map[string]any:
 		if val == nil {
 			return BoxObject(nil), nil
@@ -95,7 +97,7 @@ func boxAny(v any, seen map[uintptr]bool) (Value, error) {
 			}
 			obj[k] = boxed
 		}
-		return BoxObject(obj), nil
+		return BoxObject(ObjectOf(obj)), nil
 	case []any:
 		ptr := reflect.ValueOf(val).Pointer()
 		if len(val) > 0 && ptr != 0 {
@@ -241,11 +243,11 @@ func boxAny(v any, seen map[uintptr]bool) (Value, error) {
 			}
 			obj[keyStr] = valBoxed
 		}
-		return BoxObject(obj), nil
+		return BoxObject(ObjectOf(obj)), nil
 
 	case reflect.Struct:
 		t := rv.Type()
-		obj := make(map[string]Value, t.NumField())
+		obj := NewObject(t.NumField())
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
 			if !f.IsExported() {
@@ -266,7 +268,7 @@ func boxAny(v any, seen map[uintptr]bool) (Value, error) {
 			if err != nil {
 				return Value{}, err
 			}
-			obj[name] = boxed
+			obj.Set(name, boxed)
 		}
 		return BoxObject(obj), nil
 
@@ -580,10 +582,10 @@ func unmarshalToType(val Value, targetType reflect.Type) (any, error) {
 
 	case reflect.Map:
 		if obj, ok := val.AsObject(); ok {
-			mapVal := reflect.MakeMapWithSize(targetType, len(obj))
+			mapVal := reflect.MakeMapWithSize(targetType, obj.Len())
 			keyType := targetType.Key()
 			valType := targetType.Elem()
-			for k, v := range obj {
+			for k, v := range obj.All() {
 				kConverted, err := unmarshalToType(BoxString(k), keyType)
 				if err != nil {
 					return nil, err
@@ -675,12 +677,12 @@ func (v Value) toGo(seen map[unsafe.Pointer]any) any {
 		if seen == nil {
 			seen = make(map[unsafe.Pointer]any)
 		}
-		res := make(map[string]any, len(obj))
+		res := make(map[string]any, obj.Len())
 		if ptr != nil {
 			seen[ptr] = res
 			defer delete(seen, ptr)
 		}
-		for k, val := range obj {
+		for k, val := range obj.All() {
 			res[k] = val.toGo(seen)
 		}
 		return res
@@ -787,7 +789,7 @@ func (v Value) encodeJSON(enc *jsontext.Encoder, seen map[unsafe.Pointer]bool) e
 		return enc.WriteToken(jsontext.EndArray)
 
 	case kindObject:
-		obj := v.objectMap()
+		obj := v.object()
 		ptr := v.pointer
 		if ptr != nil {
 			if seen[ptr] {
@@ -802,11 +804,11 @@ func (v Value) encodeJSON(enc *jsontext.Encoder, seen map[unsafe.Pointer]bool) e
 		if err := enc.WriteToken(jsontext.BeginObject); err != nil {
 			return err
 		}
-		for _, k := range sortedKeys(obj) {
+		for k, val := range obj.All() {
 			if err := enc.WriteToken(jsontext.String(k)); err != nil {
 				return err
 			}
-			if err := obj[k].encodeJSON(enc, seen); err != nil {
+			if err := val.encodeJSON(enc, seen); err != nil {
 				return err
 			}
 		}
@@ -907,7 +909,7 @@ func decodeJSONValue(dec *jsontext.Decoder) (Value, error) {
 		}
 		return BoxArray(NewArray(elems...)), nil
 	case '{':
-		obj := make(map[string]Value)
+		obj := NewObject(0)
 		for dec.PeekKind() != '}' {
 			keyTok, err := dec.ReadToken()
 			if err != nil {
@@ -918,7 +920,7 @@ func decodeJSONValue(dec *jsontext.Decoder) (Value, error) {
 			if err != nil {
 				return Value{}, err
 			}
-			obj[key] = val
+			obj.Set(key, val)
 		}
 		if _, err := dec.ReadToken(); err != nil {
 			return Value{}, err

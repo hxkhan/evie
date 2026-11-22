@@ -16,7 +16,7 @@ import (
 // an object handed to the host and back is the same object
 func TestObjectIdentitySurvivesTheHost(t *testing.T) {
 	pkg := vm.NewPackage("host")
-	pkg.Native("id", vm.Func1(func(m map[string]vm.Value) map[string]vm.Value { return m }))
+	pkg.Native("id", vm.Func1(func(m *vm.Object) *vm.Object { return m }))
 	eng := evie.New(evie.Options{Packages: []*vm.Package{pkg}})
 	defer eng.Close()
 	v, err := eng.Eval(`package main imports("host")

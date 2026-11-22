@@ -478,9 +478,9 @@ func TestStringUTF8RuneSemantics(t *testing.T) {
 
 func TestHostMutableObjectNotFrozenAtCompileTime(t *testing.T) {
 	state := vm.NewPackage("state")
-	state.Set("cfg", vm.BoxObject(map[string]vm.Value{
+	state.Set("cfg", vm.BoxObject(vm.ObjectOf(map[string]vm.Value{
 		"count": vm.BoxNumber(0),
-	}))
+	})))
 	eng := evie.New(evie.Options{Packages: []*vm.Package{state}})
 	_, err := eng.Eval(`package main imports("state")
 	fn run() {

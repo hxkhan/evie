@@ -3,6 +3,7 @@ package vm
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -51,10 +52,7 @@ func (x Value) mustArray() *Array      { a, _ := x.AsArray(); return a }
 func (x Value) mustBuffer() []byte     { b, _ := x.AsBuffer(); return b }
 func (x Value) mustBufferPtr() *[]byte { return (*[]byte)(x.pointer) }
 func (x Value) mustTask() *Task        { t, _ := x.AsTask(); return t }
-func (x Value) mustObject() map[string]Value {
-	o, _ := x.AsObject()
-	return o
-}
+func (x Value) mustObject() *Object    { return x.object() }
 
 var typeNumber = newBuiltinType("number", NewFunc("number", 1, func(c Call) (Value, error) {
 	arg := c.Arg(0)
@@ -444,8 +442,7 @@ var objectHas = newMethod("has", 1, func(c Call) (Value, error) {
 	if !ok {
 		return BoxBool(false), nil
 	}
-	_, exists := c.This().mustObject()[key]
-	return BoxBool(exists), nil
+	return BoxBool(c.This().mustObject().Has(key)), nil
 })
 
 var objectRemove = newMethod("remove", 1, func(c Call) (Value, error) {
@@ -454,19 +451,19 @@ var objectRemove = newMethod("remove", 1, func(c Call) (Value, error) {
 		return Value{}, nil
 	}
 	obj := c.This().mustObject()
-	val, exists := obj[key]
+	val, exists := obj.Get(key)
 	if exists {
-		delete(obj, key)
+		obj.Delete(key)
 		return val, nil
 	}
 	return Value{}, nil
 })
 
 var typeObject = newBuiltinType("object", NewFunc("object", 0, func(c Call) (Value, error) {
-	return BoxObject(make(map[string]Value)), nil
+	return BoxObject(NewObject(0)), nil
 }), methodTable(
 	newMethod("keys", 0, func(c Call) (Value, error) {
-		keys := sortedKeys(c.This().mustObject())
+		keys := c.This().mustObject().keys
 		arr := make([]Value, len(keys))
 		for i, k := range keys {
 			arr[i] = BoxString(k)
@@ -474,23 +471,17 @@ var typeObject = newBuiltinType("object", NewFunc("object", 0, func(c Call) (Val
 		return BoxArray(NewArray(arr...)), nil
 	}),
 	newMethod("values", 0, func(c Call) (Value, error) {
-		obj := c.This().mustObject()
-		keys := sortedKeys(obj)
-		arr := make([]Value, len(keys))
-		for i, k := range keys {
-			arr[i] = obj[k]
-		}
-		return BoxArray(NewArray(arr...)), nil
+		return BoxArray(NewArray(slices.Clone(c.This().mustObject().values)...)), nil
 	}),
 	newMethod("len", 0, func(c Call) (Value, error) {
-		return BoxNumber(float64(len(c.This().mustObject()))), nil
+		return BoxNumber(float64(c.This().mustObject().Len())), nil
 	}),
 	objectHas,
 	alias("contains", objectHas),
 	objectRemove,
 	alias("delete", objectRemove),
 	newMethod("clear", 0, func(c Call) (Value, error) {
-		clear(c.This().mustObject())
+		c.This().mustObject().Clear()
 		return c.This(), nil
 	}),
 ))

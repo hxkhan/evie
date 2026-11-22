@@ -143,8 +143,7 @@ func (pkg *Package) Has(name string) bool {
 // Field reads a field of an object or of a class instance by name
 func (x Value) Field(name string) (Value, bool) {
 	if obj, ok := x.AsObject(); ok {
-		v, exists := obj[name]
-		return v, exists
+		return obj.Get(name)
 	}
 	if ci, ok := x.asClassInstance(); ok {
 		return ci.getFieldByName(name)
@@ -156,7 +155,7 @@ func (x Value) Field(name string) (Value, bool) {
 // instance by name.
 func (x Value) SetField(name string, v Value) error {
 	if obj, ok := x.AsObject(); ok {
-		obj[name] = v
+		obj.Set(name, v)
 		return nil
 	}
 	if ci, ok := x.asClassInstance(); ok {

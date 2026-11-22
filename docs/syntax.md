@@ -103,7 +103,7 @@ Evie is dynamically typed with a lightweight set of built-in types:
 | `string` | UTF-8 string | `"hello"`, `` `hi {name}` `` |
 | `buffer` | Raw mutable byte slice | `buffer("hi")`, `fs.readFile("data.bin")` |
 | `array` | Dynamic ordered collection | `[1, 2, "three"]` |
-| `object` | Key-value associative map | `{ name: "Alice", age: 30 }` |
+| `object` | Key-value map that keeps its keys in the order they were added | `{ name: "Alice", age: 30 }` |
 | `nil` | Represents absence of value | `nil` |
 | `function` | First-class callable / closure | `fn(x) => x * 2` |
 | `class` | User-defined class instance | `Person("Bob", 25)` |
@@ -608,8 +608,8 @@ arr.filter(fn(x) => x > 1)// [2, 3]
 ```go
 obj := { name: "John", age: 25 }
 
-obj.keys()                // ["age", "name"] (sorted alphabetically)
-obj.values()              // [25, "John"] (in sorted key order)
+obj.keys()                // ["name", "age"] (in the order the keys were added)
+obj.values()              // ["John", 25] (in the same order)
 obj.len()                 // 2
 obj.has("name")           // true (alias: obj.contains("name"), or obj.name?)
 obj.remove("age")         // returns 25, removes key (alias: obj.delete("age"))

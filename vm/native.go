@@ -182,7 +182,7 @@ func (c Call) Array(i int) (*Array, error) {
 }
 
 // Object returns argument i as an object
-func (c Call) Object(i int) (map[string]Value, error) {
+func (c Call) Object(i int) (*Object, error) {
 	if obj, ok := c.Arg(i).AsObject(); ok {
 		return obj, nil
 	}

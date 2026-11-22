@@ -514,10 +514,12 @@ func TestTypedWrappers(t *testing.T) {
 		}
 		return s
 	}))
-	pkg.Native("size", vm.Func1(func(o map[string]vm.Value) int { return len(o) }))
-	pkg.Native("pair", vm.Func2(func(k string, v any) map[string]vm.Value {
+	pkg.Native("size", vm.Func1(func(o *vm.Object) int { return o.Len() }))
+	pkg.Native("pair", vm.Func2(func(k string, v any) *vm.Object {
 		val, _ := vm.BoxAny(v)
-		return map[string]vm.Value{k: val}
+		o := vm.NewObject(1)
+		o.Set(k, val)
+		return o
 	}))
 	pkg.Native("div", vm.Func2E(func(a, b float64) (float64, error) {
 		if b == 0 {
@@ -822,6 +824,42 @@ func TestParametersDoNotMakeOuterLocalsEscape(t *testing.T) {
 	}`)
 	if want := "[10, [2, 4], 12]"; val.String() != want {
 		t.Fatalf("got %s, want %s", val, want)
+	}
+}
+
+// objects keep their keys in the order they were added; the objects a literal
+// makes share its keys until one changes, and big objects switch to an index
+func TestObjectLayout(t *testing.T) {
+	val := run(t, `package main
+	fn make() => {x: 1, y: 2, x: 3}
+	fn main() {
+		a := make()
+		b := make()
+		a.z = 4
+		b.remove("x")
+
+		var big := {}
+		var i := 0
+		while i < 12 { big["k" + string(i)] = i; i += 1 }
+		big.remove("k3")
+
+		var seen := []
+		var o := {p: 1, q: 2, r: 3}
+		for k, v in o {
+			if k == "p" { o.remove("q") }
+			seen.push(k + "=" + string(v))
+		}
+
+		s := "xy"
+		var d := {}
+		d[s[0:1]] = "short"
+		d[s] = "long"
+
+		return [a, b, a.keys(), b.keys(), big.len(), big.k11, big.has("k3"), seen, d.x, d.xy, d[s[0:1]]]
+	}`)
+	want := `[{x: 3, y: 2, z: 4}, {y: 2}, ["x", "y", "z"], ["y"], 11, 11, false, ["p=1", "r=3"], "short", "long", "short"]`
+	if val.String() != want {
+		t.Fatalf("got  %s\nwant %s", val, want)
 	}
 }
 

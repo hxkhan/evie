@@ -355,12 +355,12 @@ func TestObjects(t *testing.T) {
 	`
 	assertBool(t, run(t, codeObjExistence), true)
 
-	// Object methods: keys, values, len
+	// Object methods: keys, values, len; keys keep the order they were added in
 	codeMethods := `
 	user := {name: "Alice", age: 30}
 	keys := user.keys()
 	vals := user.values()
-	return keys.len() == 2 && keys[0] == "age" && keys[1] == "name" && vals[0] == 30 && vals[1] == "Alice" && user.len() == 2
+	return keys.len() == 2 && keys[0] == "name" && keys[1] == "age" && vals[0] == "Alice" && vals[1] == 30 && user.len() == 2
 	`
 	assertBool(t, run(t, codeMethods), true)
 
@@ -405,7 +405,7 @@ func TestObjects(t *testing.T) {
 	user := {b: 2, a: 1}
 	kFn := user.keys
 	keys := kFn()
-	return keys[0] == "a" && keys[1] == "b"
+	return keys[0] == "b" && keys[1] == "a"
 	`
 	assertBool(t, run(t, codeBoundMethod), true)
 

@@ -706,7 +706,8 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 		}
 
 		if obj, ok := collVal.AsObject(); ok {
-			for _, k := range sortedKeys(obj) {
+			keys := obj.keys // Delete never changes it in place, so the loop survives changes
+			for i, k := range keys {
 				if fbr.signaled() {
 					if exc := fbr.halt(site); exc != nil {
 						return Value{}, exc
@@ -714,8 +715,12 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 				}
 				keyVal := BoxString(k)
 				if idxIndex >= 0 {
+					v, ok := obj.at(i, k)
+					if !ok {
+						continue // removed by an earlier iteration
+					}
 					bindIdx(fbr, keyVal)
-					bindItem(fbr, obj[k])
+					bindItem(fbr, v)
 				} else {
 					bindItem(fbr, keyVal)
 				}

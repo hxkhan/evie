@@ -2,7 +2,9 @@ package vm
 
 import (
 	"math"
+	"slices"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/internal/fields"
@@ -147,7 +149,7 @@ func assignField(fbr *fiber, site site, obj Value, name string, index fields.ID,
 		if exc != nil {
 			return v, exc
 		}
-		m[name] = v
+		m.Set(name, v)
 		return Value{}, nil
 	}
 
@@ -303,7 +305,7 @@ func (vm *Instance) emitFieldAssign(node ast.Assign, fa ast.FieldAccess) instruc
 				if err != nil {
 					return v, err
 				}
-				obj[fa.Rhs] = v
+				obj.Set(fa.Rhs, v)
 				return Value{}, nil
 			}
 
@@ -379,7 +381,7 @@ func assignSubscriptValue(site site, target, keyVal, newVal Value) (Value, excep
 		if !ok {
 			return Value{}, errorAt(site, "object key must be a string, got '%s'", keyVal.TypeOf())
 		}
-		obj[keyStr] = newVal
+		obj.Set(keyStr, newVal)
 		return Value{}, nil
 	}
 
@@ -579,6 +581,7 @@ func (vm *Instance) resolveSuper(node ast.Node) (uclass *userClass, classLocal l
 func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 	site := vm.at(node)
 	key := fieldKeyOf(node.Rhs)
+	keyData := unsafe.StringData(key.name)
 	index := key.id
 
 	if ident, ok := node.Lhs.(ast.Ident); ok && ident.Name == "super" {
@@ -631,8 +634,17 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 
 			var cachedClass *userClass
 			var cachedSlot int = -1
+			hint := 0
 			return func(fbr *fiber) (Value, exception) {
 				v := fbr.get(lhs)
+				if o, ok := v.AsObject(); ok {
+					if i := hint; i < len(o.keys) && unsafe.StringData(o.keys[i]) == keyData && len(o.keys[i]) == len(key.name) {
+						return o.values[i], nil
+					}
+					if field, ok := o.find(key.name, &hint); ok {
+						return field, nil
+					}
+				}
 				if ci, ok := v.asClassInstance(); ok {
 					if ci.InstanceOf == cachedClass && cachedSlot >= 0 && cachedSlot < len(ci.Fields) {
 						return ci.Fields[cachedSlot], nil
@@ -682,12 +694,21 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 	lhs := vm.compile(node.Lhs)
 	var cachedClass *userClass
 	var cachedSlot int = -1
+	hint := 0
 	return func(fbr *fiber) (Value, exception) {
 		lhs, exc := lhs(fbr)
 		if exc != nil {
 			return lhs, exc
 		}
 
+		if o, ok := lhs.AsObject(); ok {
+			if i := hint; i < len(o.keys) && unsafe.StringData(o.keys[i]) == keyData && len(o.keys[i]) == len(key.name) {
+				return o.values[i], nil
+			}
+			if field, ok := o.find(key.name, &hint); ok {
+				return field, nil
+			}
+		}
 		if ci, ok := lhs.asClassInstance(); ok {
 			if ci.InstanceOf == cachedClass && cachedSlot >= 0 && cachedSlot < len(ci.Fields) {
 				return ci.Fields[cachedSlot], nil
@@ -763,7 +784,7 @@ func subscriptValue(site site, target, indexVal Value) (Value, exception) {
 		if !ok {
 			return Value{}, errorAt(site, "object key must be a string, got '%s'", indexVal.TypeOf())
 		}
-		return obj[keyStr], nil
+		return obj.get(keyStr), nil
 	}
 
 	// 3. Class instance field access: classInstance["field"]
@@ -861,7 +882,7 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 				return func(fbr *fiber) (Value, exception) {
 					target := *fbr.get(lhsLocal)
 					if target.pointer != nil && !isKnown(target.pointer) && target.scalar == kindObject {
-						return target.objectMap()[keyStr], nil
+						return target.object().get(keyStr), nil
 					}
 					return subscriptValue(site, target, keyOp)
 				}
@@ -1122,21 +1143,35 @@ type objectField struct {
 }
 
 func (vm *Instance) emitObject(node ast.Object) instruction {
-	// fields are evaluated in source order, so their side effects happen in source order
-	items := make([]objectField, len(node.Fields))
+	// fields are evaluated in source order, so their side effects happen in source
+	// order; a key given twice keeps its first place and its last value
+	var keys []string
+	slots := make([]int, len(node.Fields))
+	values := make([]instruction, len(node.Fields))
 	for i, f := range node.Fields {
-		items[i] = objectField{key: f.Key, value: vm.compile(f.Value)}
+		key := fields.Lookup(fields.Get(f.Key)) // interned, so field sites find it by pointer
+		slot := slices.Index(keys, key)
+		if slot < 0 {
+			slot = len(keys)
+			keys = append(keys, key)
+		}
+		slots[i] = slot
+		values[i] = vm.compile(f.Value)
+	}
+	keys = slices.Clip(keys)
+	var index map[string]int
+	if len(keys) > maxLinearKeys {
+		index = maps(keys)
 	}
 
 	return func(fbr *fiber) (Value, exception) {
-		obj := make(map[string]Value, len(items))
-		for _, item := range items {
-			value, err := item.value(fbr)
+		obj := newShaped(keys, index)
+		for i, value := range values {
+			v, err := value(fbr)
 			if err != nil {
-				return value, err
+				return v, err
 			}
-
-			obj[item.key] = value
+			obj.values[slots[i]] = v
 		}
 		return BoxObject(obj), nil
 	}
@@ -1154,7 +1189,7 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 			}
 
 			if obj, ok := lhs.AsObject(); ok {
-				_, exists := obj[fa.Rhs]
+				_, exists := obj.Get(fa.Rhs)
 				return BoxBool(exists), nil
 			}
 
@@ -1182,7 +1217,7 @@ func (vm *Instance) emitExists(node ast.Exists) instruction {
 
 			if obj, ok := lhs.AsObject(); ok {
 				if keyStr, ok := k.AsString(); ok {
-					_, exists := obj[keyStr]
+					_, exists := obj.Get(keyStr)
 					return BoxBool(exists), nil
 				}
 				return BoxBool(false), nil
@@ -1319,19 +1354,19 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 				})
 			}
 			if m, ok := obj.AsObject(); ok {
-				current, exists := m[fa.Rhs]
+				current, exists := m.Get(fa.Rhs)
 				if !exists {
 					return Value{}, errorAt(site, "undefined key '%s' in object", fa.Rhs)
 				}
 				if result, ok := fastCompound(op, current, value); ok {
-					m[fa.Rhs] = result
+					m.Set(fa.Rhs, result)
 					return Value{}, nil
 				}
 				result, exc := apply(fbr, current, value)
 				if exc != nil {
 					return result, exc
 				}
-				m[fa.Rhs] = result
+				m.Set(fa.Rhs, result)
 				return Value{}, nil
 			}
 			if pkg, ok := obj.AsPackage(); ok {
@@ -1375,19 +1410,19 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 		}
 
 		if m, ok := obj.AsObject(); ok {
-			current, exists := m[fa.Rhs]
+			current, exists := m.Get(fa.Rhs)
 			if !exists {
 				return Value{}, errorAt(site, "undefined key '%s' in object", fa.Rhs)
 			}
 			if result, ok := fastCompound(op, current, value); ok {
-				m[fa.Rhs] = result
+				m.Set(fa.Rhs, result)
 				return Value{}, nil
 			}
 			result, exc := apply(fbr, current, value)
 			if exc != nil {
 				return result, exc
 			}
-			m[fa.Rhs] = result
+			m.Set(fa.Rhs, result)
 			return Value{}, nil
 		}
 
@@ -1483,7 +1518,7 @@ func compoundSubscript(fbr *fiber, site site, apply func(fbr *fiber, current, rh
 		if !isString {
 			return Value{}, errorAt(site, "object key must be a string, got '%s'", keyVal.TypeOf())
 		}
-		current, exists := m[keyStr]
+		current, exists := m.Get(keyStr)
 		if !exists {
 			return Value{}, errorAt(site, "undefined key '%s' in object", keyStr)
 		}
@@ -1491,7 +1526,7 @@ func compoundSubscript(fbr *fiber, site site, apply func(fbr *fiber, current, rh
 		if exc != nil {
 			return result, exc
 		}
-		m[keyStr] = result
+		m.Set(keyStr, result)
 		return Value{}, nil
 	}
 
@@ -1543,7 +1578,7 @@ func objectLoad(target, key Value) (Value, bool) {
 	if target.scalar != kindObject || key.scalar != kindString || isKnown(target.pointer) || isKnown(key.pointer) {
 		return Value{}, false
 	}
-	return target.objectMap()[*(*string)(key.pointer)], true
+	return target.object().get(*(*string)(key.pointer)), true
 }
 
 // arrayStore sets target[key] to v when target is an array and key an integer index inside it
@@ -1565,6 +1600,6 @@ func objectStore(target, key, v Value) bool {
 	if target.scalar != kindObject || key.scalar != kindString || isKnown(target.pointer) || isKnown(key.pointer) {
 		return false
 	}
-	target.objectMap()[*(*string)(key.pointer)] = v
+	target.object().Set(*(*string)(key.pointer), v)
 	return true
 }

@@ -427,19 +427,8 @@ func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) inst
 					return func(fbr *fiber) (Value, exception) {
 						s := fbr.stack[fbr.base:]
 						target, keyVal := s[ti], s[ki]
-						if target.pointer != nil && !isKnown(target.pointer) {
-							if target.scalar == kindArray && keyVal.pointer == f64Type {
-								arr := (*Array)(target.pointer)
-								f := math.Float64frombits(keyVal.scalar)
-								idx := int(f)
-								if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
-									arr.Data[idx] = val
-									return Value{}, nil
-								}
-							} else if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
-								target.objectMap()[*(*string)(keyVal.pointer)] = val
-								return Value{}, nil
-							}
+						if arrayStore(target, keyVal, val) || objectStore(target, keyVal, val) {
+							return Value{}, nil
 						}
 						return assignSubscriptValue(site, target, keyVal, val)
 					}
@@ -447,19 +436,8 @@ func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) inst
 				return func(fbr *fiber) (Value, exception) {
 					target := *fbr.get(targetLocal)
 					keyVal := *fbr.get(keyLocal)
-					if target.pointer != nil && !isKnown(target.pointer) {
-						if target.scalar == kindArray && keyVal.pointer == f64Type {
-							arr := (*Array)(target.pointer)
-							f := math.Float64frombits(keyVal.scalar)
-							idx := int(f)
-							if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
-								arr.Data[idx] = val
-								return Value{}, nil
-							}
-						} else if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
-							target.objectMap()[*(*string)(keyVal.pointer)] = val
-							return Value{}, nil
-						}
+					if arrayStore(target, keyVal, val) || objectStore(target, keyVal, val) {
+						return Value{}, nil
 					}
 					return assignSubscriptValue(site, target, keyVal, val)
 				}
@@ -469,19 +447,8 @@ func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) inst
 					return func(fbr *fiber) (Value, exception) {
 						s := fbr.stack[fbr.base:]
 						target, keyVal, newVal := s[ti], s[ki], s[vi]
-						if target.pointer != nil && !isKnown(target.pointer) {
-							if target.scalar == kindArray && keyVal.pointer == f64Type {
-								arr := (*Array)(target.pointer)
-								f := math.Float64frombits(keyVal.scalar)
-								idx := int(f)
-								if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
-									arr.Data[idx] = newVal
-									return Value{}, nil
-								}
-							} else if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
-								target.objectMap()[*(*string)(keyVal.pointer)] = newVal
-								return Value{}, nil
-							}
+						if arrayStore(target, keyVal, newVal) || objectStore(target, keyVal, newVal) {
+							return Value{}, nil
 						}
 						return assignSubscriptValue(site, target, keyVal, newVal)
 					}
@@ -490,19 +457,8 @@ func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) inst
 					target := *fbr.get(targetLocal)
 					keyVal := *fbr.get(keyLocal)
 					newVal := *fbr.get(val)
-					if target.pointer != nil && !isKnown(target.pointer) {
-						if target.scalar == kindArray && keyVal.pointer == f64Type {
-							arr := (*Array)(target.pointer)
-							f := math.Float64frombits(keyVal.scalar)
-							idx := int(f)
-							if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
-								arr.Data[idx] = newVal
-								return Value{}, nil
-							}
-						} else if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
-							target.objectMap()[*(*string)(keyVal.pointer)] = newVal
-							return Value{}, nil
-						}
+					if arrayStore(target, keyVal, newVal) || objectStore(target, keyVal, newVal) {
+						return Value{}, nil
 					}
 					return assignSubscriptValue(site, target, keyVal, newVal)
 				}
@@ -516,19 +472,8 @@ func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) inst
 					if err != nil {
 						return newVal, err
 					}
-					if target.pointer != nil && !isKnown(target.pointer) {
-						if target.scalar == kindArray && keyVal.pointer == f64Type {
-							arr := (*Array)(target.pointer)
-							f := math.Float64frombits(keyVal.scalar)
-							idx := int(f)
-							if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
-								arr.Data[idx] = newVal
-								return Value{}, nil
-							}
-						} else if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
-							target.objectMap()[*(*string)(keyVal.pointer)] = newVal
-							return Value{}, nil
-						}
+					if arrayStore(target, keyVal, newVal) || objectStore(target, keyVal, newVal) {
+						return Value{}, nil
 					}
 					return assignSubscriptValue(site, target, keyVal, newVal)
 				}
@@ -540,19 +485,8 @@ func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) inst
 				if err != nil {
 					return newVal, err
 				}
-				if target.pointer != nil && !isKnown(target.pointer) {
-					if target.scalar == kindArray && keyVal.pointer == f64Type {
-						arr := (*Array)(target.pointer)
-						f := math.Float64frombits(keyVal.scalar)
-						idx := int(f)
-						if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
-							arr.Data[idx] = newVal
-							return Value{}, nil
-						}
-					} else if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
-						target.objectMap()[*(*string)(keyVal.pointer)] = newVal
-						return Value{}, nil
-					}
+				if arrayStore(target, keyVal, newVal) || objectStore(target, keyVal, newVal) {
+					return Value{}, nil
 				}
 				return assignSubscriptValue(site, target, keyVal, newVal)
 			}
@@ -570,19 +504,8 @@ func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) inst
 			if err != nil {
 				return newVal, err
 			}
-			if target.pointer != nil && !isKnown(target.pointer) {
-				if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
-					target.objectMap()[*(*string)(keyVal.pointer)] = newVal
-					return Value{}, nil
-				} else if target.scalar == kindArray && keyVal.pointer == f64Type {
-					arr := (*Array)(target.pointer)
-					f := math.Float64frombits(keyVal.scalar)
-					idx := int(f)
-					if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
-						arr.Data[idx] = newVal
-						return Value{}, nil
-					}
-				}
+			if objectStore(target, keyVal, newVal) || arrayStore(target, keyVal, newVal) {
+				return Value{}, nil
 			}
 			return assignSubscriptValue(site, target, keyVal, newVal)
 		}
@@ -898,17 +821,11 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 				return func(fbr *fiber) (Value, exception) {
 					s := fbr.stack[fbr.base:]
 					target, indexVal := s[li], s[ki]
-					if target.pointer != nil && !isKnown(target.pointer) {
-						if target.scalar == kindArray && indexVal.pointer == f64Type {
-							arr := (*Array)(target.pointer)
-							f := math.Float64frombits(indexVal.scalar)
-							idx := int(f)
-							if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
-								return arr.Data[idx], nil
-							}
-						} else if target.scalar == kindObject && indexVal.scalar == kindString && !isKnown(indexVal.pointer) {
-							return target.objectMap()[*(*string)(indexVal.pointer)], nil
-						}
+					if v, ok := arrayLoad(target, indexVal); ok {
+						return v, nil
+					}
+					if v, ok := objectLoad(target, indexVal); ok {
+						return v, nil
 					}
 					return subscriptValue(site, target, indexVal)
 				}
@@ -916,17 +833,11 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 			return func(fbr *fiber) (Value, exception) {
 				target := *fbr.get(lhsLocal)
 				indexVal := *fbr.get(keyOp)
-				if target.pointer != nil && !isKnown(target.pointer) {
-					if target.scalar == kindArray && indexVal.pointer == f64Type {
-						arr := (*Array)(target.pointer)
-						f := math.Float64frombits(indexVal.scalar)
-						idx := int(f)
-						if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
-							return arr.Data[idx], nil
-						}
-					} else if target.scalar == kindObject && indexVal.scalar == kindString && !isKnown(indexVal.pointer) {
-						return target.objectMap()[*(*string)(indexVal.pointer)], nil
-					}
+				if v, ok := arrayLoad(target, indexVal); ok {
+					return v, nil
+				}
+				if v, ok := objectLoad(target, indexVal); ok {
+					return v, nil
 				}
 				return subscriptValue(site, target, indexVal)
 			}
@@ -964,17 +875,11 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 			if err != nil {
 				return indexVal, err
 			}
-			if target.pointer != nil && !isKnown(target.pointer) {
-				if target.scalar == kindObject && indexVal.scalar == kindString && !isKnown(indexVal.pointer) {
-					return target.objectMap()[*(*string)(indexVal.pointer)], nil
-				} else if target.scalar == kindArray && indexVal.pointer == f64Type {
-					arr := (*Array)(target.pointer)
-					f := math.Float64frombits(indexVal.scalar)
-					idx := int(f)
-					if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
-						return arr.Data[idx], nil
-					}
-				}
+			if v, ok := objectLoad(target, indexVal); ok {
+				return v, nil
+			}
+			if v, ok := arrayLoad(target, indexVal); ok {
+				return v, nil
 			}
 			return subscriptValue(site, target, indexVal)
 		}
@@ -990,13 +895,8 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 					return target, err
 				}
 				indexVal := fbr.stack[fbr.base+ki]
-				if target.pointer != nil && !isKnown(target.pointer) && target.scalar == kindArray && indexVal.pointer == f64Type {
-					arr := (*Array)(target.pointer)
-					f := math.Float64frombits(indexVal.scalar)
-					idx := int(f)
-					if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
-						return arr.Data[idx], nil
-					}
+				if v, ok := arrayLoad(target, indexVal); ok {
+					return v, nil
 				}
 				return subscriptValue(site, target, indexVal)
 			}
@@ -1007,13 +907,8 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 				return target, err
 			}
 			indexVal := *fbr.get(keyLocal)
-			if target.pointer != nil && !isKnown(target.pointer) && target.scalar == kindArray && indexVal.pointer == f64Type {
-				arr := (*Array)(target.pointer)
-				f := math.Float64frombits(indexVal.scalar)
-				idx := int(f)
-				if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
-					return arr.Data[idx], nil
-				}
+			if v, ok := arrayLoad(target, indexVal); ok {
+				return v, nil
 			}
 			return subscriptValue(site, target, indexVal)
 		}
@@ -1628,4 +1523,48 @@ func compoundSubscript(fbr *fiber, site site, apply func(fbr *fiber, current, rh
 	}
 
 	return Value{}, errorAt(site, "cannot assign to subscript of type '%s'", obj.TypeOf())
+}
+
+// arrayLoad reads target[key] when target is an array and key an integer index inside it
+func arrayLoad(target, key Value) (Value, bool) {
+	if target.scalar != kindArray || key.pointer != f64Type || isKnown(target.pointer) {
+		return Value{}, false
+	}
+	arr := (*Array)(target.pointer)
+	f := math.Float64frombits(key.scalar)
+	if idx := int(f); uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
+		return arr.Data[idx], true
+	}
+	return Value{}, false
+}
+
+// objectLoad reads target[key] when target is an object and key a string
+func objectLoad(target, key Value) (Value, bool) {
+	if target.scalar != kindObject || key.scalar != kindString || isKnown(target.pointer) || isKnown(key.pointer) {
+		return Value{}, false
+	}
+	return target.objectMap()[*(*string)(key.pointer)], true
+}
+
+// arrayStore sets target[key] to v when target is an array and key an integer index inside it
+func arrayStore(target, key, v Value) bool {
+	if target.scalar != kindArray || key.pointer != f64Type || isKnown(target.pointer) {
+		return false
+	}
+	arr := (*Array)(target.pointer)
+	f := math.Float64frombits(key.scalar)
+	if idx := int(f); uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
+		arr.Data[idx] = v
+		return true
+	}
+	return false
+}
+
+// objectStore sets target[key] to v when target is an object and key a string
+func objectStore(target, key, v Value) bool {
+	if target.scalar != kindObject || key.scalar != kindString || isKnown(target.pointer) || isKnown(key.pointer) {
+		return false
+	}
+	target.objectMap()[*(*string)(key.pointer)] = v
+	return true
 }

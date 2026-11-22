@@ -168,15 +168,7 @@ func (vm *Instance) evalNode(src *diag.Source, node ast.Node, s *stopper) (resul
 
 	defer func() {
 		if r := recover(); r != nil {
-			if ce, ok := r.(*CompileError); ok {
-				err = ce
-			} else if exc, ok := r.(exception); ok {
-				err = exc
-			} else if e, ok := r.(error); ok {
-				err = e
-			} else {
-				err = fmt.Errorf("%v", r)
-			}
+			err = loadError(r)
 		}
 	}()
 
@@ -268,12 +260,7 @@ func (vm *Instance) CompileUnit(pu ParsedUnit) (err error) {
 			vm.cp.closures.Pop()
 		}
 		if r := recover(); r != nil {
-			switch e := r.(type) {
-			case error:
-				err = e
-			default:
-				err = recovered(r)
-			}
+			err = loadError(r)
 		}
 	}()
 
@@ -329,15 +316,7 @@ func (vm *Instance) evalPackageUnits(moduleID string, units []unit, s *stopper) 
 
 	defer func() {
 		if r := recover(); r != nil {
-			if ce, ok := r.(*CompileError); ok {
-				err = ce
-			} else if exc, ok := r.(exception); ok {
-				err = exc
-			} else if e, ok := r.(error); ok {
-				err = e
-			} else {
-				err = fmt.Errorf("%v", r)
-			}
+			err = loadError(r)
 		}
 	}()
 

@@ -289,7 +289,7 @@ type sourced struct {
 // runPackage compiles a package from all of its files at once and runs its
 // initializers. Declarations are hoisted across the files, so any file can use
 // what another declares, and imports belong to the whole package.
-func (vm *Instance) runPackage(moduleID string, units []unit) (res Value, exc exception) {
+func (vm *Instance) runPackage(moduleID string, units []unit) (Value, exception) {
 	prevPkg, prevSrc := vm.cp.pkg, vm.cp.src
 	prevClosures := vm.cp.closures.Len()
 
@@ -297,22 +297,6 @@ func (vm *Instance) runPackage(moduleID string, units []unit) (res Value, exc ex
 		vm.cp.pkg, vm.cp.src = prevPkg, prevSrc
 		for vm.cp.closures.Len() > prevClosures {
 			vm.cp.closures.Pop()
-		}
-	}()
-
-	defer func() {
-		if r := recover(); r != nil {
-			if _, ok := r.(*CompileError); ok {
-				panic(r) // EvalNode reports it as what it is
-			} else if e, ok := r.(exception); ok {
-				exc = e
-			} else if _, ok := r.(interface{ Diagnostic() *diag.Report }); ok {
-				panic(r) // an imported package's own report, such as a syntax error
-			} else if e, ok := r.(error); ok {
-				exc = customError("%v", e.Error())
-			} else {
-				exc = customError("%v", r)
-			}
 		}
 	}()
 
@@ -402,39 +386,13 @@ func (vm *Instance) runPackage(moduleID string, units []unit) (res Value, exc ex
 	}
 
 	// 1. allocate functions & classes
-	for _, it := range code {
-		vm.cp.src = it.src
-		node := it.node
-		if fn, isFn := node.(ast.Fn); isFn {
-			if fn.Name == "" {
-				panic(vm.compileErrorAt(fn, "cannot declare an fn statement with no name"))
-			}
-			index := fields.Get(fn.Name)
-			if _, exists := this.globals[index]; exists {
-				panic(vm.compileErrorAt(fn, "'%s' is declared twice in this package", fn.Name))
-			}
-
-			// create a stub for now
-			info := vm.newFuncInfo(fn.Name, fn.Args, fn.IsVariadic, false)
-			info.def = vm.at(fn)
-			boxed := boxUserFn(userFn{funcInfoStatic: info})
-			this.globals[index] = pkgGlobal{Value: &boxed, IsPublic: true, IsStatic: true, IsConstant: true}
+	vm.hoistDeclarations(this, code, func(n ast.Node, name string) fields.ID {
+		index := fields.Get(name)
+		if _, exists := this.globals[index]; exists {
+			panic(vm.compileErrorAt(n, "'%s' is declared twice in this package", name))
 		}
-
-		if cls, isClass := node.(ast.ClassDefinition); isClass {
-			if cls.Name == "" {
-				panic(vm.compileErrorAt(cls, "cannot declare a class with no name"))
-			}
-			index := fields.Get(cls.Name)
-			if _, exists := this.globals[index]; exists {
-				panic(vm.compileErrorAt(cls, "'%s' is declared twice in this package", cls.Name))
-			}
-
-			// create a stub for now
-			v := boxUserClass(newUserClass(cls.Name, vm.at(cls), cls.Args))
-			this.globals[index] = pkgGlobal{Value: &v, IsPublic: true, IsStatic: true, IsConstant: true}
-		}
-	}
+		return index
+	}, true)
 
 	// 2. declare variables. A constant with a constant initializer gets its
 	// value now, whatever the order of declarations, so uses of it fold; every
@@ -481,73 +439,8 @@ func (vm *Instance) runPackage(moduleID string, units []unit) (res Value, exc ex
 		}
 	}()
 
-	// 3. initialize functions
-	for _, it := range code {
-		vm.cp.src = it.src
-		node := it.node
-		if fn, isFn := node.(ast.Fn); isFn {
-			global := this.globals[fields.Get(fn.Name)]
-			ufn := (*userFn)(global.pointer)
-			vm.compileFunction(ufn.funcInfoStatic, fn.Args, fn.Action, nil)
-		}
-	}
-
-	// 3b. link class inheritance first, then compile class bodies ancestor-first
-	// so subclasses inherit parent body fields regardless of declaration order.
-	type classWork struct {
-		src *diag.Source
-		cls ast.ClassDefinition
-		uc  *userClass
-	}
-	classByPtr := map[*userClass]classWork{}
-	var classOrder []*userClass
-	for _, it := range code {
-		vm.cp.src = it.src
-		cls, isClass := it.node.(ast.ClassDefinition)
-		if !isClass {
-			continue
-		}
-		global := this.globals[fields.Get(cls.Name)]
-		uclass := (*userClass)(global.pointer)
-		if cls.Parent != "" {
-			parentGlobal, exists := this.globals[fields.Get(cls.Parent)]
-			if !exists {
-				panic(vm.compileErrorAt(cls, "cannot find the parent class '%v'", cls.Parent))
-			}
-			parentClass, ok := parentGlobal.Value.asUserClass()
-			if !ok {
-				panic(vm.compileErrorAt(cls, "'%v' is %s, not a class", cls.Parent, article(*parentGlobal.Value)))
-			}
-			for p := parentClass; p != nil; p = p.Parent {
-				if p == uclass {
-					panic(vm.compileErrorAt(cls, "'%v' and '%v' inherit from each other", cls.Name, cls.Parent))
-				}
-			}
-			uclass.Parent = parentClass
-		}
-		classByPtr[uclass] = classWork{src: it.src, cls: cls, uc: uclass}
-		classOrder = append(classOrder, uclass)
-	}
-	compiledClasses := map[*userClass]bool{}
-	var ensureClassCompiled func(uc *userClass)
-	ensureClassCompiled = func(uc *userClass) {
-		if uc == nil || compiledClasses[uc] {
-			return
-		}
-		work, inPkg := classByPtr[uc]
-		if !inPkg {
-			return
-		}
-		if uc.Parent != nil {
-			ensureClassCompiled(uc.Parent)
-		}
-		compiledClasses[uc] = true
-		vm.cp.src = work.src
-		vm.compileClassBody(uc, work.cls)
-	}
-	for _, uc := range classOrder {
-		ensureClassCompiled(uc)
-	}
+	// 3. compile functions and classes
+	vm.compileHoisted(this, code)
 
 	// 4. run the remaining initializers and statements in source order
 	for _, u := range units {
@@ -572,6 +465,105 @@ func (vm *Instance) runPackage(moduleID string, units []unit) (res Value, exc ex
 	loaded = true
 	vm.rt.packageOrder = append(vm.rt.packageOrder, id)
 	return Value{}, nil
+}
+
+// hoistDeclarations creates the functions and classes that code declares at
+// its top level before any body is compiled, so they can be used before their
+// declaration. declare claims a name for one and panics on a duplicate;
+// constant tells whether uses of them may fold.
+func (vm *Instance) hoistDeclarations(pkg *Package, code []sourced, declare func(n ast.Node, name string) fields.ID, constant bool) {
+	for _, it := range code {
+		vm.cp.src = it.src
+		switch node := it.node.(type) {
+		case ast.Fn:
+			if node.UsedAsExpr {
+				continue
+			}
+			if node.Name == "" {
+				panic(vm.compileErrorAt(node, "cannot declare an fn statement with no name"))
+			}
+			index := declare(node, node.Name)
+			info := vm.newFuncInfo(node.Name, node.Args, node.IsVariadic, false)
+			info.def = vm.at(node)
+			boxed := boxUserFn(userFn{funcInfoStatic: info})
+			pkg.globals[index] = pkgGlobal{Value: &boxed, IsPublic: true, IsStatic: true, IsConstant: constant}
+
+		case ast.ClassDefinition:
+			if node.Name == "" {
+				panic(vm.compileErrorAt(node, "cannot declare a class with no name"))
+			}
+			index := declare(node, node.Name)
+			boxed := boxUserClass(newUserClass(node.Name, vm.at(node), node.Args))
+			pkg.globals[index] = pkgGlobal{Value: &boxed, IsPublic: true, IsStatic: true, IsConstant: constant}
+		}
+	}
+}
+
+// compileHoisted compiles the bodies of the functions and classes that
+// hoistDeclarations created. Classes are linked to their parents first and
+// compiled ancestor-first, so a subclass inherits its parent's body fields
+// whatever the order of their declarations.
+func (vm *Instance) compileHoisted(pkg *Package, code []sourced) {
+	for _, it := range code {
+		vm.cp.src = it.src
+		if fn, isFn := it.node.(ast.Fn); isFn && !fn.UsedAsExpr {
+			global := pkg.globals[fields.Get(fn.Name)]
+			ufn := (*userFn)(global.pointer)
+			vm.compileFunction(ufn.funcInfoStatic, fn.Args, fn.Action, nil)
+		}
+	}
+
+	type classWork struct {
+		src *diag.Source
+		cls ast.ClassDefinition
+	}
+	classByPtr := map[*userClass]classWork{}
+	var classOrder []*userClass
+	for _, it := range code {
+		vm.cp.src = it.src
+		cls, isClass := it.node.(ast.ClassDefinition)
+		if !isClass {
+			continue
+		}
+		global := pkg.globals[fields.Get(cls.Name)]
+		uclass := (*userClass)(global.pointer)
+		if cls.Parent != "" {
+			parentGlobal, exists := pkg.globals[fields.Get(cls.Parent)]
+			if !exists {
+				panic(vm.compileErrorAt(cls, "cannot find the parent class '%v'", cls.Parent))
+			}
+			parentClass, ok := parentGlobal.Value.asUserClass()
+			if !ok {
+				panic(vm.compileErrorAt(cls, "'%v' is %s, not a class", cls.Parent, article(*parentGlobal.Value)))
+			}
+			for p := parentClass; p != nil; p = p.Parent {
+				if p == uclass {
+					panic(vm.compileErrorAt(cls, "'%v' and '%v' inherit from each other", cls.Name, cls.Parent))
+				}
+			}
+			uclass.Parent = parentClass
+		}
+		classByPtr[uclass] = classWork{src: it.src, cls: cls}
+		classOrder = append(classOrder, uclass)
+	}
+	compiled := map[*userClass]bool{}
+	var ensureCompiled func(uc *userClass)
+	ensureCompiled = func(uc *userClass) {
+		if uc == nil || compiled[uc] {
+			return
+		}
+		work, inCode := classByPtr[uc]
+		if !inCode {
+			return
+		}
+		ensureCompiled(uc.Parent)
+		compiled[uc] = true
+		vm.cp.src = work.src
+		vm.compileClassBody(uc, work.cls)
+	}
+	for _, uc := range classOrder {
+		ensureCompiled(uc)
+	}
 }
 
 // bindImport resolves one import of a package and binds it under its alias

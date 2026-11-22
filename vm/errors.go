@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	goruntime "runtime"
 	"runtime/debug"
 	"strings"
 
@@ -208,6 +209,24 @@ func argTypeError(args []Value, expected ...string) exception {
 // thrown exception or compile error passes through; anything else is a bug in
 // the runtime or in a native and is reported with its stack instead of taking
 // the host process down.
+// loadError turns what compiling or loading code panicked with into the error
+// the host gets: compile errors, exceptions and other errors (such as an
+// import's own report) as they are, and a Go runtime panic, which is a bug, as
+// an internal error with its stack
+func loadError(r any) error {
+	switch e := r.(type) {
+	case *CompileError:
+		return e
+	case exception:
+		return e
+	case goruntime.Error:
+		return recovered(r)
+	case error:
+		return e
+	}
+	return recovered(r)
+}
+
 func recovered(r any) exception {
 	switch e := r.(type) {
 	case exception:

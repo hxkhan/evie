@@ -184,15 +184,7 @@ func (s *Session) evalContext(ctx context.Context, src *diag.Source, node ast.No
 			vm.cp.closures.Pop()
 		}
 		if r := recover(); r != nil {
-			if ce, ok := r.(*CompileError); ok {
-				err = ce
-			} else if exc, ok := r.(exception); ok {
-				err = exc
-			} else if e, ok := r.(error); ok {
-				err = e
-			} else {
-				err = fmt.Errorf("%v", r)
-			}
+			err = loadError(r)
 		}
 		if !committed || err != nil {
 			rollback()
@@ -229,30 +221,11 @@ func (s *Session) evalContext(ctx context.Context, src *diag.Source, node ast.No
 	}
 
 	// 1. Hoist top-level function statements and class definitions in this turn.
-	for _, stmt := range stmts {
-		switch stmt := stmt.(type) {
-		case ast.Fn:
-			if stmt.UsedAsExpr {
-				continue
-			}
-			if stmt.Name == "" {
-				panic(vm.compileErrorAt(stmt, "cannot declare an fn statement with no name"))
-			}
-			id := claim(stmt, stmt.Name)
-			info := vm.newFuncInfo(stmt.Name, stmt.Args, stmt.IsVariadic, false)
-			info.def = vm.at(stmt)
-			boxed := boxUserFn(userFn{funcInfoStatic: info})
-			pkg.globals[id] = pkgGlobal{Value: &boxed, IsPublic: true, IsStatic: true}
-
-		case ast.ClassDefinition:
-			if stmt.Name == "" {
-				panic(vm.compileErrorAt(stmt, "cannot declare a class with no name"))
-			}
-			id := claim(stmt, stmt.Name)
-			boxed := boxUserClass(newUserClass(stmt.Name, vm.at(stmt), stmt.Args))
-			pkg.globals[id] = pkgGlobal{Value: &boxed, IsPublic: true, IsStatic: true}
-		}
+	code := make([]sourced, len(stmts))
+	for i, stmt := range stmts {
+		code[i] = sourced{src, stmt}
 	}
+	vm.hoistDeclarations(pkg, code, claim, false)
 
 	// 2. Declare new top-level variable bindings in this turn (never constant-folded
 	// across turns so later redeclarations behave cleanly). Bindings that shadow an
@@ -273,66 +246,9 @@ func (s *Session) evalContext(ctx context.Context, src *diag.Source, node ast.No
 		}
 	}
 
-	// 3. Compile hoisted functions.
-	for _, stmt := range stmts {
-		fn, ok := stmt.(ast.Fn)
-		if !ok || fn.UsedAsExpr {
-			continue
-		}
-		global := pkg.globals[fields.Get(fn.Name)]
-		ufn := (*userFn)(global.pointer)
-		vm.compileFunction(ufn.funcInfoStatic, fn.Args, fn.Action, nil)
-	}
-
-	// 3b. Link class inheritance first, then compile class bodies ancestor-first.
-	classByPtr := map[*userClass]ast.ClassDefinition{}
-	var classOrder []*userClass
-	for _, stmt := range stmts {
-		cls, ok := stmt.(ast.ClassDefinition)
-		if !ok {
-			continue
-		}
-		global := pkg.globals[fields.Get(cls.Name)]
-		uclass := (*userClass)(global.pointer)
-
-		if cls.Parent != "" {
-			parentGlobal, exists := pkg.globals[fields.Get(cls.Parent)]
-			if !exists {
-				panic(vm.compileErrorAt(cls, "cannot find the parent class '%v'", cls.Parent))
-			}
-			parentClass, ok := parentGlobal.Value.asUserClass()
-			if !ok {
-				panic(vm.compileErrorAt(cls, "'%v' is %s, not a class", cls.Parent, article(*parentGlobal.Value)))
-			}
-			for p := parentClass; p != nil; p = p.Parent {
-				if p == uclass {
-					panic(vm.compileErrorAt(cls, "'%v' and '%v' inherit from each other", cls.Name, cls.Parent))
-				}
-			}
-			uclass.Parent = parentClass
-		}
-		classByPtr[uclass] = cls
-		classOrder = append(classOrder, uclass)
-	}
-	compiledClasses := map[*userClass]bool{}
-	var ensureCompiled func(uc *userClass)
-	ensureCompiled = func(uc *userClass) {
-		if uc == nil || compiledClasses[uc] {
-			return
-		}
-		cls, inTurn := classByPtr[uc]
-		if !inTurn {
-			return
-		}
-		if uc.Parent != nil {
-			ensureCompiled(uc.Parent)
-		}
-		compiledClasses[uc] = true
-		vm.compileClassBody(uc, cls)
-	}
-	for _, uc := range classOrder {
-		ensureCompiled(uc)
-	}
+	// 3. Compile the hoisted functions and classes.
+	vm.compileHoisted(pkg, code)
+	vm.cp.src = src
 
 	// 4. Compile remaining statements in source order, capturing the last
 	// expression value when present.

@@ -70,7 +70,8 @@ func (vm *Instance) emitThrow(node ast.Throw) instruction {
 }
 
 // compileCondition compiles an expression used as a condition straight to a
-// Go bool; comparisons on locals and constants skip the boxed result
+// Go bool; comparisons on locals and constants skip the boxed result, and &&,
+// || and ! combine their operands' conditions without boxing either
 func (vm *Instance) compileCondition(node ast.Node) func(fbr *fiber) (bool, exception) {
 	site := vm.at(node)
 	if val, ok := vm.evaluate(node).(Value); ok {
@@ -80,9 +81,34 @@ func (vm *Instance) compileCondition(node ast.Node) func(fbr *fiber) (bool, exce
 		}
 	}
 
-	if bin, ok := node.(ast.BinOp); ok {
-		if fast, ok := vm.compileComparison(bin, site); ok {
+	switch n := node.(type) {
+	case ast.BinOp:
+		switch n.Operator {
+		case ast.AndOp:
+			lhs, rhs := vm.compileCondition(n.Lhs), vm.compileCondition(n.Rhs)
+			return func(fbr *fiber) (bool, exception) {
+				if ok, err := lhs(fbr); !ok || err != nil {
+					return false, err
+				}
+				return rhs(fbr)
+			}
+		case ast.OrOp:
+			lhs, rhs := vm.compileCondition(n.Lhs), vm.compileCondition(n.Rhs)
+			return func(fbr *fiber) (bool, exception) {
+				if ok, err := lhs(fbr); ok || err != nil {
+					return ok, err
+				}
+				return rhs(fbr)
+			}
+		}
+		if fast, ok := vm.compileComparison(n, site); ok {
 			return fast
+		}
+	case ast.Not:
+		inner := vm.compileCondition(n.Value)
+		return func(fbr *fiber) (bool, exception) {
+			ok, err := inner(fbr)
+			return !ok, err
 		}
 	}
 
@@ -99,9 +125,24 @@ func (vm *Instance) compileCondition(node ast.Node) func(fbr *fiber) (bool, exce
 func (vm *Instance) emitConditional(node ast.Conditional) instruction {
 	condition := vm.compileCondition(node.Condition)
 	action := vm.compile(node.Action)
-
+	var otherwise instruction
 	if node.Otherwise != nil {
-		otherwise := vm.compile(node.Otherwise)
+		otherwise = vm.compile(node.Otherwise)
+	}
+
+	// a condition known while compiling runs one branch; both are compiled, so
+	// mistakes in the other are still reported
+	if val, ok := vm.evaluate(node.Condition).(Value); ok {
+		switch {
+		case val.IsTruthy():
+			return action
+		case otherwise != nil:
+			return otherwise
+		}
+		return func(fbr *fiber) (Value, exception) { return Value{}, nil }
+	}
+
+	if otherwise != nil {
 
 		return func(fbr *fiber) (Value, exception) {
 			ok, err := condition(fbr)
@@ -750,6 +791,7 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 
 type switchCaseCompiled struct {
 	values []instruction
+	conds  []func(fbr *fiber) (bool, exception) // a tagless switch's case conditions
 	action instruction
 }
 
@@ -758,15 +800,21 @@ func (vm *Instance) emitSwitch(node ast.Switch) instruction {
 
 	cases := make([]switchCaseCompiled, len(node.Cases))
 	for i, c := range node.Cases {
-		vals := make([]instruction, len(c.Values))
-		for j, val := range c.Values {
-			vals[j] = vm.compile(val)
+		var vals []instruction
+		var conds []func(fbr *fiber) (bool, exception)
+		for _, val := range c.Values {
+			if node.Value == nil {
+				conds = append(conds, vm.compileCondition(val))
+			} else {
+				vals = append(vals, vm.compile(val))
+			}
 		}
 		cl.switches++
 		action := vm.compile(c.Action)
 		cl.switches--
 		cases[i] = switchCaseCompiled{
 			values: vals,
+			conds:  conds,
 			action: action,
 		}
 	}
@@ -783,12 +831,12 @@ func (vm *Instance) emitSwitch(node ast.Switch) instruction {
 		return func(fbr *fiber) (Value, exception) {
 			for _, c := range cases {
 				matched := false
-				for _, valInst := range c.values {
-					condVal, err := valInst(fbr)
+				for _, cond := range c.conds {
+					ok, err := cond(fbr)
 					if err != nil {
-						return condVal, err
+						return Value{}, err
 					}
-					if condVal.IsTruthy() {
+					if ok {
 						matched = true
 						break
 					}

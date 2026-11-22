@@ -94,3 +94,12 @@ func TestHasPackageHeader(t *testing.T) {
 		}
 	}
 }
+
+// a script's io.readln gets the line after it, not one the REPL read ahead
+func TestREPLAndScriptShareStdin(t *testing.T) {
+	var out, errOut bytes.Buffer
+	runREPLLoop(strings.NewReader("x := io.readln()\nhello\nx\n"), &out, &errOut, replConfig{inline: true}, nil, nil, nil)
+	if errOut.Len() != 0 || !strings.Contains(out.String(), "hello") {
+		t.Fatalf("stdout %q, stderr %q", out.String(), errOut.String())
+	}
+}

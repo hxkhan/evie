@@ -1,3 +1,4 @@
+// Package io is Evie's console package: print, println, prompt and readln.
 package io
 
 import (
@@ -17,18 +18,27 @@ type lineResult struct {
 	err  error
 }
 
-// lineReader serializes line reads from a single io.Reader and keeps an
-// in-flight read cancellable via context.
-type lineReader struct {
+// LineReader reads lines from one source for everyone who reads from it: the
+// io package of any number of engines, and the host itself, such as a REPL
+// reading its own input between scripts. Give it to an engine as
+// evie.Options.Stdin and the io package reads through it rather than through
+// a buffer of its own, so no reader takes lines meant for another.
+//
+// A read that is cancelled leaves its line pending, and the next read gets it,
+// so no line is lost. A Read of the source itself cannot be cancelled: one
+// that never returns keeps its goroutine until the source is closed.
+type LineReader struct {
 	sem     chan struct{}
 	src     goio.Reader // nil means track os.Stdin dynamically
 	file    *os.File
 	buf     *bufio.Reader
 	pending chan lineResult
+	rest    []byte // what Read has yet to hand out of the last line
 }
 
-func newLineReader(src goio.Reader) *lineReader {
-	r := &lineReader{
+// NewLineReader makes a line reader for src
+func NewLineReader(src goio.Reader) *LineReader {
+	r := &LineReader{
 		sem: make(chan struct{}, 1),
 		src: src,
 	}
@@ -38,9 +48,33 @@ func newLineReader(src goio.Reader) *lineReader {
 	return r
 }
 
-var defaultStdin = newLineReader(nil)
+var defaultStdin = NewLineReader(nil)
 
-func (r *lineReader) readLine(ctx context.Context, prompt string, out goio.Writer) (string, bool, error) {
+// ReadLine reads the next line without its line ending; eof says the source
+// has no more. When ctx is done first, the read gives up with ctx's cause.
+func (r *LineReader) ReadLine(ctx context.Context) (line string, eof bool, err error) {
+	return r.readLine(ctx, "", nil)
+}
+
+// Read makes a LineReader an io.Reader, so it can be an engine's Stdin; it
+// hands out whole lines, each with a newline
+func (r *LineReader) Read(p []byte) (int, error) {
+	if len(r.rest) == 0 {
+		line, eof, err := r.ReadLine(context.Background())
+		if err != nil {
+			return 0, err
+		}
+		if eof {
+			return 0, goio.EOF
+		}
+		r.rest = append([]byte(line), '\n')
+	}
+	n := copy(p, r.rest)
+	r.rest = r.rest[n:]
+	return n, nil
+}
+
+func (r *LineReader) readLine(ctx context.Context, prompt string, out goio.Writer) (string, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return "", false, context.Cause(ctx)
 	}
@@ -116,8 +150,10 @@ func Construct() *vm.Package {
 // nil) and writing to out (or os.Stdout when nil).
 func ConstructWith(in goio.Reader, out goio.Writer) *vm.Package {
 	reader := defaultStdin
-	if in != nil {
-		reader = newLineReader(in)
+	if lr, ok := in.(*LineReader); ok {
+		reader = lr
+	} else if in != nil {
+		reader = NewLineReader(in)
 	}
 	writer := func() goio.Writer {
 		if out != nil {

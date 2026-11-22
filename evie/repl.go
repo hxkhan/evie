@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hxkhan/evie"
+	evieio "github.com/hxkhan/evie/std/io"
 )
 
 type replConfig struct {
@@ -79,10 +80,13 @@ func runREPLLoop(
 	activeEngine *atomic.Pointer[evie.Engine],
 	running, interrupted *atomic.Bool,
 ) {
+	// the REPL and the scripts it runs read stdin through one line reader, so a
+	// script's io.readln gets the next line, not one the REPL read ahead
+	lines := evieio.NewLineReader(in)
 	newSession := func() (*evie.Engine, *evie.Session) {
 		eng := evie.New(evie.Options{
 			Root:   ".",
-			Stdin:  in,
+			Stdin:  lines,
 			Stdout: out,
 			Debug: evie.Debug{
 				NoFastPaths: !cfg.inline,
@@ -115,9 +119,6 @@ func runREPLLoop(
 		promptCont = "\033[90m  ...\033[0m "
 	}
 
-	scanner := bufio.NewScanner(in)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-
 	var buf strings.Builder
 	for {
 		if cfg.interactive {
@@ -128,7 +129,8 @@ func runREPLLoop(
 			}
 		}
 
-		if !scanner.Scan() {
+		line, eof, err := lines.ReadLine(context.Background())
+		if eof || err != nil {
 			if buf.Len() > 0 {
 				evalREPLChunk(sess, buf.String(), out, errOut, cfg, running, interrupted)
 			}
@@ -138,7 +140,6 @@ func runREPLLoop(
 			return
 		}
 
-		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)
 
 		// Meta-commands only trigger when not inside a multi-line construct.

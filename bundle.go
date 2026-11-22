@@ -106,7 +106,7 @@ func ParseProject(fsys iofs.FS, dirPath string) (*Bundle, error) {
 func ParseSource(name string, src []byte) (*Bundle, error) {
 	dir, err := os.Getwd()
 	if err != nil {
-		return nil, err
+		dir = "." // some platforms, such as js/wasm, have no working directory
 	}
 	return parseUnit(osSourceFS{}, diag.NewSource(name, src), name, dir, dir, nil)
 }

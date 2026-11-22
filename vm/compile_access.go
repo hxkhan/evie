@@ -10,11 +10,23 @@ import (
 
 func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
 	cl := vm.currentClosure()
-	index, success := cl.scope.Declare(node.Name, node.IsStatic)
+	index, success := cl.scope.Reserve(node.Name, node.IsStatic)
 	if !success {
 		panic(vm.compileErrorAt(node, "double declaration of %s", node.Name))
 	}
 	escapes := cl.mayEscape(node.Name)
+
+	// The initializer sees the bindings from before this declaration, so `x := x + 1`
+	// in an inner block reads the outer x and `x := x` cannot read its own unwritten
+	// slot. Only a function literal in the initializer that names the binding sees it,
+	// which is how a local closure calls itself; that name is captured, so the binding
+	// escapes and takes the generic path below, which creates its cell before running
+	// the initializer.
+	if findCapturedNames(node.Value)[node.Name] {
+		cl.scope.Bind(node.Name, index, node.IsStatic)
+	} else {
+		defer cl.scope.Bind(node.Name, index, node.IsStatic)
+	}
 
 	// try to evaluate
 	switch value := vm.evaluate(node.Value).(type) {

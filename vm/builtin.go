@@ -12,7 +12,8 @@ import (
 )
 
 // maxStringAllocBytes caps single-call string expansion in repeat/padStart/padEnd
-// to prevent untrusted scripts from triggering an out-of-memory crash.
+// and the size of buffer(n), to prevent untrusted scripts from triggering an
+// out-of-memory crash.
 const maxStringAllocBytes = 64 << 20
 
 // builtinType is a type known to the runtime: it constructs values when called
@@ -549,6 +550,9 @@ var typeBuffer = newBuiltinType("buffer", NewVariadic("buffer", 0, func(c Call) 
 	}
 	if n < 0 {
 		return Value{}, fmt.Errorf("buffer: size must not be negative, got %d", n)
+	}
+	if n > maxStringAllocBytes {
+		return Value{}, fmt.Errorf("buffer: size %d exceeds the maximum buffer size (%d bytes)", n, maxStringAllocBytes)
 	}
 	return BoxBuffer(make([]byte, n)), nil
 }), methodTable(

@@ -297,6 +297,15 @@ func (lex *Lexer) simple(lit string, start int) token.Token {
 
 // lexTemplateInto appends all tokens of a template literal (including nested templates) into dst
 func (lex *Lexer) lexTemplateInto(tickStart, tickLine, tickCol int, dst *[]token.Token) {
+	lex.depth++
+	defer func() { lex.depth-- }()
+	if lex.depth > maxTemplateDepth {
+		// give up on the rest of the source; the parser fails on the nesting before it gets here
+		*dst = append(*dst, token.Token{Type: token.Invalid, Literal: "`", Pos: token.Pos{Line: tickLine, Column: tickCol, Length: 1}})
+		lex.cursor = len(lex.src)
+		return
+	}
+
 	startPos := lex.cursor
 	partLine := lex.line
 	partCol := startPos - lex.lineStart + 1

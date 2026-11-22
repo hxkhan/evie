@@ -776,6 +776,38 @@ func TestNestedNamedFunctions(t *testing.T) {
 	}
 }
 
+// an initializer sees the bindings from before its declaration, never its own
+// unwritten slot; only a function literal naming the binding sees it
+func TestDeclarationInitializersSeeOuterBindings(t *testing.T) {
+	val := run(t, `package main
+	N := 4
+	fn outerConst() { N := N * 2; return N }
+	fn wrap(f) => f
+	fn main() {
+		y := 1
+		var inner := 0
+		if true { y := y + 10; inner = y }
+		x := 5
+		f := fn() { x := x + 1; return x }
+		fact := fn(n) { if n < 2 { return 1 }; return n * fact(n - 1) }
+		g := wrap(fn(n) { if n < 1 { return 0 }; return 1 + g(n - 1) })
+		return [y, inner, f(), outerConst(), fact(5), g(4)]
+	}`)
+	if want := "[1, 11, 6, 8, 120, 4]"; val.String() != want {
+		t.Fatalf("got %s, want %s", val, want)
+	}
+
+	// `v := v` used to read whatever the previous call left in the slot: a stale
+	// string, or a heap cell reinterpreted as a string, which crashed the process
+	_, err := runCode(`package main
+	fn leak() { c := 1.5; f := fn() => c; return f }
+	fn peek() { v := v; return v }
+	fn main() { g := leak(); x := peek(); return x.len() }`)
+	if err == nil || !strings.Contains(err.Error(), "cannot find 'v'") {
+		t.Fatalf("expected a compile error for a self-referencing declaration, got %v", err)
+	}
+}
+
 // closures and tasks inside for and while loops capture per-iteration bindings
 func TestLoopClosureAndTaskCaptures(t *testing.T) {
 	code := `package main
@@ -1193,10 +1225,11 @@ func TestBufferMutationAndConstruction(t *testing.T) {
 			catch { b1[0] = -1 }.message,
 			catch { b1[10] = 65 }.message,
 			catch(buffer(-2)).message,
+			catch(buffer(1000000000000)).message,
 		]
 		return [b1.string(), b2.string(), [b3[0], b3[1], b3[2]], errs]
 	}`)
-	want := `["Abd!?", "Hi", [0, 42, 0], ["buffer element must be an integer in 0..255, got 300", "buffer element must be an integer in 0..255, got -1", "IndexError: buffer index 10 out of bounds (length 5)", "buffer: size must not be negative, got -2"]]`
+	want := `["Abd!?", "Hi", [0, 42, 0], ["buffer element must be an integer in 0..255, got 300", "buffer element must be an integer in 0..255, got -1", "IndexError: buffer index 10 out of bounds (length 5)", "buffer: size must not be negative, got -2", "buffer: size 1000000000000 exceeds the maximum buffer size (67108864 bytes)"]]`
 	if val.String() != want {
 		t.Fatalf("got  %s\nwant %s", val, want)
 	}

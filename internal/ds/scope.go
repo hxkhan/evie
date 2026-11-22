@@ -56,16 +56,30 @@ func (sc *Scope) Names() []string {
 
 // Declare adds a new binding to the current block-scope
 func (sc *Scope) Declare(name string, isStatic bool) (index int, success bool) {
-	top := sc.blocks[len(sc.blocks)-1]
-	if _, exists := top[name]; exists {
+	index, success = sc.Reserve(name, isStatic)
+	if success {
+		sc.Bind(name, index, isStatic)
+	}
+	return index, success
+}
+
+// Reserve allocates the slot for a declaration in the current block-scope
+// without making name visible yet, so code compiled before Bind still sees
+// any outer binding of the same name
+func (sc *Scope) Reserve(name string, isStatic bool) (index int, success bool) {
+	if _, exists := sc.blocks[len(sc.blocks)-1][name]; exists {
 		return 0, false
 	}
-	top[name] = Binding{Index: sc.index, IsStatic: isStatic}
 	if sc.TrackSlots {
 		sc.slots = append(sc.slots, SlotInfo{Name: name, IsStatic: isStatic})
 	}
 	sc.index++
 	return sc.index - 1, true
+}
+
+// Bind makes a slot returned by Reserve visible as name in the current block-scope
+func (sc *Scope) Bind(name string, index int, isStatic bool) {
+	sc.blocks[len(sc.blocks)-1][name] = Binding{Index: index, IsStatic: isStatic}
 }
 
 // Reach searches for a binding in this scope

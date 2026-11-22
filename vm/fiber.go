@@ -41,9 +41,11 @@ func (fbr *fiber) unlock() {
 	fbr.vm.rt.release()
 }
 
-// reset forgets everything from the previous use of this fiber
+// reset forgets everything from the previous use of this fiber. It clears the
+// whole backing array, not just the live part: popped frames leave values
+// behind, and they must neither stay reachable nor be seen by the next user.
 func (fbr *fiber) reset() {
-	clear(fbr.stack)
+	clear(fbr.stack[:cap(fbr.stack)])
 	fbr.running = false
 	fbr.active = nil
 	fbr.base = 0

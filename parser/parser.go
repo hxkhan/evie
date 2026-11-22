@@ -442,7 +442,14 @@ func (ps *parser) parseConditional(main token.Token) ast.Node {
 	if ps.consume("else") {
 		elseTok := ps.last
 		if ps.consume("if") {
+			// an else-if nests the rest of the chain, and every later pass recurses
+			// into it, so it counts towards the nesting limit like any other nesting
+			ps.depth++
+			if ps.depth > maxParseDepth {
+				ps.fail(ps.last.Pos, "this else-if chain is nested too deeply; use a switch")
+			}
 			node.Otherwise = ps.parseConditional(ps.last)
+			ps.depth--
 		} else {
 			if !ps.consume("{") {
 				ps.expected("'{' or 'if' after else", elseTok, "")

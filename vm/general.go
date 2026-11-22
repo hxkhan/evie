@@ -131,8 +131,7 @@ func (vm *Instance) borrowFiber(s *stopper) (fbr *fiber) {
 // takeFiber is borrowFiber for a caller that already holds a use of s for
 // the fiber, as a parent does for the task it spawns
 func (vm *Instance) takeFiber(s *stopper) (fbr *fiber) {
-	fbr = vm.rt.fibers.Get().(*fiber)
-	fbr.reset()
+	fbr = vm.rt.fibers.Get().(*fiber) // pooled fibers were reset by releaseFiber
 	fbr.attach(s)
 	return fbr
 }
@@ -459,7 +458,11 @@ func (cp *compiler) reach(name string) (binding, error) {
 				return local{index: int16(binding.Index), isCaptured: false, isBoxed: closure.mayEscape(name), isStatic: binding.IsStatic}, nil
 			}
 
-			// otherwise capture it & return the index
+			// otherwise capture it & return the index; a captured slot must live in a heap
+			// cell, or the closure would read the stack slot's contents as a pointer
+			if !closure.mayEscape(name) {
+				panic(fmt.Errorf("internal compiler error: '%s' is captured but its slot is not boxed", name))
+			}
 			return local{index: int16(cp.addToCaptured(scroll, binding.Index)), isCaptured: true, isStatic: binding.IsStatic}, nil
 		}
 	}

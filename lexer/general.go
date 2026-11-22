@@ -16,7 +16,14 @@ type Lexer struct {
 
 	backlog []token.Token // backlog of tokens to return
 	bi      int           // backlog index
+	depth   int           // how many template literals the cursor is inside
 }
+
+// maxTemplateDepth bounds how deeply template literals may nest. Templates are
+// lexed eagerly and recursively, so without a bound deep nesting would overflow
+// the Go stack before the parser, which allows less nesting than this and
+// reports it as an error, ever saw a token.
+const maxTemplateDepth = 512
 
 func New(input []byte) *Lexer {
 	return &Lexer{src: input, cursor: 0, line: 1}

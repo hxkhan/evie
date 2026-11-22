@@ -63,6 +63,9 @@ func main() {
 	out := flag.String("out", "", "also write this run's JSON to the given path")
 	md := flag.String("md", "", "write a markdown report to the given path")
 	flag.Parse()
+	if *runs < 1 {
+		fatal(fmt.Errorf("-n must be at least 1"))
+	}
 
 	root, err := findDir(*dir)
 	if err != nil {
@@ -284,7 +287,7 @@ func printSummary(run Run, base *Run) {
 		}
 	}
 	fmt.Println()
-	fmt.Printf("geomean median: %s", dur(int64(geomean(run, nil))))
+	fmt.Printf("geomean median: %s", dur(int64(geomean(run))))
 	if base != nil {
 		if ratio := geomeanRatio(run, base); ratio > 0 {
 			fmt.Printf("   vs baseline: %+.1f%%", (ratio-1)*100)
@@ -310,7 +313,7 @@ func markdown(run Run, base *Run) string {
 		}
 		fmt.Fprintf(&sb, "| %s | %s | %s | %.1f%% | %s | %s |\n", r.Name, dur(r.MedianNs), dur(r.MinNs), r.StdDev, bytes(r.Bytes), delta(r, find(base, r.Name)))
 	}
-	fmt.Fprintf(&sb, "\nGeomean median: **%s**", dur(int64(geomean(run, nil))))
+	fmt.Fprintf(&sb, "\nGeomean median: **%s**", dur(int64(geomean(run))))
 	if base != nil {
 		if ratio := geomeanRatio(run, base); ratio > 0 {
 			fmt.Fprintf(&sb, " (%+.1f%% vs baseline)", (ratio-1)*100)
@@ -320,12 +323,12 @@ func markdown(run Run, base *Run) string {
 	return sb.String()
 }
 
-// geomean of medians, optionally restricted to the names present in `only`
-func geomean(run Run, only *Run) float64 {
+// geomean of the medians of the benchmarks that succeeded
+func geomean(run Run) float64 {
 	var sum float64
 	var n int
 	for _, r := range run.Results {
-		if !r.OK || (only != nil && find(only, r.Name) == nil) {
+		if !r.OK {
 			continue
 		}
 		sum += math.Log(float64(r.MedianNs))

@@ -19,21 +19,23 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	goruntime "runtime"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
 type Runtime struct {
-	Name    string   // display name in tables
-	Ext     string   // file extension in suites/<bench>/<bench>.<ext>
-	Bins    []string // executable candidates on PATH (empty for built evie)
-	Args    []string // extra flags before the script path
-	OptIn   bool     // skipped unless -jit or explicitly requested via -langs
-	Resolved string  // resolved binary path
+	Name     string   // display name in tables
+	Ext      string   // file extension in suites/<bench>/<bench>.<ext>
+	Bins     []string // executable candidates on PATH (empty for built evie)
+	Args     []string // extra flags before the script path
+	OptIn    bool     // skipped unless -jit or explicitly requested via -langs
+	Resolved string   // resolved binary path
 }
 
 type Cell struct {
@@ -49,14 +51,14 @@ type Cell struct {
 }
 
 type Report struct {
-	Commit    string            `json:"commit"`
-	Date      time.Time         `json:"date"`
-	OS        string            `json:"os"`
-	CPUs      int               `json:"cpus"`
-	Runs      int               `json:"runs"`
-	Languages []string          `json:"languages"`
-	Benchmarks []string         `json:"benchmarks"`
-	Cells     map[string]Cell   `json:"cells"` // key: bench + "/" + lang
+	Commit     string          `json:"commit"`
+	Date       time.Time       `json:"date"`
+	OS         string          `json:"os"`
+	CPUs       int             `json:"cpus"`
+	Runs       int             `json:"runs"`
+	Languages  []string        `json:"languages"`
+	Benchmarks []string        `json:"benchmarks"`
+	Cells      map[string]Cell `json:"cells"` // key: bench + "/" + lang
 }
 
 var defaultRuntimes = []Runtime{
@@ -81,6 +83,10 @@ func main() {
 	md := flag.String("md", "", "write a markdown comparison table to this path")
 	outJSON := flag.String("json", "", "write raw JSON results to this path")
 	flag.Parse()
+	if *runs < 1 {
+		fatal(fmt.Errorf("-n must be at least 1"))
+	}
+	stopOnInterrupt()
 
 	root, err := findCompareDir(*dir)
 	if err != nil {
@@ -108,6 +114,7 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
+	atExit(cleanup)
 	defer cleanup()
 
 	active := selectRuntimes(evieBin, *langs, *includeJIT)
@@ -181,7 +188,7 @@ func main() {
 	}
 
 	if failed > 0 {
-		os.Exit(1)
+		exit(1)
 	}
 }
 
@@ -560,5 +567,39 @@ func git(dir string, args ...string) string {
 
 func fatal(err error) {
 	fmt.Fprintln(os.Stderr, "error:", err)
-	os.Exit(2)
+	exit(2)
+}
+
+// cleanups run before the runner exits early; os.Exit skips deferred calls,
+// which used to leave the .evie-bin-* build folder behind
+var (
+	cleanupsMu sync.Mutex
+	cleanups   []func()
+)
+
+func atExit(fn func()) {
+	cleanupsMu.Lock()
+	defer cleanupsMu.Unlock()
+	cleanups = append(cleanups, fn)
+}
+
+// exit runs the cleanups and exits with code
+func exit(code int) {
+	cleanupsMu.Lock()
+	for i := len(cleanups) - 1; i >= 0; i-- {
+		cleanups[i]()
+	}
+	cleanups = nil
+	cleanupsMu.Unlock()
+	os.Exit(code)
+}
+
+// stopOnInterrupt cleans up and exits on Ctrl+C
+func stopOnInterrupt() {
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt)
+	go func() {
+		<-signals
+		exit(130)
+	}()
 }

@@ -1,4 +1,4 @@
-# Cross-language benchmark runner wrapper (pins P-cores on hybrid Intel CPUs when available).
+# Cross-language benchmark runner wrapper; -Affinity pins it to a set of cores, such as 0x0FFF for the P-cores of an i5-13400F.
 # Usage:
 #   .\benchmarks\compare\bench.ps1
 #   .\benchmarks\compare\bench.ps1 -Filter "fib|sieve" -Runs 5

@@ -22,18 +22,10 @@ func run(t *testing.T, code string) vm.Value {
 	return val
 }
 
-// Helper to evaluate Evie code and return the result value or error
+// Helper to evaluate Evie code and return the result value or error. It does
+// not recover panics: nothing a script does may panic across the host boundary,
+// and a panic here must fail the test.
 func runCode(code string) (resVal vm.Value, retErr error) {
-	defer func() {
-		if r := recover(); r != nil {
-			if e, ok := r.(error); ok {
-				retErr = e
-			} else {
-				retErr = fmt.Errorf("%v", r)
-			}
-		}
-	}()
-
 	evm := evie.New()
 	trimmed := strings.TrimSpace(code)
 	script := code

@@ -808,6 +808,42 @@ func TestDeclarationInitializersSeeOuterBindings(t *testing.T) {
 	}
 }
 
+// a parameter of a nested function shadows outer bindings, so an outer local of
+// the same name stays on the stack and keeps its loop fast paths
+func TestParametersDoNotMakeOuterLocalsEscape(t *testing.T) {
+	val := run(t, `package main
+	fn main() {
+		var x := 0
+		while x < 10 { x += 1 }
+		ys := [1, 2].map(fn(x) => x * 2)
+		var i := 0
+		while i < 10 { d := 3; i += d }
+		return [x, ys, i]
+	}`)
+	if want := "[10, [2, 4], 12]"; val.String() != want {
+		t.Fatalf("got %s, want %s", val, want)
+	}
+}
+
+// a '(' or '[' at the start of a line begins a new statement instead of calling
+// or indexing the line before; a '.' still continues it
+func TestLineBreakEndsCallsAndIndexes(t *testing.T) {
+	val := run(t, `package main
+	fn main() {
+		arr := [5, 6]
+		x := arr
+		[1, 2].len()
+		f := fn(v) => v
+		y := f
+		(3)
+		return [x, y(4), arr
+			.len()]
+	}`)
+	if want := "[[5, 6], 4, 2]"; val.String() != want {
+		t.Fatalf("got %s, want %s", val, want)
+	}
+}
+
 // closures and tasks inside for and while loops capture per-iteration bindings
 func TestLoopClosureAndTaskCaptures(t *testing.T) {
 	code := `package main

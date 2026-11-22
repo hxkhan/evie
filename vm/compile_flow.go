@@ -201,13 +201,36 @@ func (vm *Instance) emitCountedWhile(node ast.While, site site) instruction {
 	// Check if the last statement is `i += step` where `i` matches the loop variable,
 	// nothing in the block shadows `i` (or `step`), and none of the preceding
 	// statements `continue` (which would skip the step).
+	// The step is analysed before the body is compiled, outside the body's scope, so it
+	// may only name bindings from before the loop: a name the body declares would
+	// resolve to an outer binding or to nothing.
 	declaresName := func(stmts []ast.Node, name string) bool {
 		for _, stmt := range stmts {
-			if d, ok := stmt.(ast.Decl); ok && d.Name == name {
-				return true
+			switch d := stmt.(type) {
+			case ast.Decl:
+				if d.Name == name {
+					return true
+				}
+			case ast.Fn:
+				if !d.UsedAsExpr && d.Name == name {
+					return true
+				}
+			case ast.ClassDefinition:
+				if d.Name == name {
+					return true
+				}
 			}
 		}
 		return false
+	}
+	namesAny := func(n ast.Node, stmts []ast.Node) (found bool) {
+		ast.Walk(n, func(sub ast.Node) bool {
+			if id, ok := sub.(ast.Ident); ok && declaresName(stmts, id.Name) {
+				found = true
+			}
+			return !found
+		})
+		return found
 	}
 	hasStep := false
 	stepIsLocal := false
@@ -215,21 +238,22 @@ func (vm *Instance) emitCountedWhile(node ast.While, site site) instruction {
 	var stepConst float64
 	bodyNodes := block.Code
 	if mbo, ok := block.Code[len(block.Code)-1].(ast.MutableBinOp); ok && mbo.Operator == ast.AddOp {
-		if lhsIdent, ok := mbo.Lhs.(ast.Ident); ok && lhsIdent.Name == idxIdent.Name && !containsContinue(block.Code[:len(block.Code)-1]) && !declaresName(block.Code[:len(block.Code)-1], idxIdent.Name) {
+		prefix := block.Code[:len(block.Code)-1]
+		if lhsIdent, ok := mbo.Lhs.(ast.Ident); ok && lhsIdent.Name == idxIdent.Name && !containsContinue(prefix) && !declaresName(prefix, idxIdent.Name) && !namesAny(mbo.Rhs, prefix) {
 			if target, ok := vm.evaluate(lhsIdent).(local); ok && target == idxLocal && !target.isStatic {
 				switch r := vm.evaluate(mbo.Rhs).(type) {
 				case Value:
 					if r.pointer == f64Type {
 						hasStep = true
 						stepConst = math.Float64frombits(r.scalar)
-						bodyNodes = block.Code[:len(block.Code)-1]
+						bodyNodes = prefix
 					}
 				case local:
-					if stepIdent, ok := mbo.Rhs.(ast.Ident); ok && !r.isCaptured && !r.isBoxed && !declaresName(block.Code[:len(block.Code)-1], stepIdent.Name) {
+					if _, ok := mbo.Rhs.(ast.Ident); ok && !r.isCaptured && !r.isBoxed {
 						hasStep = true
 						stepIsLocal = true
 						stepLocal = r
-						bodyNodes = block.Code[:len(block.Code)-1]
+						bodyNodes = prefix
 					}
 				}
 			}

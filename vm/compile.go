@@ -230,14 +230,25 @@ func collectCapturedNames(body ast.Node, captured *map[string]bool) {
 		}
 		(*captured)[name] = true
 	}
-	scanNested := func(n ast.Node) {
+	// scanNested marks the names a nested function or class body refers to, except
+	// those its own parameters (or those of a function between) shadow: a parameter
+	// is visible in the whole body, so such a name can never mean an outer binding.
+	// Anything else is marked even if a nested local might shadow it, which only
+	// boxes more than needed.
+	var scanNested func(n ast.Node, shadowed []string)
+	scanNested = func(n ast.Node, shadowed []string) {
 		ast.Walk(n, func(sub ast.Node) bool {
 			switch s := sub.(type) {
 			case ast.Ident:
-				mark(s.Name)
+				if !slices.Contains(shadowed, s.Name) {
+					mark(s.Name)
+				}
 				if s.Name == "super" {
 					mark("this")
 				}
+			case ast.Fn:
+				scanNested(s.Action, append(slices.Clip(shadowed), s.Args...))
+				return false
 			case ast.ClassDefinition:
 				if s.Parent != "" {
 					mark(s.Parent)
@@ -250,14 +261,14 @@ func collectCapturedNames(body ast.Node, captured *map[string]bool) {
 	ast.Walk(body, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case ast.Fn:
-			scanNested(n.Action)
+			scanNested(n.Action, n.Args)
 			return false
 		case ast.ClassDefinition:
 			if n.Parent != "" {
 				mark(n.Parent)
 				mark(n.Name)
 			}
-			scanNested(n.Action)
+			scanNested(n.Action, nil)
 			return false
 		}
 		return true

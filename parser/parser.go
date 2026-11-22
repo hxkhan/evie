@@ -244,8 +244,16 @@ func (ps *parser) parseImportList(open token.Token) []ast.ImportSpec {
 }
 
 func (ps *parser) parseFloat(tok token.Token) float64 {
+	// numbers are decimal digits with an optional fraction; strconv alone would
+	// also take exponents, hex floats and the like
+	valid := tok.Literal != ""
+	for _, c := range tok.Literal {
+		if (c < '0' || c > '9') && c != '.' {
+			valid = false
+		}
+	}
 	num, err := strconv.ParseFloat(tok.Literal, 64)
-	if err != nil {
+	if err != nil || !valid {
 		ps.fail(tok.Pos, fmt.Sprintf("'%s' is not a valid number", tok.Literal))
 	}
 	return num
@@ -906,6 +914,12 @@ func (ps *parser) parseNode(precedenceLevel int, asExpr bool) (node ast.Node) {
 func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) ast.Node {
 	for {
 		next := ps.PeekToken()
+
+		// a '(' or '[' that starts a line starts a new statement; it neither calls
+		// nor indexes the expression on the line before
+		if next.NewlineBefore && (next.IsSimple("(") || next.IsSimple("[")) {
+			break
+		}
 
 		// field access; a member may be named like a keyword, as in task.await()
 		if next.IsSimple(".") {

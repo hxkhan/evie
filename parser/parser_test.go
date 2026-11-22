@@ -65,6 +65,11 @@ func TestParseErrors(t *testing.T) {
 		"x := " + strings.Repeat("`{", 1_000_000):                           "nested too deeply",
 		"fn main() { if a {}" + strings.Repeat(" else if a {}", 300) + " }": "nested too deeply",
 		// a malformed number is one token, not a number followed by a name
+		"x := 1e5":    "'1e5' is not a valid number",
+		"x := 0x10":   "'0x10' is not a valid number",
+		"x := 123abc": "'123abc' is not a valid number",
+		"x := 1.25":   "",
+		"fn main() { if a {}" + strings.Repeat(" else if a {}", 200) + " }": "",
 	}
 	for src, want := range cases {
 		node, err := parser.Parse([]byte(src))

@@ -60,7 +60,16 @@ func (lex *Lexer) eos() token.Token {
 	return token.Token{Type: token.EOS, Literal: "end of source", Pos: token.Pos{Line: lex.line, Column: lex.cursor - lex.lineStart + 1, Length: 1}}
 }
 
+// composeInto lexes the next token (or all tokens of a template literal) into dst
 func (lex *Lexer) composeInto(dst *[]token.Token) {
+	before, line := len(*dst), lex.line // the line the previous token ended on
+	lex.compose(dst)
+	if len(*dst) > before && (*dst)[before].Line > line {
+		(*dst)[before].NewlineBefore = true
+	}
+}
+
+func (lex *Lexer) compose(dst *[]token.Token) {
 START:
 	start := lex.cursor
 	startLine := lex.line
@@ -271,6 +280,11 @@ START:
 				}
 
 				break
+			}
+			// take letters and digits glued to the number too, so `1e5` or `0x10` is one
+			// malformed number for the parser to reject instead of a number and a name
+			for next, ns := lex.peek(); isValidNamePart(next); next, ns = lex.peek() {
+				lex.cursor += ns
 			}
 			// extract number content
 			num := unsafe.String(&lex.src[start], lex.cursor-start)

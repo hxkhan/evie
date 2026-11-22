@@ -58,6 +58,7 @@ type Token struct {
 	Type    Type
 	Literal string
 	Pos
+	NewlineBefore bool // a line break separates this token from the one before it
 }
 
 // IsEOS reports whether the token signals end-of-source

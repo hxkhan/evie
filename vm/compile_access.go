@@ -437,7 +437,7 @@ func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) inst
 									return Value{}, nil
 								}
 							} else if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
-								(*(*map[string]Value)(target.pointer))[*(*string)(keyVal.pointer)] = val
+								target.objectMap()[*(*string)(keyVal.pointer)] = val
 								return Value{}, nil
 							}
 						}
@@ -457,7 +457,7 @@ func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) inst
 								return Value{}, nil
 							}
 						} else if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
-							(*(*map[string]Value)(target.pointer))[*(*string)(keyVal.pointer)] = val
+							target.objectMap()[*(*string)(keyVal.pointer)] = val
 							return Value{}, nil
 						}
 					}
@@ -479,7 +479,7 @@ func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) inst
 									return Value{}, nil
 								}
 							} else if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
-								(*(*map[string]Value)(target.pointer))[*(*string)(keyVal.pointer)] = newVal
+								target.objectMap()[*(*string)(keyVal.pointer)] = newVal
 								return Value{}, nil
 							}
 						}
@@ -500,7 +500,7 @@ func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) inst
 								return Value{}, nil
 							}
 						} else if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
-							(*(*map[string]Value)(target.pointer))[*(*string)(keyVal.pointer)] = newVal
+							target.objectMap()[*(*string)(keyVal.pointer)] = newVal
 							return Value{}, nil
 						}
 					}
@@ -526,7 +526,7 @@ func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) inst
 								return Value{}, nil
 							}
 						} else if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
-							(*(*map[string]Value)(target.pointer))[*(*string)(keyVal.pointer)] = newVal
+							target.objectMap()[*(*string)(keyVal.pointer)] = newVal
 							return Value{}, nil
 						}
 					}
@@ -550,7 +550,7 @@ func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) inst
 							return Value{}, nil
 						}
 					} else if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
-						(*(*map[string]Value)(target.pointer))[*(*string)(keyVal.pointer)] = newVal
+						target.objectMap()[*(*string)(keyVal.pointer)] = newVal
 						return Value{}, nil
 					}
 				}
@@ -572,7 +572,7 @@ func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) inst
 			}
 			if target.pointer != nil && !isKnown(target.pointer) {
 				if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
-					(*(*map[string]Value)(target.pointer))[*(*string)(keyVal.pointer)] = newVal
+					target.objectMap()[*(*string)(keyVal.pointer)] = newVal
 					return Value{}, nil
 				} else if target.scalar == kindArray && keyVal.pointer == f64Type {
 					arr := (*Array)(target.pointer)
@@ -907,7 +907,7 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 								return arr.Data[idx], nil
 							}
 						} else if target.scalar == kindObject && indexVal.scalar == kindString && !isKnown(indexVal.pointer) {
-							return (*(*map[string]Value)(target.pointer))[*(*string)(indexVal.pointer)], nil
+							return target.objectMap()[*(*string)(indexVal.pointer)], nil
 						}
 					}
 					return subscriptValue(site, target, indexVal)
@@ -925,7 +925,7 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 							return arr.Data[idx], nil
 						}
 					} else if target.scalar == kindObject && indexVal.scalar == kindString && !isKnown(indexVal.pointer) {
-						return (*(*map[string]Value)(target.pointer))[*(*string)(indexVal.pointer)], nil
+						return target.objectMap()[*(*string)(indexVal.pointer)], nil
 					}
 				}
 				return subscriptValue(site, target, indexVal)
@@ -950,7 +950,7 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 				return func(fbr *fiber) (Value, exception) {
 					target := *fbr.get(lhsLocal)
 					if target.pointer != nil && !isKnown(target.pointer) && target.scalar == kindObject {
-						return (*(*map[string]Value)(target.pointer))[keyStr], nil
+						return target.objectMap()[keyStr], nil
 					}
 					return subscriptValue(site, target, keyOp)
 				}
@@ -966,7 +966,7 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 			}
 			if target.pointer != nil && !isKnown(target.pointer) {
 				if target.scalar == kindObject && indexVal.scalar == kindString && !isKnown(indexVal.pointer) {
-					return (*(*map[string]Value)(target.pointer))[*(*string)(indexVal.pointer)], nil
+					return target.objectMap()[*(*string)(indexVal.pointer)], nil
 				} else if target.scalar == kindArray && indexVal.pointer == f64Type {
 					arr := (*Array)(target.pointer)
 					f := math.Float64frombits(indexVal.scalar)

@@ -115,7 +115,13 @@ func BoxObject(obj map[string]Value) Value {
 	if obj == nil {
 		obj = map[string]Value{}
 	}
-	return Value{scalar: kindObject, pointer: unsafe.Pointer(&obj)}
+	// a map is one pointer, so the value holds that pointer itself
+	return Value{scalar: kindObject, pointer: *(*unsafe.Pointer)(unsafe.Pointer(&obj))}
+}
+
+// objectMap is the map of a value that holds an object
+func (x Value) objectMap() map[string]Value {
+	return *(*map[string]Value)(unsafe.Pointer(&x.pointer))
 }
 
 // boxUserClass boxes an evie class
@@ -209,7 +215,7 @@ func (x Value) AsObject() (obj map[string]Value, ok bool) {
 	if x.scalar != kindObject || isKnown(x.pointer) {
 		return nil, false
 	}
-	return *(*map[string]Value)(x.pointer), true
+	return x.objectMap(), true
 }
 
 func (x Value) asUserClass() (obj *userClass, ok bool) {
@@ -297,7 +303,7 @@ func (x Value) IsTruthy() bool {
 	case kindArray:
 		return len((*Array)(x.pointer).Data) != 0
 	case kindObject:
-		return len(*(*map[string]Value)(x.pointer)) != 0
+		return len(x.objectMap()) != 0
 	case kindBuffer:
 		return len(*(*[]byte)(x.pointer)) != 0
 	default:
@@ -432,8 +438,8 @@ func (x Value) writeTo(builder *strings.Builder, seen map[unsafe.Pointer]bool, q
 			(*classInstance)(x.pointer).writeTo(builder, seen)
 			return
 		case kindObject:
-			obj := *(*map[string]Value)(x.pointer)
-			ptr := *(*unsafe.Pointer)(x.pointer)
+			obj := x.objectMap()
+			ptr := x.pointer
 			if ptr != nil && seen[ptr] {
 				builder.WriteString("{...}")
 				return
@@ -551,7 +557,7 @@ func (x Value) getField(k fieldKey) (field Value, ok bool) {
 		return x.boundMethod(typeTask, k.id)
 
 	case kindObject:
-		obj := *(*map[string]Value)(x.pointer)
+		obj := x.objectMap()
 		if value, exists := obj[k.name]; exists {
 			return value, true
 		}
@@ -617,7 +623,7 @@ func (x Value) memberNames() []string {
 	case kindError:
 		return append(ids(typeError.Fields), "message", "line", "column", "file", "trace")
 	case kindObject:
-		return append(sortedKeys(*(*map[string]Value)(x.pointer)), ids(typeObject.Fields)...)
+		return append(sortedKeys(x.objectMap()), ids(typeObject.Fields)...)
 	case kindBuiltinType:
 		return ids((*builtinType)(x.pointer).Fields)
 	case kindHost:
@@ -671,7 +677,7 @@ func (x Value) dotAccess(k fieldKey) (field Value) {
 	case kindTask:
 		return typeTask.Fields[k.id]
 	case kindObject:
-		obj := *(*map[string]Value)(x.pointer)
+		obj := x.objectMap()
 		if value, exists := obj[k.name]; exists {
 			return value
 		}

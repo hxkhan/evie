@@ -13,6 +13,27 @@ import (
 	"github.com/hxkhan/evie/vm"
 )
 
+// an object handed to the host and back is the same object
+func TestObjectIdentitySurvivesTheHost(t *testing.T) {
+	pkg := vm.NewPackage("host")
+	pkg.Native("id", vm.Func1(func(m map[string]vm.Value) map[string]vm.Value { return m }))
+	eng := evie.New(evie.Options{Packages: []*vm.Package{pkg}})
+	defer eng.Close()
+	v, err := eng.Eval(`package main imports("host")
+	fn same() {
+		o := {a: 1}
+		return [host.id(o) == o, {a: 1} == o]
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = v
+	got, err := eng.Call("main.same")
+	if err != nil || got.String() != "[true, false]" {
+		t.Fatalf("got %v, %v", got, err)
+	}
+}
+
 // Equals and IsTruthy agree with the language
 func TestValuePredicates(t *testing.T) {
 	n := vm.BoxNumber

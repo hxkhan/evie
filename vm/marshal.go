@@ -666,7 +666,7 @@ func (v Value) toGo(seen map[unsafe.Pointer]any) any {
 		return res
 	}
 	if obj, ok := v.AsObject(); ok {
-		ptr := *(*unsafe.Pointer)(v.pointer)
+		ptr := v.pointer
 		if ptr != nil {
 			if existing, ok := seen[ptr]; ok {
 				return existing
@@ -787,8 +787,8 @@ func (v Value) encodeJSON(enc *jsontext.Encoder, seen map[unsafe.Pointer]bool) e
 		return enc.WriteToken(jsontext.EndArray)
 
 	case kindObject:
-		obj := *(*map[string]Value)(v.pointer)
-		ptr := *(*unsafe.Pointer)(v.pointer)
+		obj := v.objectMap()
+		ptr := v.pointer
 		if ptr != nil {
 			if seen[ptr] {
 				return fmt.Errorf("cannot encode cyclic object as JSON")

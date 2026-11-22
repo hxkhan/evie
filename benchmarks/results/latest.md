@@ -1,40 +1,40 @@
 # Evie benchmarks
 
-`e6bb6ce` on `main` · 2026-11-22 11:35 UTC · go1.27.2 · 16 CPUs
+`76b718e` on `main` · 2026-11-22 21:43 UTC · go1.27.2 · 16 CPUs
 
-Baseline: `60cfe96` (2026-11-21)
+Baseline: `e6bb6ce` (2026-11-22)
 
 | benchmark | median | min | ± | alloc | Δ base |
 |---|---:|---:|---:|---:|---:|
-| lang/arrays | 10.7ms | 10.1ms | 3.3% | 7.0MB | -64.2% |
-| lang/calls | 43.9ms | 43.1ms | 3.2% | 8.4MB | -32.6% |
-| lang/classes | 34.0ms | 32.7ms | 27.3% | 12.3MB | -52.1% |
-| lang/closures | 53.3ms | 50.4ms | 5.0% | 33.6MB | -14.0% |
-| lang/conditionals | 85.9ms | 83.4ms | 3.1% | 29KB | -83.2% |
-| lang/errors | 40.2ms | 39.1ms | 3.0% | 36.1MB | -44.2% |
-| lang/globals | 20.4ms | 20.1ms | 1.6% | 25KB | -82.9% |
-| lang/higher_order | 37.1ms | 34.2ms | 5.8% | 31.0MB | -59.7% |
-| lang/host_calls | 24.6ms | 24.0ms | 6.7% | 45KB | -51.0% |
-| lang/inheritance | 26.5ms | 25.4ms | 3.6% | 41KB | -37.0% |
-| lang/loops | 22.8ms | 22.3ms | 5.1% | 66KB | -67.6% |
-| lang/method_calls | 46.8ms | 45.3ms | 11.4% | 56KB | -55.1% |
-| lang/objects | 81.0ms | 73.1ms | 6.1% | 65.7MB | -50.3% |
-| lang/strings | 91.2ms | 88.0ms | 7.2% | 61.5MB | -11.5% |
-| lang/switch | 49.9ms | 47.4ms | 7.1% | 36KB | -67.0% |
-| lang/tasks | 117.1ms | 104.1ms | 5.9% | 17.6MB | +8.0% |
-| math/ackermann | 67.7ms | 65.0ms | 4.0% | 276KB | +4.4% |
-| math/collatz | 152.6ms | 142.1ms | 6.4% | 28KB | -63.6% |
-| math/divisors | 90.3ms | 82.6ms | 4.9% | 30KB | -67.9% |
-| math/fib | 118.8ms | 101.1ms | 7.5% | 23KB | +14.8% |
-| math/fib_iter | 110.9ms | 105.1ms | 4.7% | 26KB | -0.9% |
-| math/gcd | 62.6ms | 61.5ms | 7.4% | 27KB | -22.8% |
-| math/gcd_rec | 68.6ms | 65.9ms | 3.5% | 26KB | -25.7% |
-| math/leibniz | 151.2ms | 136.4ms | 5.0% | 23KB | +32.4% |
-| math/mandelbrot | 97.1ms | 89.6ms | 12.6% | 33KB | +7.0% |
-| math/matmul | 26.8ms | 26.3ms | 45.8% | 1.2MB | -0.8% |
-| math/primes_trial | 133.2ms | 111.9ms | 9.7% | 28KB | -62.0% |
-| math/sieve | 305.7ms | 257.4ms | 13.9% | 164.7MB | +32.4% |
-| math/spectral_norm | 43.0ms | 41.5ms | 20.9% | 64KB | +19.7% |
-| math/tak | 29.1ms | 26.0ms | 13.1% | 25KB | +29.3% |
+| lang/arrays | 11.5ms | 9.9ms | 8.2% | 7.0MB | +7.5% |
+| lang/calls | 40.8ms | 38.4ms | 4.4% | 8.4MB | -7.1% |
+| lang/classes | 32.8ms | 31.4ms | 3.1% | 12.3MB | -3.7% |
+| lang/closures | 51.6ms | 50.1ms | 3.6% | 33.6MB | -3.1% |
+| lang/conditionals | 67.3ms | 65.8ms | 4.7% | 31KB | -21.7% |
+| lang/errors | 44.2ms | 41.7ms | 4.2% | 36.1MB | +9.9% |
+| lang/globals | 19.0ms | 18.1ms | 3.8% | 27KB | -6.8% |
+| lang/higher_order | 39.8ms | 37.9ms | 9.4% | 31.0MB | +7.3% |
+| lang/host_calls | 24.2ms | 23.1ms | 3.0% | 47KB | -1.5% |
+| lang/inheritance | 25.8ms | 23.6ms | 5.4% | 44KB | -2.3% |
+| lang/loops | 19.6ms | 19.5ms | 3.9% | 70KB | -14.1% |
+| lang/method_calls | 45.0ms | 44.3ms | 2.5% | 58KB | -3.7% |
+| lang/objects | 35.1ms | 34.1ms | 4.9% | 21.4MB | -56.7% |
+| lang/strings | 67.6ms | 59.2ms | 15.6% | 58.5MB | -25.9% |
+| lang/switch | 42.9ms | 40.2ms | 5.8% | 38KB | -13.9% |
+| lang/tasks | 95.1ms | 88.5ms | 2.7% | 17.6MB | -18.7% |
+| math/ackermann | 52.3ms | 49.0ms | 3.6% | 277KB | -22.9% |
+| math/collatz | 101.2ms | 100.5ms | 1.8% | 30KB | -33.7% |
+| math/divisors | 54.6ms | 53.6ms | 3.3% | 32KB | -39.6% |
+| math/fib | 82.3ms | 78.5ms | 7.9% | 24KB | -30.7% |
+| math/fib_iter | 67.9ms | 65.6ms | 2.2% | 28KB | -38.8% |
+| math/gcd | 40.4ms | 39.3ms | 2.0% | 29KB | -35.4% |
+| math/gcd_rec | 44.3ms | 42.7ms | 3.0% | 28KB | -35.5% |
+| math/leibniz | 77.6ms | 75.2ms | 4.0% | 25KB | -48.7% |
+| math/mandelbrot | 50.3ms | 48.3ms | 2.6% | 35KB | -48.2% |
+| math/matmul | 12.4ms | 11.0ms | 5.8% | 1.2MB | -53.9% |
+| math/primes_trial | 59.3ms | 56.3ms | 3.3% | 30KB | -55.5% |
+| math/sieve | 98.8ms | 92.9ms | 5.9% | 64.0MB | -67.7% |
+| math/spectral_norm | 22.0ms | 20.7ms | 3.2% | 66KB | -48.8% |
+| math/tak | 15.8ms | 14.5ms | 4.4% | 26KB | -45.7% |
 
-Geomean median: **57.8ms** (-38.9% vs baseline)
+Geomean median: **41.2ms** (-28.8% vs baseline)

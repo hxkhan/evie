@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	iofs "io/fs"
 	"os"
 	"path"
@@ -29,7 +30,7 @@ func ConstructFS(fsys iofs.FS) *vm.Package {
 
 // files is where the package reads and writes
 type files interface {
-	readFile(name string) ([]byte, error)
+	open(name string) (iofs.File, error)
 	stat(name string) (iofs.FileInfo, error)
 	readDir(name string) ([]iofs.DirEntry, error)
 	writeFile(name string, data []byte) error
@@ -74,15 +75,15 @@ func build(files files) *vm.Package {
 		})
 	}
 
-	onPath("readFile", func(p string) (vm.Value, error) {
-		data, err := files.readFile(p)
+	blocking("readFile", 1, func(c vm.Call) (vm.Value, error) {
+		data, err := readFile(c, files)
 		if err != nil {
 			return vm.Value{}, err
 		}
 		return vm.BoxBuffer(data), nil
 	})
-	onPath("readText", func(p string) (vm.Value, error) {
-		data, err := files.readFile(p)
+	blocking("readText", 1, func(c vm.Call) (vm.Value, error) {
+		data, err := readFile(c, files)
 		if err != nil {
 			return vm.Value{}, err
 		}
@@ -144,7 +145,7 @@ func build(files files) *vm.Package {
 // osFiles is the operating system's file system, relative to the working directory
 type osFiles struct{}
 
-func (osFiles) readFile(name string) ([]byte, error)         { return os.ReadFile(name) }
+func (osFiles) open(name string) (iofs.File, error)          { return os.Open(name) }
 func (osFiles) stat(name string) (iofs.FileInfo, error)      { return os.Stat(name) }
 func (osFiles) readDir(name string) ([]iofs.DirEntry, error) { return os.ReadDir(name) }
 func (osFiles) writeFile(name string, data []byte) error     { return os.WriteFile(name, data, 0o644) }
@@ -180,12 +181,12 @@ func clean(name string) (string, error) {
 	return p, nil
 }
 
-func (f fsFiles) readFile(name string) ([]byte, error) {
+func (f fsFiles) open(name string) (iofs.File, error) {
 	p, err := clean(name)
 	if err != nil {
 		return nil, err
 	}
-	return iofs.ReadFile(f.fsys, p)
+	return f.fsys.Open(p)
 }
 
 func (f fsFiles) stat(name string) (iofs.FileInfo, error) {
@@ -209,6 +210,43 @@ func (fsFiles) appendFile(string, []byte) error { return errReadOnly }
 func (fsFiles) mkdir(string) error              { return errReadOnly }
 func (fsFiles) remove(string) error             { return errReadOnly }
 func (fsFiles) rename(string, string) error     { return errReadOnly }
+
+// maxReadBytes caps what one read takes into memory, so that reading a device
+// or a pipe that never ends, such as /dev/zero, fails instead of exhausting it
+const maxReadBytes = 256 << 20
+
+// readFile reads the file named by argument 0 in chunks, giving up when the
+// call has to stop or the file outgrows maxReadBytes
+func readFile(c vm.Call, files files) ([]byte, error) {
+	name, err := c.String(0)
+	if err != nil {
+		return nil, err
+	}
+	f, err := files.open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var data []byte
+	chunk := make([]byte, 1<<20)
+	for {
+		if err := c.Context().Err(); err != nil {
+			return nil, context.Cause(c.Context())
+		}
+		n, err := f.Read(chunk)
+		if len(data)+n > maxReadBytes {
+			return nil, fmt.Errorf("'%s' is larger than %d MB, the most a read takes", name, maxReadBytes>>20)
+		}
+		data = append(data, chunk[:n]...)
+		if errors.Is(err, io.EOF) {
+			return data, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+}
 
 // bytesOf accepts a string or a buffer as file content
 func bytesOf(fn string, content vm.Value) ([]byte, error) {

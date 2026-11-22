@@ -1,6 +1,7 @@
 package evie_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -615,6 +616,40 @@ func TestInstanceCall(t *testing.T) {
 	}
 	if _, err := env.Call("main.add", 1); err == nil || !strings.Contains(err.Error(), "takes 2 arguments but 1 was supplied") {
 		t.Fatalf("expected an arity error, got %v", err)
+	}
+}
+
+// a native called with Value.Call runs outside any instance and cannot start
+// async work; CallValue runs it under the engine, where it can
+func TestCallValueRunsNativesUnderTheEngine(t *testing.T) {
+	later := vm.NewFunc("later", 0, func(c vm.Call) (vm.Value, error) {
+		return c.Async(func(ctx context.Context) (vm.Value, error) { return vm.BoxNumber(7), nil }), nil
+	})
+	native := vm.BoxGoFunc(later)
+
+	detached, err := native.Call()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _ := detached.AsTask()
+	<-task.Done()
+	if _, err := task.Result(); err == nil || !strings.Contains(err.Error(), "needs an instance") {
+		t.Fatalf("detached async gave %v", err)
+	}
+
+	eng := evie.New()
+	defer eng.Close()
+	v, err := eng.CallValue(native)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _ = v.AsTask()
+	<-task.Done()
+	if res, err := task.Result(); err != nil || res.String() != "7" {
+		t.Fatalf("async under the engine gave %v, %v", res, err)
+	}
+	if _, err := eng.CallValue(vm.BoxNumber(1)); err == nil {
+		t.Fatal("calling a number should fail")
 	}
 }
 

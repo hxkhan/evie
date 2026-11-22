@@ -64,15 +64,9 @@ func (c Call) Context() context.Context {
 func (c Call) Async(fn func(ctx context.Context) (Value, error)) Value {
 	task := newTaskInstance()
 	if c.fbr.vm == nil {
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					task.reject(recovered(r))
-				}
-			}()
-			res, err := fn(c.Context())
-			task.finish(res, toException(err))
-		}()
+		// called through Value.Call, outside any instance: nothing would wait for
+		// or stop the work, so it does not start
+		task.reject(customError("async work needs an instance: call this native from a script or with Instance.CallValue"))
 		return boxTask(task)
 	}
 	stop := c.fbr.vm.rt.newTaskStopper(c.fbr.stop)

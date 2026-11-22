@@ -745,7 +745,11 @@ func (x Value) AcceptsArgs() bool {
 }
 
 // Call calls a callable value from Go: a script function, a native, a bound
-// method or a type. It borrows a fiber of the instance the value belongs to.
+// method or a type. A script function runs on a fiber of the instance it
+// belongs to. A native or a builtin method belongs to no instance and runs as
+// a plain Go call on the calling goroutine: outside the instance's runner, not
+// stopped by Interrupt, and unable to start async work. Use Instance.CallValue
+// to call one under an instance.
 func (x Value) Call(args ...Value) (Value, error) {
 	v, exc := x.callGuarded(nil, args...)
 	if exc != nil {

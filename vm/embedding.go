@@ -67,6 +67,36 @@ func (vm *Instance) CallContext(ctx context.Context, path string, args ...any) (
 	return plain(fn.callGuarded(fbr, boxed...))
 }
 
+// CallValue calls a callable value under this instance, as Call calls one by
+// path: Go arguments are boxed with BoxAny and it runs on a borrowed fiber,
+// holding the instance's runner, so Interrupt stops it and the async work of
+// a native it calls belongs to the instance.
+func (vm *Instance) CallValue(fn Value, args ...any) (Value, error) {
+	if !fn.IsCallable() {
+		return Value{}, fmt.Errorf("a %s is not callable", fn.TypeOf())
+	}
+	boxed, err := boxArgs(args)
+	if err != nil {
+		return Value{}, err
+	}
+	fbr := vm.newFiber()
+	defer vm.releaseFiber(fbr)
+	return plain(fn.callGuarded(fbr, boxed...))
+}
+
+// boxArgs boxes Go arguments with BoxAny
+func boxArgs(args []any) ([]Value, error) {
+	boxed := make([]Value, len(args))
+	for i, arg := range args {
+		v, err := BoxAny(arg)
+		if err != nil {
+			return nil, fmt.Errorf("argument %d: %w", i+1, err)
+		}
+		boxed[i] = v
+	}
+	return boxed, nil
+}
+
 // callable looks up a callable by path and boxes the arguments for it
 func (vm *Instance) callable(path string, args []any) (Value, []Value, error) {
 	fn, ok := vm.Lookup(path)
@@ -76,13 +106,9 @@ func (vm *Instance) callable(path string, args []any) (Value, []Value, error) {
 	if !fn.IsCallable() {
 		return Value{}, nil, fmt.Errorf("symbol '%s' is a %s, not a callable", path, fn.TypeOf())
 	}
-	boxed := make([]Value, len(args))
-	for i, arg := range args {
-		v, err := BoxAny(arg)
-		if err != nil {
-			return Value{}, nil, fmt.Errorf("argument %d: %w", i+1, err)
-		}
-		boxed[i] = v
+	boxed, err := boxArgs(args)
+	if err != nil {
+		return Value{}, nil, err
 	}
 	return fn, boxed, nil
 }

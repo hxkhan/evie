@@ -69,6 +69,15 @@ func (e *Engine) CallContext(ctx context.Context, path string, args ...any) (vm.
 	return e.vm.CallContext(ctx, path, args...)
 }
 
+// CallValue calls a callable value, such as one a script returned, under the
+// engine: see vm.Instance.CallValue
+func (e *Engine) CallValue(fn vm.Value, args ...any) (vm.Value, error) {
+	if err := e.usable(); err != nil {
+		return vm.Value{}, err
+	}
+	return e.vm.CallValue(fn, args...)
+}
+
 // Lookup resolves a symbol from a loaded package ("pkg.sym") or main/prelude ("sym").
 func (e *Engine) Lookup(path string) (vm.Value, bool) {
 	return e.vm.Lookup(path)

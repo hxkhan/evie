@@ -62,6 +62,11 @@ func (vm *Instance) emitThrow(node ast.Throw) instruction {
 		}
 
 		if e, ok := v.AsError(); ok {
+			if e.fatal || e.Pos.Known() {
+				// thrown before: the script may still hold it, and a stop it caught
+				// as a value is an ordinary error when thrown again
+				e = e.clone(false)
+			}
 			return Value{}, e.at(site)
 		}
 

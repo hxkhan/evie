@@ -275,8 +275,8 @@ func settle(fbr *fiber, tasks []*Task, successOnly bool) (outcome, bool) {
 			if fbr.stop.done() {
 				return outcome{err: fbr.stop.failure()}, true
 			}
-			if out.err != nil && out.err.fatal {
-				out.err = &Error{Report: out.err.Report, code: out.err.code, Cause: out.err.Cause}
+			if out.err != nil {
+				out.err = out.err.clone(false) // this fiber is not stopping, so it can catch it
 			}
 			if out.err == nil || !successOnly {
 				return out, true

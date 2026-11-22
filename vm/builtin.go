@@ -583,7 +583,7 @@ var typeTask = newBuiltinType("task", NewFunc("task", 0, func(c Call) (Value, er
 	newMethod("error", 0, func(c Call) (Value, error) {
 		_, exc := c.This().mustTask().outcome()
 		if exc != nil {
-			return boxError(exc), nil
+			return boxError(exc.clone(false)), nil // a value of its own, which catch can catch when thrown
 		}
 		return Value{}, nil
 	}),

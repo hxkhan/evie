@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"slices"
 	goruntime "runtime"
 	"runtime/debug"
 	"strings"
@@ -97,6 +98,16 @@ func (e *Error) at(s site) *Error {
 	}
 	e.Trace = append(e.Trace, diag.Frame{Function: s.fn, Source: s.src, Pos: s.pos})
 	return e
+}
+
+// clone copies an error for a new owner, trace included, so that locating or
+// unwinding the copy leaves the original alone. fatal says whether the copy
+// still stops whoever gets it.
+func (e *Error) clone(fatal bool) *Error {
+	c := *e
+	c.Trace = slices.Clone(e.Trace)
+	c.fatal = fatal
+	return &c
 }
 
 // unwind records that the error passed through a call made at s

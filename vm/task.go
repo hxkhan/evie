@@ -128,12 +128,13 @@ func (t *Task) outcome() (Value, exception) {
 	return t.result, t.err
 }
 
-// outcomeFor returns the task's outcome as seen by fbr: a stop from another
-// run becomes an ordinary catchable error for a fiber that is still running.
+// outcomeFor returns the task's outcome as seen by fbr. The error is a copy,
+// since every awaiter records its own trace on it, and a stop from another run
+// becomes an ordinary catchable error for a fiber that is still running.
 func (t *Task) outcomeFor(fbr *fiber) (Value, exception) {
 	res, err := t.outcome()
-	if err != nil && err.fatal && (fbr == nil || !fbr.stop.done()) {
-		err = &Error{Report: err.Report, code: err.code, Cause: err.Cause}
+	if err != nil {
+		err = err.clone(err.fatal && fbr != nil && fbr.stop.done())
 	}
 	return res, err
 }

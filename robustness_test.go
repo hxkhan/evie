@@ -827,6 +827,28 @@ func TestParametersDoNotMakeOuterLocalsEscape(t *testing.T) {
 	}
 }
 
+// every await of a failed task gets its own copy of the error, so traces do
+// not pile up, and a cancelled task's error is an ordinary error when thrown
+func TestTaskErrorsAreCopiedForEachAwait(t *testing.T) {
+	val := run(t, `package main imports("time")
+	fn fail() { throw error("boom") }
+	fn main() {
+		t := go fail()
+		a := catch(await t)
+		n := a.trace.len()
+		b := catch(await t)
+		c := go time.sleep(100000)
+		c.cancel()
+		catch(await c)
+		e := c.error()
+		r := catch { throw e }
+		return [a.trace.len() == n, a != b, r != nil, r.message]
+	}`)
+	if want := `[true, true, true, "cancelled"]`; val.String() != want {
+		t.Fatalf("got %s, want %s", val, want)
+	}
+}
+
 // objects keep their keys in the order they were added; the objects a literal
 // makes share its keys until one changes, and big objects switch to an index
 func TestObjectLayout(t *testing.T) {

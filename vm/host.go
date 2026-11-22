@@ -36,15 +36,27 @@ var (
 	hostTypes   = map[reflect.Type]*HostType{}
 )
 
-// NewHostType registers Go values of type T under a name scripts see
+// NewHostType registers Go values of type T under a name scripts see. The
+// registry is shared by every instance in the process, since BoxAny boxes a
+// value without knowing one, so create a host type once, at package level.
+// Registering T again under the same name returns the type registered first,
+// so values of T keep one type in every instance; registering it under
+// another name panics.
 func NewHostType[T any](name string) *HostType {
+	goType := reflect.TypeOf((*T)(nil)).Elem()
+	hostTypesMu.Lock()
+	defer hostTypesMu.Unlock()
+	if existing, ok := hostTypes[goType]; ok {
+		if existing.Name() != name {
+			panic(fmt.Sprintf("vm: NewHostType: %v is already registered as '%s', not '%s'", goType, existing.Name(), name))
+		}
+		return existing
+	}
 	t := &HostType{
 		typ:    newBuiltinType(name, nil, map[fields.ID]Value{}),
-		goType: reflect.TypeOf((*T)(nil)).Elem(),
+		goType: goType,
 	}
-	hostTypesMu.Lock()
-	hostTypes[t.goType] = t
-	hostTypesMu.Unlock()
+	hostTypes[goType] = t
 	return t
 }
 
@@ -151,7 +163,9 @@ func (hv *hostValue) equals(other *hostValue) bool {
 	if hv.val == nil || other.val == nil {
 		return hv.val == other.val
 	}
-	if reflect.TypeOf(hv.val).Comparable() && reflect.TypeOf(other.val).Comparable() {
+	// the values, not their types: a struct type is comparable even when a field
+	// holds an interface whose value is not, and == would panic on it
+	if reflect.ValueOf(hv.val).Comparable() && reflect.ValueOf(other.val).Comparable() {
 		return hv.val == other.val
 	}
 	return hv == other

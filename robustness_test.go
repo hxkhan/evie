@@ -2,6 +2,7 @@ package evie_test
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -615,6 +616,34 @@ func TestInstanceCall(t *testing.T) {
 	if _, err := env.Call("main.add", 1); err == nil || !strings.Contains(err.Error(), "takes 2 arguments but 1 was supplied") {
 		t.Fatalf("expected an arity error, got %v", err)
 	}
+}
+
+// registering a Go type again gives the type registered first, so a value boxed
+// by one engine is the same type in another; another name for it panics
+type token struct{ id int }
+
+func TestHostTypeRegisteredTwice(t *testing.T) {
+	first := vm.NewHostType[*token]("Token")
+	second := vm.NewHostType[*token]("Token")
+	if first != second {
+		t.Fatal("registering a type again made a second one")
+	}
+	boxed, err := vm.BoxAny(&token{id: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng := evie.New()
+	eng.SetStatic("Token", first.Box())
+	eng.SetStatic("tok", boxed)
+	if v, err := eng.Eval("return tok is Token"); err != nil || v.String() != "true" {
+		t.Fatalf("tok is Token = %v, %v", v, err)
+	}
+	defer func() {
+		if r := recover(); r == nil || !strings.Contains(fmt.Sprint(r), "already registered as 'Token'") {
+			t.Fatalf("expected a panic for another name, got %v", r)
+		}
+	}()
+	vm.NewHostType[*token]("Other")
 }
 
 // host types travel through scripts as they are, with methods, identity, `is`

@@ -64,7 +64,7 @@ func TestCallsReleaseFiberStateOnException(t *testing.T) {
 	}
 
 	fbr := evm.newFiber()
-	stackBefore, boxesBefore := len(fbr.stack), len(fbr.boxes)
+	stackBefore := len(fbr.stack)
 
 	result, exc := mainFn.callGuarded(fbr)
 	if exc != nil {
@@ -76,8 +76,5 @@ func TestCallsReleaseFiberStateOnException(t *testing.T) {
 
 	if len(fbr.stack) != stackBefore {
 		t.Errorf("fiber stack leaked: %d entries before, %d after", stackBefore, len(fbr.stack))
-	}
-	if len(fbr.boxes) != boxesBefore || len(fbr.spent) != 0 {
-		t.Errorf("box pool unbalanced: %d free before, %d after, %d chunks still in use", boxesBefore, len(fbr.boxes), len(fbr.spent))
 	}
 }

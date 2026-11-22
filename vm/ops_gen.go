@@ -23,6 +23,103 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 	if l, ok := lhs.(Value); ok {
 		if r, ok := rhs.(local); ok {
+			if !r.isCaptured && !r.isBoxed {
+				ri := int(r.index)
+				switch node.Operator {
+				case ast.AddOp:
+					return func(fbr *fiber) (Value, exception) {
+						b := fbr.stack[fbr.base+ri]
+						if result, ok := l.add(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "+", l, b)
+					}
+				case ast.SubOp:
+					return func(fbr *fiber) (Value, exception) {
+						b := fbr.stack[fbr.base+ri]
+						if result, ok := l.sub(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "-", l, b)
+					}
+				case ast.MulOp:
+					return func(fbr *fiber) (Value, exception) {
+						b := fbr.stack[fbr.base+ri]
+						if result, ok := l.mul(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "*", l, b)
+					}
+				case ast.DivOp:
+					return func(fbr *fiber) (Value, exception) {
+						b := fbr.stack[fbr.base+ri]
+						if result, ok := l.div(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "/", l, b)
+					}
+				case ast.ModOp:
+					return func(fbr *fiber) (Value, exception) {
+						b := fbr.stack[fbr.base+ri]
+						if result, ok := l.mod(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "%", l, b)
+					}
+				case ast.EqOp:
+					return func(fbr *fiber) (Value, exception) {
+						b := fbr.stack[fbr.base+ri]
+						return BoxBool(l.Equals(b)), nil
+					}
+				case ast.NotEqOp:
+					return func(fbr *fiber) (Value, exception) {
+						b := fbr.stack[fbr.base+ri]
+						return BoxBool(!l.Equals(b)), nil
+					}
+				case ast.LtOp:
+					return func(fbr *fiber) (Value, exception) {
+						b := fbr.stack[fbr.base+ri]
+						if result, ok := l.lessThan(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "<", l, b)
+					}
+				case ast.GtOp:
+					return func(fbr *fiber) (Value, exception) {
+						b := fbr.stack[fbr.base+ri]
+						if result, ok := l.greaterThan(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, ">", l, b)
+					}
+				case ast.LtEqOp:
+					return func(fbr *fiber) (Value, exception) {
+						b := fbr.stack[fbr.base+ri]
+						if result, ok := l.lessThanOrEqualTo(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "<=", l, b)
+					}
+				case ast.GtEqOp:
+					return func(fbr *fiber) (Value, exception) {
+						b := fbr.stack[fbr.base+ri]
+						if result, ok := l.greaterThanOrEqualTo(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, ">=", l, b)
+					}
+				case ast.OrOp:
+					return func(fbr *fiber) (Value, exception) {
+						b := fbr.stack[fbr.base+ri]
+						return BoxBool(l.IsTruthy() || b.IsTruthy()), nil
+					}
+				case ast.AndOp:
+					return func(fbr *fiber) (Value, exception) {
+						b := fbr.stack[fbr.base+ri]
+						return BoxBool(l.IsTruthy() && b.IsTruthy()), nil
+					}
+				}
+			}
 			switch node.Operator {
 			case ast.AddOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -122,6 +219,116 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 	if l, ok := lhs.(local); ok {
 		if r, ok := rhs.(local); ok {
+			if !l.isCaptured && !l.isBoxed && !r.isCaptured && !r.isBoxed {
+				li, ri := int(l.index), int(r.index)
+				switch node.Operator {
+				case ast.AddOp:
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						if result, ok := a.add(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "+", a, b)
+					}
+				case ast.SubOp:
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						if result, ok := a.sub(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "-", a, b)
+					}
+				case ast.MulOp:
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						if result, ok := a.mul(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "*", a, b)
+					}
+				case ast.DivOp:
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						if result, ok := a.div(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "/", a, b)
+					}
+				case ast.ModOp:
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						if result, ok := a.mod(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "%", a, b)
+					}
+				case ast.EqOp:
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						return BoxBool(a.Equals(b)), nil
+					}
+				case ast.NotEqOp:
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						return BoxBool(!a.Equals(b)), nil
+					}
+				case ast.LtOp:
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						if result, ok := a.lessThan(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "<", a, b)
+					}
+				case ast.GtOp:
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						if result, ok := a.greaterThan(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, ">", a, b)
+					}
+				case ast.LtEqOp:
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						if result, ok := a.lessThanOrEqualTo(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "<=", a, b)
+					}
+				case ast.GtEqOp:
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						if result, ok := a.greaterThanOrEqualTo(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, ">=", a, b)
+					}
+				case ast.OrOp:
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						return BoxBool(a.IsTruthy() || b.IsTruthy()), nil
+					}
+				case ast.AndOp:
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						return BoxBool(a.IsTruthy() && b.IsTruthy()), nil
+					}
+				}
+			}
 			switch node.Operator {
 			case ast.AddOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -218,6 +425,103 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			}
 		}
 		if r, ok := rhs.(Value); ok {
+			if !l.isCaptured && !l.isBoxed {
+				li := int(l.index)
+				switch node.Operator {
+				case ast.AddOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						if result, ok := a.add(r); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "+", a, r)
+					}
+				case ast.SubOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						if result, ok := a.sub(r); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "-", a, r)
+					}
+				case ast.MulOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						if result, ok := a.mul(r); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "*", a, r)
+					}
+				case ast.DivOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						if result, ok := a.div(r); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "/", a, r)
+					}
+				case ast.ModOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						if result, ok := a.mod(r); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "%", a, r)
+					}
+				case ast.EqOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						return BoxBool(a.Equals(r)), nil
+					}
+				case ast.NotEqOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						return BoxBool(!a.Equals(r)), nil
+					}
+				case ast.LtOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						if result, ok := a.lessThan(r); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "<", a, r)
+					}
+				case ast.GtOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						if result, ok := a.greaterThan(r); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, ">", a, r)
+					}
+				case ast.LtEqOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						if result, ok := a.lessThanOrEqualTo(r); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "<=", a, r)
+					}
+				case ast.GtEqOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						if result, ok := a.greaterThanOrEqualTo(r); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, ">=", a, r)
+					}
+				case ast.OrOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						return BoxBool(a.IsTruthy() || r.IsTruthy()), nil
+					}
+				case ast.AndOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						return BoxBool(a.IsTruthy() && r.IsTruthy()), nil
+					}
+				}
+			}
 			switch node.Operator {
 			case ast.AddOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -310,6 +614,776 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 				return func(fbr *fiber) (Value, exception) {
 					a := *fbr.get(l)
 					return BoxBool(a.IsTruthy() && r.IsTruthy()), nil
+				}
+			}
+		}
+	}
+
+	// Single-sided operand specialization for non-short-circuit operators:
+	// eliminates one indirect closure call in chained expressions such as
+	// (xx - yy) + x0, (2.0 * x) * y + y0, or (py / size) * 2.0 - 1.0.
+	if node.Operator != ast.AndOp && node.Operator != ast.OrOp {
+		if r, ok := rhs.(local); ok {
+			left := vm.compile(node.Lhs)
+			if !r.isCaptured && !r.isBoxed {
+				ri := int(r.index)
+				switch node.Operator {
+				case ast.AddOp:
+					return func(fbr *fiber) (Value, exception) {
+						a, exc := left(fbr)
+						if exc != nil {
+							return a, exc
+						}
+						b := fbr.stack[fbr.base+ri]
+						if result, ok := a.add(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "+", a, b)
+					}
+				case ast.SubOp:
+					return func(fbr *fiber) (Value, exception) {
+						a, exc := left(fbr)
+						if exc != nil {
+							return a, exc
+						}
+						b := fbr.stack[fbr.base+ri]
+						if result, ok := a.sub(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "-", a, b)
+					}
+				case ast.MulOp:
+					return func(fbr *fiber) (Value, exception) {
+						a, exc := left(fbr)
+						if exc != nil {
+							return a, exc
+						}
+						b := fbr.stack[fbr.base+ri]
+						if result, ok := a.mul(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "*", a, b)
+					}
+				case ast.DivOp:
+					return func(fbr *fiber) (Value, exception) {
+						a, exc := left(fbr)
+						if exc != nil {
+							return a, exc
+						}
+						b := fbr.stack[fbr.base+ri]
+						if result, ok := a.div(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "/", a, b)
+					}
+				case ast.ModOp:
+					return func(fbr *fiber) (Value, exception) {
+						a, exc := left(fbr)
+						if exc != nil {
+							return a, exc
+						}
+						b := fbr.stack[fbr.base+ri]
+						if result, ok := a.mod(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "%", a, b)
+					}
+				case ast.EqOp:
+					return func(fbr *fiber) (Value, exception) {
+						a, exc := left(fbr)
+						if exc != nil {
+							return a, exc
+						}
+						b := fbr.stack[fbr.base+ri]
+						return BoxBool(a.Equals(b)), nil
+					}
+				case ast.NotEqOp:
+					return func(fbr *fiber) (Value, exception) {
+						a, exc := left(fbr)
+						if exc != nil {
+							return a, exc
+						}
+						b := fbr.stack[fbr.base+ri]
+						return BoxBool(!a.Equals(b)), nil
+					}
+				case ast.LtOp:
+					return func(fbr *fiber) (Value, exception) {
+						a, exc := left(fbr)
+						if exc != nil {
+							return a, exc
+						}
+						b := fbr.stack[fbr.base+ri]
+						if result, ok := a.lessThan(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "<", a, b)
+					}
+				case ast.GtOp:
+					return func(fbr *fiber) (Value, exception) {
+						a, exc := left(fbr)
+						if exc != nil {
+							return a, exc
+						}
+						b := fbr.stack[fbr.base+ri]
+						if result, ok := a.greaterThan(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, ">", a, b)
+					}
+				case ast.LtEqOp:
+					return func(fbr *fiber) (Value, exception) {
+						a, exc := left(fbr)
+						if exc != nil {
+							return a, exc
+						}
+						b := fbr.stack[fbr.base+ri]
+						if result, ok := a.lessThanOrEqualTo(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "<=", a, b)
+					}
+				case ast.GtEqOp:
+					return func(fbr *fiber) (Value, exception) {
+						a, exc := left(fbr)
+						if exc != nil {
+							return a, exc
+						}
+						b := fbr.stack[fbr.base+ri]
+						if result, ok := a.greaterThanOrEqualTo(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, ">=", a, b)
+					}
+				}
+			}
+			switch node.Operator {
+			case ast.AddOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					b := *fbr.get(r)
+					if result, ok := a.add(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "+", a, b)
+				}
+			case ast.SubOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					b := *fbr.get(r)
+					if result, ok := a.sub(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "-", a, b)
+				}
+			case ast.MulOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					b := *fbr.get(r)
+					if result, ok := a.mul(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "*", a, b)
+				}
+			case ast.DivOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					b := *fbr.get(r)
+					if result, ok := a.div(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "/", a, b)
+				}
+			case ast.ModOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					b := *fbr.get(r)
+					if result, ok := a.mod(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "%", a, b)
+				}
+			case ast.EqOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					b := *fbr.get(r)
+					return BoxBool(a.Equals(b)), nil
+				}
+			case ast.NotEqOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					b := *fbr.get(r)
+					return BoxBool(!a.Equals(b)), nil
+				}
+			case ast.LtOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					b := *fbr.get(r)
+					if result, ok := a.lessThan(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "<", a, b)
+				}
+			case ast.GtOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					b := *fbr.get(r)
+					if result, ok := a.greaterThan(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, ">", a, b)
+				}
+			case ast.LtEqOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					b := *fbr.get(r)
+					if result, ok := a.lessThanOrEqualTo(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "<=", a, b)
+				}
+			case ast.GtEqOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					b := *fbr.get(r)
+					if result, ok := a.greaterThanOrEqualTo(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, ">=", a, b)
+				}
+			}
+		}
+		if r, ok := rhs.(Value); ok {
+			left := vm.compile(node.Lhs)
+			switch node.Operator {
+			case ast.AddOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					if result, ok := a.add(r); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "+", a, r)
+				}
+			case ast.SubOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					if result, ok := a.sub(r); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "-", a, r)
+				}
+			case ast.MulOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					if result, ok := a.mul(r); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "*", a, r)
+				}
+			case ast.DivOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					if result, ok := a.div(r); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "/", a, r)
+				}
+			case ast.ModOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					if result, ok := a.mod(r); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "%", a, r)
+				}
+			case ast.EqOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					return BoxBool(a.Equals(r)), nil
+				}
+			case ast.NotEqOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					return BoxBool(!a.Equals(r)), nil
+				}
+			case ast.LtOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					if result, ok := a.lessThan(r); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "<", a, r)
+				}
+			case ast.GtOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					if result, ok := a.greaterThan(r); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, ">", a, r)
+				}
+			case ast.LtEqOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					if result, ok := a.lessThanOrEqualTo(r); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "<=", a, r)
+				}
+			case ast.GtEqOp:
+				return func(fbr *fiber) (Value, exception) {
+					a, exc := left(fbr)
+					if exc != nil {
+						return a, exc
+					}
+					if result, ok := a.greaterThanOrEqualTo(r); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, ">=", a, r)
+				}
+			}
+		}
+		if l, ok := lhs.(local); ok {
+			right := vm.compile(node.Rhs)
+			if !l.isCaptured && !l.isBoxed {
+				li := int(l.index)
+				switch node.Operator {
+				case ast.AddOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						b, exc := right(fbr)
+						if exc != nil {
+							return b, exc
+						}
+						if result, ok := a.add(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "+", a, b)
+					}
+				case ast.SubOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						b, exc := right(fbr)
+						if exc != nil {
+							return b, exc
+						}
+						if result, ok := a.sub(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "-", a, b)
+					}
+				case ast.MulOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						b, exc := right(fbr)
+						if exc != nil {
+							return b, exc
+						}
+						if result, ok := a.mul(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "*", a, b)
+					}
+				case ast.DivOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						b, exc := right(fbr)
+						if exc != nil {
+							return b, exc
+						}
+						if result, ok := a.div(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "/", a, b)
+					}
+				case ast.ModOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						b, exc := right(fbr)
+						if exc != nil {
+							return b, exc
+						}
+						if result, ok := a.mod(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "%", a, b)
+					}
+				case ast.EqOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						b, exc := right(fbr)
+						if exc != nil {
+							return b, exc
+						}
+						return BoxBool(a.Equals(b)), nil
+					}
+				case ast.NotEqOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						b, exc := right(fbr)
+						if exc != nil {
+							return b, exc
+						}
+						return BoxBool(!a.Equals(b)), nil
+					}
+				case ast.LtOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						b, exc := right(fbr)
+						if exc != nil {
+							return b, exc
+						}
+						if result, ok := a.lessThan(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "<", a, b)
+					}
+				case ast.GtOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						b, exc := right(fbr)
+						if exc != nil {
+							return b, exc
+						}
+						if result, ok := a.greaterThan(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, ">", a, b)
+					}
+				case ast.LtEqOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						b, exc := right(fbr)
+						if exc != nil {
+							return b, exc
+						}
+						if result, ok := a.lessThanOrEqualTo(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, "<=", a, b)
+					}
+				case ast.GtEqOp:
+					return func(fbr *fiber) (Value, exception) {
+						a := fbr.stack[fbr.base+li]
+						b, exc := right(fbr)
+						if exc != nil {
+							return b, exc
+						}
+						if result, ok := a.greaterThanOrEqualTo(b); ok {
+							return result, nil
+						}
+						return Value{}, operatorError(site, ">=", a, b)
+					}
+				}
+			}
+			switch node.Operator {
+			case ast.AddOp:
+				return func(fbr *fiber) (Value, exception) {
+					a := *fbr.get(l)
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					if result, ok := a.add(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "+", a, b)
+				}
+			case ast.SubOp:
+				return func(fbr *fiber) (Value, exception) {
+					a := *fbr.get(l)
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					if result, ok := a.sub(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "-", a, b)
+				}
+			case ast.MulOp:
+				return func(fbr *fiber) (Value, exception) {
+					a := *fbr.get(l)
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					if result, ok := a.mul(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "*", a, b)
+				}
+			case ast.DivOp:
+				return func(fbr *fiber) (Value, exception) {
+					a := *fbr.get(l)
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					if result, ok := a.div(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "/", a, b)
+				}
+			case ast.ModOp:
+				return func(fbr *fiber) (Value, exception) {
+					a := *fbr.get(l)
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					if result, ok := a.mod(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "%", a, b)
+				}
+			case ast.EqOp:
+				return func(fbr *fiber) (Value, exception) {
+					a := *fbr.get(l)
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					return BoxBool(a.Equals(b)), nil
+				}
+			case ast.NotEqOp:
+				return func(fbr *fiber) (Value, exception) {
+					a := *fbr.get(l)
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					return BoxBool(!a.Equals(b)), nil
+				}
+			case ast.LtOp:
+				return func(fbr *fiber) (Value, exception) {
+					a := *fbr.get(l)
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					if result, ok := a.lessThan(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "<", a, b)
+				}
+			case ast.GtOp:
+				return func(fbr *fiber) (Value, exception) {
+					a := *fbr.get(l)
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					if result, ok := a.greaterThan(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, ">", a, b)
+				}
+			case ast.LtEqOp:
+				return func(fbr *fiber) (Value, exception) {
+					a := *fbr.get(l)
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					if result, ok := a.lessThanOrEqualTo(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "<=", a, b)
+				}
+			case ast.GtEqOp:
+				return func(fbr *fiber) (Value, exception) {
+					a := *fbr.get(l)
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					if result, ok := a.greaterThanOrEqualTo(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, ">=", a, b)
+				}
+			}
+		}
+		if l, ok := lhs.(Value); ok {
+			right := vm.compile(node.Rhs)
+			switch node.Operator {
+			case ast.AddOp:
+				return func(fbr *fiber) (Value, exception) {
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					if result, ok := l.add(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "+", l, b)
+				}
+			case ast.SubOp:
+				return func(fbr *fiber) (Value, exception) {
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					if result, ok := l.sub(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "-", l, b)
+				}
+			case ast.MulOp:
+				return func(fbr *fiber) (Value, exception) {
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					if result, ok := l.mul(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "*", l, b)
+				}
+			case ast.DivOp:
+				return func(fbr *fiber) (Value, exception) {
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					if result, ok := l.div(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "/", l, b)
+				}
+			case ast.ModOp:
+				return func(fbr *fiber) (Value, exception) {
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					if result, ok := l.mod(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "%", l, b)
+				}
+			case ast.EqOp:
+				return func(fbr *fiber) (Value, exception) {
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					return BoxBool(l.Equals(b)), nil
+				}
+			case ast.NotEqOp:
+				return func(fbr *fiber) (Value, exception) {
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					return BoxBool(!l.Equals(b)), nil
+				}
+			case ast.LtOp:
+				return func(fbr *fiber) (Value, exception) {
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					if result, ok := l.lessThan(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "<", l, b)
+				}
+			case ast.GtOp:
+				return func(fbr *fiber) (Value, exception) {
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					if result, ok := l.greaterThan(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, ">", l, b)
+				}
+			case ast.LtEqOp:
+				return func(fbr *fiber) (Value, exception) {
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					if result, ok := l.lessThanOrEqualTo(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, "<=", l, b)
+				}
+			case ast.GtEqOp:
+				return func(fbr *fiber) (Value, exception) {
+					b, exc := right(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					if result, ok := l.greaterThanOrEqualTo(b); ok {
+						return result, nil
+					}
+					return Value{}, operatorError(site, ">=", l, b)
 				}
 			}
 		}
@@ -528,6 +1602,61 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 		}
 		switch rhs := vm.evaluate(node.Rhs).(type) {
 		case local:
+			if !lhs.isCaptured && !lhs.isBoxed && !rhs.isCaptured && !rhs.isBoxed {
+				li, ri := int(lhs.index), int(rhs.index)
+				switch node.Operator {
+				case ast.AddOp:
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						cell, b := &s[li], s[ri]
+						if result, ok := cell.add(b); ok {
+							*cell = result
+							return Value{}, nil
+						}
+						return Value{}, operatorError(site, "+", *cell, b)
+					}
+				case ast.SubOp:
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						cell, b := &s[li], s[ri]
+						if result, ok := cell.sub(b); ok {
+							*cell = result
+							return Value{}, nil
+						}
+						return Value{}, operatorError(site, "-", *cell, b)
+					}
+				case ast.MulOp:
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						cell, b := &s[li], s[ri]
+						if result, ok := cell.mul(b); ok {
+							*cell = result
+							return Value{}, nil
+						}
+						return Value{}, operatorError(site, "*", *cell, b)
+					}
+				case ast.DivOp:
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						cell, b := &s[li], s[ri]
+						if result, ok := cell.div(b); ok {
+							*cell = result
+							return Value{}, nil
+						}
+						return Value{}, operatorError(site, "/", *cell, b)
+					}
+				case ast.ModOp:
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						cell, b := &s[li], s[ri]
+						if result, ok := cell.mod(b); ok {
+							*cell = result
+							return Value{}, nil
+						}
+						return Value{}, operatorError(site, "%", *cell, b)
+					}
+				}
+			}
 			switch node.Operator {
 			case ast.AddOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -576,6 +1705,56 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 				}
 			}
 		case Value:
+			if !lhs.isCaptured && !lhs.isBoxed {
+				li := int(lhs.index)
+				switch node.Operator {
+				case ast.AddOp:
+					return func(fbr *fiber) (Value, exception) {
+						cell := &fbr.stack[fbr.base+li]
+						if result, ok := cell.add(rhs); ok {
+							*cell = result
+							return Value{}, nil
+						}
+						return Value{}, operatorError(site, "+", *cell, rhs)
+					}
+				case ast.SubOp:
+					return func(fbr *fiber) (Value, exception) {
+						cell := &fbr.stack[fbr.base+li]
+						if result, ok := cell.sub(rhs); ok {
+							*cell = result
+							return Value{}, nil
+						}
+						return Value{}, operatorError(site, "-", *cell, rhs)
+					}
+				case ast.MulOp:
+					return func(fbr *fiber) (Value, exception) {
+						cell := &fbr.stack[fbr.base+li]
+						if result, ok := cell.mul(rhs); ok {
+							*cell = result
+							return Value{}, nil
+						}
+						return Value{}, operatorError(site, "*", *cell, rhs)
+					}
+				case ast.DivOp:
+					return func(fbr *fiber) (Value, exception) {
+						cell := &fbr.stack[fbr.base+li]
+						if result, ok := cell.div(rhs); ok {
+							*cell = result
+							return Value{}, nil
+						}
+						return Value{}, operatorError(site, "/", *cell, rhs)
+					}
+				case ast.ModOp:
+					return func(fbr *fiber) (Value, exception) {
+						cell := &fbr.stack[fbr.base+li]
+						if result, ok := cell.mod(rhs); ok {
+							*cell = result
+							return Value{}, nil
+						}
+						return Value{}, operatorError(site, "%", *cell, rhs)
+					}
+				}
+			}
 			switch node.Operator {
 			case ast.AddOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -625,6 +1804,76 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 			}
 		}
 		rhs := vm.compile(node.Rhs)
+		if !lhs.isCaptured && !lhs.isBoxed {
+			li := int(lhs.index)
+			switch node.Operator {
+			case ast.AddOp:
+				return func(fbr *fiber) (Value, exception) {
+					b, exc := rhs(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					cell := &fbr.stack[fbr.base+li]
+					if result, ok := cell.add(b); ok {
+						*cell = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "+", *cell, b)
+				}
+			case ast.SubOp:
+				return func(fbr *fiber) (Value, exception) {
+					b, exc := rhs(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					cell := &fbr.stack[fbr.base+li]
+					if result, ok := cell.sub(b); ok {
+						*cell = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "-", *cell, b)
+				}
+			case ast.MulOp:
+				return func(fbr *fiber) (Value, exception) {
+					b, exc := rhs(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					cell := &fbr.stack[fbr.base+li]
+					if result, ok := cell.mul(b); ok {
+						*cell = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "*", *cell, b)
+				}
+			case ast.DivOp:
+				return func(fbr *fiber) (Value, exception) {
+					b, exc := rhs(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					cell := &fbr.stack[fbr.base+li]
+					if result, ok := cell.div(b); ok {
+						*cell = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "/", *cell, b)
+				}
+			case ast.ModOp:
+				return func(fbr *fiber) (Value, exception) {
+					b, exc := rhs(fbr)
+					if exc != nil {
+						return b, exc
+					}
+					cell := &fbr.stack[fbr.base+li]
+					if result, ok := cell.mod(b); ok {
+						*cell = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "%", *cell, b)
+				}
+			}
+		}
 		switch node.Operator {
 		case ast.AddOp:
 			return func(fbr *fiber) (Value, exception) {
@@ -765,12 +2014,616 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 	panic(vm.compileErrorAt(node, "unsupported compound operator '%v'", node.Operator))
 }
 
+// compileLocalBinAssign fuses a local declaration or assignment whose RHS is an
+// arithmetic binary op ('dest := a op b', 'dest = expr op c') directly into
+// the destination slot, skipping one indirect closure dispatch per statement.
+func (vm *Instance) compileLocalBinAssign(dest local, bin ast.BinOp) (instruction, bool) {
+	if dest.isCaptured || dest.isBoxed {
+		return nil, false
+	}
+	di := int(dest.index)
+	site := vm.at(bin)
+	lhs, rhs := vm.evaluate(bin.Lhs), vm.evaluate(bin.Rhs)
+
+	if l, ok := lhs.(local); ok && !l.isCaptured && !l.isBoxed {
+		li := int(l.index)
+		if r, ok := rhs.(local); ok && !r.isCaptured && !r.isBoxed {
+			ri := int(r.index)
+			switch bin.Operator {
+			case ast.AddOp:
+				return func(fbr *fiber) (Value, exception) {
+					s := fbr.stack[fbr.base:]
+					a, b := s[li], s[ri]
+					if result, ok := a.add(b); ok {
+						s[di] = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "+", a, b)
+				}, true
+			case ast.SubOp:
+				return func(fbr *fiber) (Value, exception) {
+					s := fbr.stack[fbr.base:]
+					a, b := s[li], s[ri]
+					if result, ok := a.sub(b); ok {
+						s[di] = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "-", a, b)
+				}, true
+			case ast.MulOp:
+				return func(fbr *fiber) (Value, exception) {
+					s := fbr.stack[fbr.base:]
+					a, b := s[li], s[ri]
+					if result, ok := a.mul(b); ok {
+						s[di] = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "*", a, b)
+				}, true
+			case ast.DivOp:
+				return func(fbr *fiber) (Value, exception) {
+					s := fbr.stack[fbr.base:]
+					a, b := s[li], s[ri]
+					if result, ok := a.div(b); ok {
+						s[di] = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "/", a, b)
+				}, true
+			case ast.ModOp:
+				return func(fbr *fiber) (Value, exception) {
+					s := fbr.stack[fbr.base:]
+					a, b := s[li], s[ri]
+					if result, ok := a.mod(b); ok {
+						s[di] = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "%", a, b)
+				}, true
+			}
+		}
+		if r, ok := rhs.(Value); ok {
+			switch bin.Operator {
+			case ast.AddOp:
+				return func(fbr *fiber) (Value, exception) {
+					s := fbr.stack[fbr.base:]
+					a := s[li]
+					if result, ok := a.add(r); ok {
+						s[di] = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "+", a, r)
+				}, true
+			case ast.SubOp:
+				return func(fbr *fiber) (Value, exception) {
+					s := fbr.stack[fbr.base:]
+					a := s[li]
+					if result, ok := a.sub(r); ok {
+						s[di] = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "-", a, r)
+				}, true
+			case ast.MulOp:
+				return func(fbr *fiber) (Value, exception) {
+					s := fbr.stack[fbr.base:]
+					a := s[li]
+					if result, ok := a.mul(r); ok {
+						s[di] = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "*", a, r)
+				}, true
+			case ast.DivOp:
+				return func(fbr *fiber) (Value, exception) {
+					s := fbr.stack[fbr.base:]
+					a := s[li]
+					if result, ok := a.div(r); ok {
+						s[di] = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "/", a, r)
+				}, true
+			case ast.ModOp:
+				return func(fbr *fiber) (Value, exception) {
+					s := fbr.stack[fbr.base:]
+					a := s[li]
+					if result, ok := a.mod(r); ok {
+						s[di] = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "%", a, r)
+				}, true
+			}
+		}
+	}
+	if l, ok := lhs.(Value); ok {
+		if r, ok := rhs.(local); ok && !r.isCaptured && !r.isBoxed {
+			ri := int(r.index)
+			switch bin.Operator {
+			case ast.AddOp:
+				return func(fbr *fiber) (Value, exception) {
+					s := fbr.stack[fbr.base:]
+					b := s[ri]
+					if result, ok := l.add(b); ok {
+						s[di] = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "+", l, b)
+				}, true
+			case ast.SubOp:
+				return func(fbr *fiber) (Value, exception) {
+					s := fbr.stack[fbr.base:]
+					b := s[ri]
+					if result, ok := l.sub(b); ok {
+						s[di] = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "-", l, b)
+				}, true
+			case ast.MulOp:
+				return func(fbr *fiber) (Value, exception) {
+					s := fbr.stack[fbr.base:]
+					b := s[ri]
+					if result, ok := l.mul(b); ok {
+						s[di] = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "*", l, b)
+				}, true
+			case ast.DivOp:
+				return func(fbr *fiber) (Value, exception) {
+					s := fbr.stack[fbr.base:]
+					b := s[ri]
+					if result, ok := l.div(b); ok {
+						s[di] = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "/", l, b)
+				}, true
+			case ast.ModOp:
+				return func(fbr *fiber) (Value, exception) {
+					s := fbr.stack[fbr.base:]
+					b := s[ri]
+					if result, ok := l.mod(b); ok {
+						s[di] = result
+						return Value{}, nil
+					}
+					return Value{}, operatorError(site, "%", l, b)
+				}, true
+			}
+		}
+	}
+	if r, ok := rhs.(local); ok && !r.isCaptured && !r.isBoxed {
+		ri := int(r.index)
+		switch bin.Operator {
+		case ast.AddOp:
+			left := vm.compile(bin.Lhs)
+			return func(fbr *fiber) (Value, exception) {
+				a, exc := left(fbr)
+				if exc != nil {
+					return a, exc
+				}
+				s := fbr.stack[fbr.base:]
+				b := s[ri]
+				if result, ok := a.add(b); ok {
+					s[di] = result
+					return Value{}, nil
+				}
+				return Value{}, operatorError(site, "+", a, b)
+			}, true
+		case ast.SubOp:
+			left := vm.compile(bin.Lhs)
+			return func(fbr *fiber) (Value, exception) {
+				a, exc := left(fbr)
+				if exc != nil {
+					return a, exc
+				}
+				s := fbr.stack[fbr.base:]
+				b := s[ri]
+				if result, ok := a.sub(b); ok {
+					s[di] = result
+					return Value{}, nil
+				}
+				return Value{}, operatorError(site, "-", a, b)
+			}, true
+		case ast.MulOp:
+			left := vm.compile(bin.Lhs)
+			return func(fbr *fiber) (Value, exception) {
+				a, exc := left(fbr)
+				if exc != nil {
+					return a, exc
+				}
+				s := fbr.stack[fbr.base:]
+				b := s[ri]
+				if result, ok := a.mul(b); ok {
+					s[di] = result
+					return Value{}, nil
+				}
+				return Value{}, operatorError(site, "*", a, b)
+			}, true
+		case ast.DivOp:
+			left := vm.compile(bin.Lhs)
+			return func(fbr *fiber) (Value, exception) {
+				a, exc := left(fbr)
+				if exc != nil {
+					return a, exc
+				}
+				s := fbr.stack[fbr.base:]
+				b := s[ri]
+				if result, ok := a.div(b); ok {
+					s[di] = result
+					return Value{}, nil
+				}
+				return Value{}, operatorError(site, "/", a, b)
+			}, true
+		case ast.ModOp:
+			left := vm.compile(bin.Lhs)
+			return func(fbr *fiber) (Value, exception) {
+				a, exc := left(fbr)
+				if exc != nil {
+					return a, exc
+				}
+				s := fbr.stack[fbr.base:]
+				b := s[ri]
+				if result, ok := a.mod(b); ok {
+					s[di] = result
+					return Value{}, nil
+				}
+				return Value{}, operatorError(site, "%", a, b)
+			}, true
+		}
+	}
+	if r, ok := rhs.(Value); ok {
+		switch bin.Operator {
+		case ast.AddOp:
+			left := vm.compile(bin.Lhs)
+			return func(fbr *fiber) (Value, exception) {
+				a, exc := left(fbr)
+				if exc != nil {
+					return a, exc
+				}
+				if result, ok := a.add(r); ok {
+					fbr.stack[fbr.base+di] = result
+					return Value{}, nil
+				}
+				return Value{}, operatorError(site, "+", a, r)
+			}, true
+		case ast.SubOp:
+			left := vm.compile(bin.Lhs)
+			return func(fbr *fiber) (Value, exception) {
+				a, exc := left(fbr)
+				if exc != nil {
+					return a, exc
+				}
+				if result, ok := a.sub(r); ok {
+					fbr.stack[fbr.base+di] = result
+					return Value{}, nil
+				}
+				return Value{}, operatorError(site, "-", a, r)
+			}, true
+		case ast.MulOp:
+			left := vm.compile(bin.Lhs)
+			return func(fbr *fiber) (Value, exception) {
+				a, exc := left(fbr)
+				if exc != nil {
+					return a, exc
+				}
+				if result, ok := a.mul(r); ok {
+					fbr.stack[fbr.base+di] = result
+					return Value{}, nil
+				}
+				return Value{}, operatorError(site, "*", a, r)
+			}, true
+		case ast.DivOp:
+			left := vm.compile(bin.Lhs)
+			return func(fbr *fiber) (Value, exception) {
+				a, exc := left(fbr)
+				if exc != nil {
+					return a, exc
+				}
+				if result, ok := a.div(r); ok {
+					fbr.stack[fbr.base+di] = result
+					return Value{}, nil
+				}
+				return Value{}, operatorError(site, "/", a, r)
+			}, true
+		case ast.ModOp:
+			left := vm.compile(bin.Lhs)
+			return func(fbr *fiber) (Value, exception) {
+				a, exc := left(fbr)
+				if exc != nil {
+					return a, exc
+				}
+				if result, ok := a.mod(r); ok {
+					fbr.stack[fbr.base+di] = result
+					return Value{}, nil
+				}
+				return Value{}, operatorError(site, "%", a, r)
+			}, true
+		}
+	}
+	return nil, false
+}
+
 // compileComparison compiles a comparison used as a condition straight to a
-// Go bool when its operands are locals or constants, comparing numbers
-// without boxing. It reports false when the expression has another shape.
+// Go bool when its operands are locals or constants (or an expression compared
+// against a local or constant), comparing numbers without boxing.
 func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber) (bool, exception), bool) {
-	l, isLocal := vm.evaluate(bin.Lhs).(local)
-	if !isLocal {
+	if l, isLocal := vm.evaluate(bin.Lhs).(local); isLocal {
+		switch r := vm.evaluate(bin.Rhs).(type) {
+		case Value:
+			b := r
+			if bn, isNum := r.AsFloat64(); isNum {
+				if !l.isCaptured && !l.isBoxed {
+					li := int(l.index)
+					switch bin.Operator {
+					case ast.EqOp:
+						return func(fbr *fiber) (bool, exception) {
+							a := fbr.stack[fbr.base+li]
+							return a.Equals(b), nil
+						}, true
+					case ast.NotEqOp:
+						return func(fbr *fiber) (bool, exception) {
+							a := fbr.stack[fbr.base+li]
+							return !a.Equals(b), nil
+						}, true
+					case ast.LtOp:
+						return func(fbr *fiber) (bool, exception) {
+							a := fbr.stack[fbr.base+li]
+							if a.pointer == f64Type {
+								return math.Float64frombits(a.scalar) < bn, nil
+							}
+							res, ok := a.lessThan(b)
+							if !ok {
+								return false, operatorError(site, "<", a, b)
+							}
+							return res.IsTruthy(), nil
+						}, true
+					case ast.GtOp:
+						return func(fbr *fiber) (bool, exception) {
+							a := fbr.stack[fbr.base+li]
+							if a.pointer == f64Type {
+								return math.Float64frombits(a.scalar) > bn, nil
+							}
+							res, ok := a.greaterThan(b)
+							if !ok {
+								return false, operatorError(site, ">", a, b)
+							}
+							return res.IsTruthy(), nil
+						}, true
+					case ast.LtEqOp:
+						return func(fbr *fiber) (bool, exception) {
+							a := fbr.stack[fbr.base+li]
+							if a.pointer == f64Type {
+								return math.Float64frombits(a.scalar) <= bn, nil
+							}
+							res, ok := a.lessThanOrEqualTo(b)
+							if !ok {
+								return false, operatorError(site, "<=", a, b)
+							}
+							return res.IsTruthy(), nil
+						}, true
+					case ast.GtEqOp:
+						return func(fbr *fiber) (bool, exception) {
+							a := fbr.stack[fbr.base+li]
+							if a.pointer == f64Type {
+								return math.Float64frombits(a.scalar) >= bn, nil
+							}
+							res, ok := a.greaterThanOrEqualTo(b)
+							if !ok {
+								return false, operatorError(site, ">=", a, b)
+							}
+							return res.IsTruthy(), nil
+						}, true
+					}
+				}
+				switch bin.Operator {
+				case ast.EqOp:
+					return func(fbr *fiber) (bool, exception) {
+						a := *fbr.get(l)
+						return a.Equals(b), nil
+					}, true
+				case ast.NotEqOp:
+					return func(fbr *fiber) (bool, exception) {
+						a := *fbr.get(l)
+						return !a.Equals(b), nil
+					}, true
+				case ast.LtOp:
+					return func(fbr *fiber) (bool, exception) {
+						a := *fbr.get(l)
+						if a.pointer == f64Type {
+							return math.Float64frombits(a.scalar) < bn, nil
+						}
+						res, ok := a.lessThan(b)
+						if !ok {
+							return false, operatorError(site, "<", a, b)
+						}
+						return res.IsTruthy(), nil
+					}, true
+				case ast.GtOp:
+					return func(fbr *fiber) (bool, exception) {
+						a := *fbr.get(l)
+						if a.pointer == f64Type {
+							return math.Float64frombits(a.scalar) > bn, nil
+						}
+						res, ok := a.greaterThan(b)
+						if !ok {
+							return false, operatorError(site, ">", a, b)
+						}
+						return res.IsTruthy(), nil
+					}, true
+				case ast.LtEqOp:
+					return func(fbr *fiber) (bool, exception) {
+						a := *fbr.get(l)
+						if a.pointer == f64Type {
+							return math.Float64frombits(a.scalar) <= bn, nil
+						}
+						res, ok := a.lessThanOrEqualTo(b)
+						if !ok {
+							return false, operatorError(site, "<=", a, b)
+						}
+						return res.IsTruthy(), nil
+					}, true
+				case ast.GtEqOp:
+					return func(fbr *fiber) (bool, exception) {
+						a := *fbr.get(l)
+						if a.pointer == f64Type {
+							return math.Float64frombits(a.scalar) >= bn, nil
+						}
+						res, ok := a.greaterThanOrEqualTo(b)
+						if !ok {
+							return false, operatorError(site, ">=", a, b)
+						}
+						return res.IsTruthy(), nil
+					}, true
+				}
+			}
+			switch bin.Operator {
+			case ast.EqOp:
+				return func(fbr *fiber) (bool, exception) {
+					return fbr.get(l).Equals(b), nil
+				}, true
+			case ast.NotEqOp:
+				return func(fbr *fiber) (bool, exception) {
+					return !fbr.get(l).Equals(b), nil
+				}, true
+			}
+		case local:
+			if !l.isCaptured && !l.isBoxed && !r.isCaptured && !r.isBoxed {
+				li, ri := int(l.index), int(r.index)
+				switch bin.Operator {
+				case ast.EqOp:
+					return func(fbr *fiber) (bool, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						return a.Equals(b), nil
+					}, true
+				case ast.NotEqOp:
+					return func(fbr *fiber) (bool, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						return !a.Equals(b), nil
+					}, true
+				case ast.LtOp:
+					return func(fbr *fiber) (bool, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						if a.pointer == f64Type && b.pointer == f64Type {
+							return math.Float64frombits(a.scalar) < math.Float64frombits(b.scalar), nil
+						}
+						res, ok := a.lessThan(b)
+						if !ok {
+							return false, operatorError(site, "<", a, b)
+						}
+						return res.IsTruthy(), nil
+					}, true
+				case ast.GtOp:
+					return func(fbr *fiber) (bool, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						if a.pointer == f64Type && b.pointer == f64Type {
+							return math.Float64frombits(a.scalar) > math.Float64frombits(b.scalar), nil
+						}
+						res, ok := a.greaterThan(b)
+						if !ok {
+							return false, operatorError(site, ">", a, b)
+						}
+						return res.IsTruthy(), nil
+					}, true
+				case ast.LtEqOp:
+					return func(fbr *fiber) (bool, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						if a.pointer == f64Type && b.pointer == f64Type {
+							return math.Float64frombits(a.scalar) <= math.Float64frombits(b.scalar), nil
+						}
+						res, ok := a.lessThanOrEqualTo(b)
+						if !ok {
+							return false, operatorError(site, "<=", a, b)
+						}
+						return res.IsTruthy(), nil
+					}, true
+				case ast.GtEqOp:
+					return func(fbr *fiber) (bool, exception) {
+						s := fbr.stack[fbr.base:]
+						a, b := s[li], s[ri]
+						if a.pointer == f64Type && b.pointer == f64Type {
+							return math.Float64frombits(a.scalar) >= math.Float64frombits(b.scalar), nil
+						}
+						res, ok := a.greaterThanOrEqualTo(b)
+						if !ok {
+							return false, operatorError(site, ">=", a, b)
+						}
+						return res.IsTruthy(), nil
+					}, true
+				}
+			}
+			switch bin.Operator {
+			case ast.EqOp:
+				return func(fbr *fiber) (bool, exception) {
+					a, b := *fbr.get(l), *fbr.get(r)
+					return a.Equals(b), nil
+				}, true
+			case ast.NotEqOp:
+				return func(fbr *fiber) (bool, exception) {
+					a, b := *fbr.get(l), *fbr.get(r)
+					return !a.Equals(b), nil
+				}, true
+			case ast.LtOp:
+				return func(fbr *fiber) (bool, exception) {
+					a, b := *fbr.get(l), *fbr.get(r)
+					if a.pointer == f64Type && b.pointer == f64Type {
+						return math.Float64frombits(a.scalar) < math.Float64frombits(b.scalar), nil
+					}
+					res, ok := a.lessThan(b)
+					if !ok {
+						return false, operatorError(site, "<", a, b)
+					}
+					return res.IsTruthy(), nil
+				}, true
+			case ast.GtOp:
+				return func(fbr *fiber) (bool, exception) {
+					a, b := *fbr.get(l), *fbr.get(r)
+					if a.pointer == f64Type && b.pointer == f64Type {
+						return math.Float64frombits(a.scalar) > math.Float64frombits(b.scalar), nil
+					}
+					res, ok := a.greaterThan(b)
+					if !ok {
+						return false, operatorError(site, ">", a, b)
+					}
+					return res.IsTruthy(), nil
+				}, true
+			case ast.LtEqOp:
+				return func(fbr *fiber) (bool, exception) {
+					a, b := *fbr.get(l), *fbr.get(r)
+					if a.pointer == f64Type && b.pointer == f64Type {
+						return math.Float64frombits(a.scalar) <= math.Float64frombits(b.scalar), nil
+					}
+					res, ok := a.lessThanOrEqualTo(b)
+					if !ok {
+						return false, operatorError(site, "<=", a, b)
+					}
+					return res.IsTruthy(), nil
+				}, true
+			case ast.GtEqOp:
+				return func(fbr *fiber) (bool, exception) {
+					a, b := *fbr.get(l), *fbr.get(r)
+					if a.pointer == f64Type && b.pointer == f64Type {
+						return math.Float64frombits(a.scalar) >= math.Float64frombits(b.scalar), nil
+					}
+					res, ok := a.greaterThanOrEqualTo(b)
+					if !ok {
+						return false, operatorError(site, ">=", a, b)
+					}
+					return res.IsTruthy(), nil
+				}, true
+			}
+		}
+		return nil, false
+	}
+
+	if !vm.cp.inline {
 		return nil, false
 	}
 	switch r := vm.evaluate(bin.Rhs).(type) {
@@ -779,18 +2632,30 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 		if bn, isNum := r.AsFloat64(); isNum {
 			switch bin.Operator {
 			case ast.EqOp:
+				left := vm.compile(bin.Lhs)
 				return func(fbr *fiber) (bool, exception) {
-					a := *fbr.get(l)
+					a, exc := left(fbr)
+					if exc != nil {
+						return false, exc
+					}
 					return a.Equals(b), nil
 				}, true
 			case ast.NotEqOp:
+				left := vm.compile(bin.Lhs)
 				return func(fbr *fiber) (bool, exception) {
-					a := *fbr.get(l)
+					a, exc := left(fbr)
+					if exc != nil {
+						return false, exc
+					}
 					return !a.Equals(b), nil
 				}, true
 			case ast.LtOp:
+				left := vm.compile(bin.Lhs)
 				return func(fbr *fiber) (bool, exception) {
-					a := *fbr.get(l)
+					a, exc := left(fbr)
+					if exc != nil {
+						return false, exc
+					}
 					if a.pointer == f64Type {
 						return math.Float64frombits(a.scalar) < bn, nil
 					}
@@ -801,8 +2666,12 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 					return res.IsTruthy(), nil
 				}, true
 			case ast.GtOp:
+				left := vm.compile(bin.Lhs)
 				return func(fbr *fiber) (bool, exception) {
-					a := *fbr.get(l)
+					a, exc := left(fbr)
+					if exc != nil {
+						return false, exc
+					}
 					if a.pointer == f64Type {
 						return math.Float64frombits(a.scalar) > bn, nil
 					}
@@ -813,8 +2682,12 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 					return res.IsTruthy(), nil
 				}, true
 			case ast.LtEqOp:
+				left := vm.compile(bin.Lhs)
 				return func(fbr *fiber) (bool, exception) {
-					a := *fbr.get(l)
+					a, exc := left(fbr)
+					if exc != nil {
+						return false, exc
+					}
 					if a.pointer == f64Type {
 						return math.Float64frombits(a.scalar) <= bn, nil
 					}
@@ -825,8 +2698,12 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 					return res.IsTruthy(), nil
 				}, true
 			case ast.GtEqOp:
+				left := vm.compile(bin.Lhs)
 				return func(fbr *fiber) (bool, exception) {
-					a := *fbr.get(l)
+					a, exc := left(fbr)
+					if exc != nil {
+						return false, exc
+					}
 					if a.pointer == f64Type {
 						return math.Float64frombits(a.scalar) >= bn, nil
 					}
@@ -840,29 +2717,54 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 		}
 		switch bin.Operator {
 		case ast.EqOp:
+			left := vm.compile(bin.Lhs)
 			return func(fbr *fiber) (bool, exception) {
-				return fbr.get(l).Equals(b), nil
+				a, exc := left(fbr)
+				if exc != nil {
+					return false, exc
+				}
+				return a.Equals(b), nil
 			}, true
 		case ast.NotEqOp:
+			left := vm.compile(bin.Lhs)
 			return func(fbr *fiber) (bool, exception) {
-				return !fbr.get(l).Equals(b), nil
+				a, exc := left(fbr)
+				if exc != nil {
+					return false, exc
+				}
+				return !a.Equals(b), nil
 			}, true
 		}
 	case local:
 		switch bin.Operator {
 		case ast.EqOp:
+			left := vm.compile(bin.Lhs)
 			return func(fbr *fiber) (bool, exception) {
-				a, b := *fbr.get(l), *fbr.get(r)
+				a, exc := left(fbr)
+				if exc != nil {
+					return false, exc
+				}
+				b := *fbr.get(r)
 				return a.Equals(b), nil
 			}, true
 		case ast.NotEqOp:
+			left := vm.compile(bin.Lhs)
 			return func(fbr *fiber) (bool, exception) {
-				a, b := *fbr.get(l), *fbr.get(r)
+				a, exc := left(fbr)
+				if exc != nil {
+					return false, exc
+				}
+				b := *fbr.get(r)
 				return !a.Equals(b), nil
 			}, true
 		case ast.LtOp:
+			left := vm.compile(bin.Lhs)
 			return func(fbr *fiber) (bool, exception) {
-				a, b := *fbr.get(l), *fbr.get(r)
+				a, exc := left(fbr)
+				if exc != nil {
+					return false, exc
+				}
+				b := *fbr.get(r)
 				if a.pointer == f64Type && b.pointer == f64Type {
 					return math.Float64frombits(a.scalar) < math.Float64frombits(b.scalar), nil
 				}
@@ -873,8 +2775,13 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 				return res.IsTruthy(), nil
 			}, true
 		case ast.GtOp:
+			left := vm.compile(bin.Lhs)
 			return func(fbr *fiber) (bool, exception) {
-				a, b := *fbr.get(l), *fbr.get(r)
+				a, exc := left(fbr)
+				if exc != nil {
+					return false, exc
+				}
+				b := *fbr.get(r)
 				if a.pointer == f64Type && b.pointer == f64Type {
 					return math.Float64frombits(a.scalar) > math.Float64frombits(b.scalar), nil
 				}
@@ -885,8 +2792,13 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 				return res.IsTruthy(), nil
 			}, true
 		case ast.LtEqOp:
+			left := vm.compile(bin.Lhs)
 			return func(fbr *fiber) (bool, exception) {
-				a, b := *fbr.get(l), *fbr.get(r)
+				a, exc := left(fbr)
+				if exc != nil {
+					return false, exc
+				}
+				b := *fbr.get(r)
 				if a.pointer == f64Type && b.pointer == f64Type {
 					return math.Float64frombits(a.scalar) <= math.Float64frombits(b.scalar), nil
 				}
@@ -897,8 +2809,13 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 				return res.IsTruthy(), nil
 			}, true
 		case ast.GtEqOp:
+			left := vm.compile(bin.Lhs)
 			return func(fbr *fiber) (bool, exception) {
-				a, b := *fbr.get(l), *fbr.get(r)
+				a, exc := left(fbr)
+				if exc != nil {
+					return false, exc
+				}
+				b := *fbr.get(r)
 				if a.pointer == f64Type && b.pointer == f64Type {
 					return math.Float64frombits(a.scalar) >= math.Float64frombits(b.scalar), nil
 				}

@@ -44,6 +44,14 @@ func (vm *Instance) closeFunction(info *funcInfoStatic, closure *closure) {
 		}
 	}
 
+	// Parameters that may escape into a nested closure are boxed into heap cells
+	// right after arguments are placed in the frame.
+	for i, name := range info.args {
+		if closure.mayEscape(name) {
+			info.escapingParams = append(info.escapingParams, i)
+		}
+	}
+
 	if vm.cp.debugInfo {
 		info.ensureDebug().slots = closure.scope.Slots()
 	}
@@ -89,7 +97,7 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 
 	closure := vm.compileFunction(info, node.Args, node.Action, nil)
 	captures := closure.captures
-	escapes := enclosing.needsFreshCell(node.Name)
+	escapes := enclosing.mayEscape(node.Name)
 
 	// create the function & declare it
 	if escapes {
@@ -169,23 +177,19 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 							return Value{}, exc
 						}
 					}
-					base := len(fbr.stack)
-					for _, escapes := range fn.locals {
-						if !escapes {
-							fbr.stack = append(fbr.stack, fbr.pop())
-						} else {
-							fbr.stack = append(fbr.stack, &Value{})
-						}
-					}
+					n := len(fn.locals)
+					base := fbr.allocFrame(n)
 
 					for idx, argFn := range arguments {
 						arg, exc := argFn(fbr)
 						if exc != nil {
-							fbr.push(fn.recyclable)
-							fbr.popStack(len(fn.locals))
+							fbr.popStack(n)
 							return Value{}, exc
 						}
-						*(fbr.stack[base+idx]) = arg
+						fbr.stack[base+idx] = arg
+					}
+					if len(fn.escapingParams) > 0 {
+						fbr.boxParams(base, fn.escapingParams)
 					}
 
 					prevBase := fbr.base
@@ -193,8 +197,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 					result, exc = fn.code(fbr)
 
-					fbr.push(fn.recyclable)
-					fbr.popStack(len(fn.locals))
+					fbr.popStack(n)
 					fbr.base = prevBase
 
 					switch exc {
@@ -217,23 +220,19 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 							return Value{}, exc
 						}
 					}
-					base := len(fbr.stack)
-					for _, escapes := range fn.locals {
-						if !escapes {
-							fbr.stack = append(fbr.stack, fbr.pop())
-						} else {
-							fbr.stack = append(fbr.stack, &Value{})
-						}
-					}
+					n := len(fn.locals)
+					base := fbr.allocFrame(n)
 
 					for idx, argFn := range arguments {
 						arg, exc := argFn(fbr)
 						if exc != nil {
-							fbr.push(fn.recyclable)
-							fbr.popStack(len(fn.locals))
+							fbr.popStack(n)
 							return Value{}, exc
 						}
-						*(fbr.stack[base+idx]) = arg
+						fbr.stack[base+idx] = arg
+					}
+					if len(fn.escapingParams) > 0 {
+						fbr.boxParams(base, fn.escapingParams)
 					}
 
 					prevBase, prevActive := fbr.base, fbr.active
@@ -241,8 +240,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 					result, exc = fn.code(fbr)
 
-					fbr.push(fn.recyclable)
-					fbr.popStack(len(fn.locals))
+					fbr.popStack(n)
 					fbr.base, fbr.active = prevBase, prevActive
 
 					switch exc {
@@ -362,14 +360,8 @@ func invokeDynamic(fbr *fiber, site site, target Value, arguments []instruction)
 			return Value{}, exc
 		}
 	}
-	base := len(fbr.stack)
-	for _, escapes := range fn.locals {
-		if !escapes {
-			fbr.stack = append(fbr.stack, fbr.pop())
-		} else {
-			fbr.stack = append(fbr.stack, &Value{})
-		}
-	}
+	n := len(fn.locals)
+	base := fbr.allocFrame(n)
 
 	fixed := len(arguments)
 	if fn.isVariadic {
@@ -378,18 +370,19 @@ func invokeDynamic(fbr *fiber, site site, target Value, arguments []instruction)
 	for idx := range fixed {
 		arg, exc := arguments[idx](fbr)
 		if exc != nil {
-			fbr.push(fn.recyclable)
-			fbr.popStack(len(fn.locals))
+			fbr.popStack(n)
 			return Value{}, exc
 		}
-		*(fbr.stack[base+idx]) = arg
+		fbr.stack[base+idx] = arg
 	}
 	if fn.isVariadic {
 		if exc := fbr.evalVariadicTail(base, fixed, fixed, arguments); exc != nil {
-			fbr.push(fn.recyclable)
-			fbr.popStack(len(fn.locals))
+			fbr.popStack(n)
 			return Value{}, exc
 		}
+	}
+	if len(fn.escapingParams) > 0 {
+		fbr.boxParams(base, fn.escapingParams)
 	}
 
 	prevBase, prevActive := fbr.base, fbr.active
@@ -397,8 +390,7 @@ func invokeDynamic(fbr *fiber, site site, target Value, arguments []instruction)
 
 	result, exc := fn.code(fbr)
 
-	fbr.push(fn.recyclable)
-	fbr.popStack(len(fn.locals))
+	fbr.popStack(n)
 	fbr.base, fbr.active = prevBase, prevActive
 
 	switch exc {

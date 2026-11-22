@@ -37,13 +37,6 @@ func (cl *closure) mayEscape(name string) bool {
 	return cl.capturedNames[name]
 }
 
-// needsFreshCell reports whether declaring name right now needs a fresh heap
-// cell on each execution. Outside loops, ds.Scope assigns every declaration a
-// unique slot whose heap cell is already allocated on frame entry if it escapes.
-func (cl *closure) needsFreshCell(name string) bool {
-	return cl.loops > 0 && cl.capturedNames[name]
-}
-
 // PackageResolver resolves a package by import name or path.
 type PackageResolver func(name string) (*Package, error)
 
@@ -433,6 +426,7 @@ func (vm *Instance) WaitForNoActivity() {
 type local struct {
 	index      int16
 	isCaptured bool
+	isBoxed    bool // true when this local escapes into a nested closure and lives in a heap cell
 	isStatic   bool
 }
 
@@ -462,7 +456,7 @@ func (cp *compiler) reach(name string) (binding, error) {
 		if binding, success := closure.scope.Reach(name); success {
 			// check if it is a local
 			if scroll == 0 {
-				return local{index: int16(binding.Index), isCaptured: false, isStatic: binding.IsStatic}, nil
+				return local{index: int16(binding.Index), isCaptured: false, isBoxed: closure.mayEscape(name), isStatic: binding.IsStatic}, nil
 			}
 
 			// otherwise capture it & return the index

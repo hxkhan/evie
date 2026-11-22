@@ -128,6 +128,15 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 	if l, ok := lhs.(Value); ok {
 		if r, ok := rhs.(local); ok {
+			if !r.isCaptured && !r.isBoxed {
+				ri := int(r.index)
+				switch node.Operator {
+`)
+	for _, o := range ops {
+		p("case ast.%s:\n\treturn func(fbr *fiber) (Value, exception) {\n\t\tb := fbr.stack[fbr.base+ri]\n\t\t%s\n\t}\n", o.Name, o.result("l", "b"))
+	}
+	p(`				}
+			}
 			switch node.Operator {
 `)
 	for _, o := range ops {
@@ -139,6 +148,15 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 
 	if l, ok := lhs.(local); ok {
 		if r, ok := rhs.(local); ok {
+			if !l.isCaptured && !l.isBoxed && !r.isCaptured && !r.isBoxed {
+				li, ri := int(l.index), int(r.index)
+				switch node.Operator {
+`)
+	for _, o := range ops {
+		p("case ast.%s:\n\treturn func(fbr *fiber) (Value, exception) {\n\t\ts := fbr.stack[fbr.base:]\n\t\ta, b := s[li], s[ri]\n\t\t%s\n\t}\n", o.Name, o.result("a", "b"))
+	}
+	p(`				}
+			}
 			switch node.Operator {
 `)
 	for _, o := range ops {
@@ -147,10 +165,97 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 	p(`			}
 		}
 		if r, ok := rhs.(Value); ok {
+			if !l.isCaptured && !l.isBoxed {
+				li := int(l.index)
+				switch node.Operator {
+`)
+	for _, o := range ops {
+		p("case ast.%s:\n\treturn func(fbr *fiber) (Value, exception) {\n\t\ta := fbr.stack[fbr.base+li]\n\t\t%s\n\t}\n", o.Name, o.result("a", "r"))
+	}
+	p(`				}
+			}
 			switch node.Operator {
 `)
 	for _, o := range ops {
 		p("case ast.%s:\n\treturn func(fbr *fiber) (Value, exception) {\n\t\ta := *fbr.get(l)\n\t\t%s\n\t}\n", o.Name, o.result("a", "r"))
+	}
+	p(`			}
+		}
+	}
+
+	// Single-sided operand specialization for non-short-circuit operators:
+	// eliminates one indirect closure call in chained expressions such as
+	// (xx - yy) + x0, (2.0 * x) * y + y0, or (py / size) * 2.0 - 1.0.
+	if node.Operator != ast.AndOp && node.Operator != ast.OrOp {
+		if r, ok := rhs.(local); ok {
+			left := vm.compile(node.Lhs)
+			if !r.isCaptured && !r.isBoxed {
+				ri := int(r.index)
+				switch node.Operator {
+`)
+	for _, o := range ops {
+		if o.Kind == "and" || o.Kind == "or" {
+			continue
+		}
+		p("case ast.%s:\n\treturn func(fbr *fiber) (Value, exception) {\n\t\ta, exc := left(fbr)\n\t\tif exc != nil {\n\t\t\treturn a, exc\n\t\t}\n\t\tb := fbr.stack[fbr.base+ri]\n\t\t%s\n\t}\n", o.Name, o.result("a", "b"))
+	}
+	p(`				}
+			}
+			switch node.Operator {
+`)
+	for _, o := range ops {
+		if o.Kind == "and" || o.Kind == "or" {
+			continue
+		}
+		p("case ast.%s:\n\treturn func(fbr *fiber) (Value, exception) {\n\t\ta, exc := left(fbr)\n\t\tif exc != nil {\n\t\t\treturn a, exc\n\t\t}\n\t\tb := *fbr.get(r)\n\t\t%s\n\t}\n", o.Name, o.result("a", "b"))
+	}
+	p(`			}
+		}
+		if r, ok := rhs.(Value); ok {
+			left := vm.compile(node.Lhs)
+			switch node.Operator {
+`)
+	for _, o := range ops {
+		if o.Kind == "and" || o.Kind == "or" {
+			continue
+		}
+		p("case ast.%s:\n\treturn func(fbr *fiber) (Value, exception) {\n\t\ta, exc := left(fbr)\n\t\tif exc != nil {\n\t\t\treturn a, exc\n\t\t}\n\t\t%s\n\t}\n", o.Name, o.result("a", "r"))
+	}
+	p(`			}
+		}
+		if l, ok := lhs.(local); ok {
+			right := vm.compile(node.Rhs)
+			if !l.isCaptured && !l.isBoxed {
+				li := int(l.index)
+				switch node.Operator {
+`)
+	for _, o := range ops {
+		if o.Kind == "and" || o.Kind == "or" {
+			continue
+		}
+		p("case ast.%s:\n\treturn func(fbr *fiber) (Value, exception) {\n\t\ta := fbr.stack[fbr.base+li]\n\t\tb, exc := right(fbr)\n\t\tif exc != nil {\n\t\t\treturn b, exc\n\t\t}\n\t\t%s\n\t}\n", o.Name, o.result("a", "b"))
+	}
+	p(`				}
+			}
+			switch node.Operator {
+`)
+	for _, o := range ops {
+		if o.Kind == "and" || o.Kind == "or" {
+			continue
+		}
+		p("case ast.%s:\n\treturn func(fbr *fiber) (Value, exception) {\n\t\ta := *fbr.get(l)\n\t\tb, exc := right(fbr)\n\t\tif exc != nil {\n\t\t\treturn b, exc\n\t\t}\n\t\t%s\n\t}\n", o.Name, o.result("a", "b"))
+	}
+	p(`			}
+		}
+		if l, ok := lhs.(Value); ok {
+			right := vm.compile(node.Rhs)
+			switch node.Operator {
+`)
+	for _, o := range ops {
+		if o.Kind == "and" || o.Kind == "or" {
+			continue
+		}
+		p("case ast.%s:\n\treturn func(fbr *fiber) (Value, exception) {\n\t\tb, exc := right(fbr)\n\t\tif exc != nil {\n\t\t\treturn b, exc\n\t\t}\n\t\t%s\n\t}\n", o.Name, o.result("l", "b"))
 	}
 	p(`			}
 		}
@@ -221,6 +326,18 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 		}
 		switch rhs := vm.evaluate(node.Rhs).(type) {
 		case local:
+			if !lhs.isCaptured && !lhs.isBoxed && !rhs.isCaptured && !rhs.isBoxed {
+				li, ri := int(lhs.index), int(rhs.index)
+				switch node.Operator {
+`)
+	for _, o := range ops {
+		if !o.arithmetic() {
+			continue
+		}
+		p("case ast.%s:\n\treturn func(fbr *fiber) (Value, exception) {\n\t\ts := fbr.stack[fbr.base:]\n\t\tcell, b := &s[li], s[ri]\n\t\t%s\n\t}\n", o.Name, o.update("b"))
+	}
+	p(`				}
+			}
 			switch node.Operator {
 `)
 	for _, o := range ops {
@@ -231,6 +348,18 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 	}
 	p(`			}
 		case Value:
+			if !lhs.isCaptured && !lhs.isBoxed {
+				li := int(lhs.index)
+				switch node.Operator {
+`)
+	for _, o := range ops {
+		if !o.arithmetic() {
+			continue
+		}
+		p("case ast.%s:\n\treturn func(fbr *fiber) (Value, exception) {\n\t\tcell := &fbr.stack[fbr.base+li]\n\t\t%s\n\t}\n", o.Name, o.update("rhs"))
+	}
+	p(`				}
+			}
 			switch node.Operator {
 `)
 	for _, o := range ops {
@@ -242,6 +371,18 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 	p(`			}
 		}
 		rhs := vm.compile(node.Rhs)
+		if !lhs.isCaptured && !lhs.isBoxed {
+			li := int(lhs.index)
+			switch node.Operator {
+`)
+	for _, o := range ops {
+		if !o.arithmetic() {
+			continue
+		}
+		p("case ast.%s:\n\treturn func(fbr *fiber) (Value, exception) {\n\t\tb, exc := rhs(fbr)\n\t\tif exc != nil {\n\t\t\treturn b, exc\n\t\t}\n\t\tcell := &fbr.stack[fbr.base+li]\n\t\t%s\n\t}\n", o.Name, o.update("b"))
+	}
+	p(`			}
+		}
 		switch node.Operator {
 `)
 	for _, o := range ops {
@@ -271,12 +412,209 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 	panic(vm.compileErrorAt(node, "unsupported compound operator '%%v'", node.Operator))
 }
 
+// compileLocalBinAssign fuses a local declaration or assignment whose RHS is an
+// arithmetic binary op ('dest := a op b', 'dest = expr op c') directly into
+// the destination slot, skipping one indirect closure dispatch per statement.
+func (vm *Instance) compileLocalBinAssign(dest local, bin ast.BinOp) (instruction, bool) {
+	if dest.isCaptured || dest.isBoxed {
+		return nil, false
+	}
+	di := int(dest.index)
+	site := vm.at(bin)
+	lhs, rhs := vm.evaluate(bin.Lhs), vm.evaluate(bin.Rhs)
+
+	if l, ok := lhs.(local); ok && !l.isCaptured && !l.isBoxed {
+		li := int(l.index)
+		if r, ok := rhs.(local); ok && !r.isCaptured && !r.isBoxed {
+			ri := int(r.index)
+			switch bin.Operator {
+`)
+	for _, o := range ops {
+		if !o.arithmetic() {
+			continue
+		}
+		p(`case ast.%s:
+	return func(fbr *fiber) (Value, exception) {
+		s := fbr.stack[fbr.base:]
+		a, b := s[li], s[ri]
+		if result, ok := a.%s(b); ok {
+			s[di] = result
+			return Value{}, nil
+		}
+		return Value{}, operatorError(site, %q, a, b)
+	}, true
+`, o.Name, o.Method, o.Symbol)
+	}
+	p(`			}
+		}
+		if r, ok := rhs.(Value); ok {
+			switch bin.Operator {
+`)
+	for _, o := range ops {
+		if !o.arithmetic() {
+			continue
+		}
+		p(`case ast.%s:
+	return func(fbr *fiber) (Value, exception) {
+		s := fbr.stack[fbr.base:]
+		a := s[li]
+		if result, ok := a.%s(r); ok {
+			s[di] = result
+			return Value{}, nil
+		}
+		return Value{}, operatorError(site, %q, a, r)
+	}, true
+`, o.Name, o.Method, o.Symbol)
+	}
+	p(`			}
+		}
+	}
+	if l, ok := lhs.(Value); ok {
+		if r, ok := rhs.(local); ok && !r.isCaptured && !r.isBoxed {
+			ri := int(r.index)
+			switch bin.Operator {
+`)
+	for _, o := range ops {
+		if !o.arithmetic() {
+			continue
+		}
+		p(`case ast.%s:
+	return func(fbr *fiber) (Value, exception) {
+		s := fbr.stack[fbr.base:]
+		b := s[ri]
+		if result, ok := l.%s(b); ok {
+			s[di] = result
+			return Value{}, nil
+		}
+		return Value{}, operatorError(site, %q, l, b)
+	}, true
+`, o.Name, o.Method, o.Symbol)
+	}
+	p(`			}
+		}
+	}
+	if r, ok := rhs.(local); ok && !r.isCaptured && !r.isBoxed {
+		ri := int(r.index)
+		switch bin.Operator {
+`)
+	for _, o := range ops {
+		if !o.arithmetic() {
+			continue
+		}
+		p(`case ast.%s:
+	left := vm.compile(bin.Lhs)
+	return func(fbr *fiber) (Value, exception) {
+		a, exc := left(fbr)
+		if exc != nil {
+			return a, exc
+		}
+		s := fbr.stack[fbr.base:]
+		b := s[ri]
+		if result, ok := a.%s(b); ok {
+			s[di] = result
+			return Value{}, nil
+		}
+		return Value{}, operatorError(site, %q, a, b)
+	}, true
+`, o.Name, o.Method, o.Symbol)
+	}
+	p(`		}
+	}
+	if r, ok := rhs.(Value); ok {
+		switch bin.Operator {
+`)
+	for _, o := range ops {
+		if !o.arithmetic() {
+			continue
+		}
+		p(`case ast.%s:
+	left := vm.compile(bin.Lhs)
+	return func(fbr *fiber) (Value, exception) {
+		a, exc := left(fbr)
+		if exc != nil {
+			return a, exc
+		}
+		if result, ok := a.%s(r); ok {
+			fbr.stack[fbr.base+di] = result
+			return Value{}, nil
+		}
+		return Value{}, operatorError(site, %q, a, r)
+	}, true
+`, o.Name, o.Method, o.Symbol)
+	}
+	p(`		}
+	}
+	return nil, false
+}
+
 // compileComparison compiles a comparison used as a condition straight to a
-// Go bool when its operands are locals or constants, comparing numbers
-// without boxing. It reports false when the expression has another shape.
+// Go bool when its operands are locals or constants (or an expression compared
+// against a local or constant), comparing numbers without boxing.
 func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber) (bool, exception), bool) {
-	l, isLocal := vm.evaluate(bin.Lhs).(local)
-	if !isLocal {
+	if l, isLocal := vm.evaluate(bin.Lhs).(local); isLocal {
+		switch r := vm.evaluate(bin.Rhs).(type) {
+		case Value:
+			b := r
+			if bn, isNum := r.AsFloat64(); isNum {
+				if !l.isCaptured && !l.isBoxed {
+					li := int(l.index)
+					switch bin.Operator {
+`)
+	for _, o := range ops {
+		if !o.comparison() {
+			continue
+		}
+		p("case ast.%s:\n\treturn func(fbr *fiber) (bool, exception) {\n\t\ta := fbr.stack[fbr.base+li]\n\t\t%s\n\t}, true\n", o.Name, o.condition("a.pointer == f64Type", "bn"))
+	}
+	p(`					}
+				}
+				switch bin.Operator {
+`)
+	for _, o := range ops {
+		if !o.comparison() {
+			continue
+		}
+		p("case ast.%s:\n\treturn func(fbr *fiber) (bool, exception) {\n\t\ta := *fbr.get(l)\n\t\t%s\n\t}, true\n", o.Name, o.condition("a.pointer == f64Type", "bn"))
+	}
+	p(`				}
+			}
+			switch bin.Operator {
+			case ast.EqOp:
+				return func(fbr *fiber) (bool, exception) {
+					return fbr.get(l).Equals(b), nil
+				}, true
+			case ast.NotEqOp:
+				return func(fbr *fiber) (bool, exception) {
+					return !fbr.get(l).Equals(b), nil
+				}, true
+			}
+		case local:
+			if !l.isCaptured && !l.isBoxed && !r.isCaptured && !r.isBoxed {
+				li, ri := int(l.index), int(r.index)
+				switch bin.Operator {
+`)
+	for _, o := range ops {
+		if !o.comparison() {
+			continue
+		}
+		p("case ast.%s:\n\treturn func(fbr *fiber) (bool, exception) {\n\t\ts := fbr.stack[fbr.base:]\n\t\ta, b := s[li], s[ri]\n\t\t%s\n\t}, true\n", o.Name, o.condition("a.pointer == f64Type && b.pointer == f64Type", "math.Float64frombits(b.scalar)"))
+	}
+	p(`				}
+			}
+			switch bin.Operator {
+`)
+	for _, o := range ops {
+		if !o.comparison() {
+			continue
+		}
+		p("case ast.%s:\n\treturn func(fbr *fiber) (bool, exception) {\n\t\ta, b := *fbr.get(l), *fbr.get(r)\n\t\t%s\n\t}, true\n", o.Name, o.condition("a.pointer == f64Type && b.pointer == f64Type", "math.Float64frombits(b.scalar)"))
+	}
+	p(`			}
+		}
+		return nil, false
+	}
+
+	if !vm.cp.inline {
 		return nil, false
 	}
 	switch r := vm.evaluate(bin.Rhs).(type) {
@@ -289,18 +627,28 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 		if !o.comparison() {
 			continue
 		}
-		p("case ast.%s:\n\treturn func(fbr *fiber) (bool, exception) {\n\t\ta := *fbr.get(l)\n\t\t%s\n\t}, true\n", o.Name, o.condition("a.pointer == f64Type", "bn"))
+		p("case ast.%s:\n\tleft := vm.compile(bin.Lhs)\n\treturn func(fbr *fiber) (bool, exception) {\n\t\ta, exc := left(fbr)\n\t\tif exc != nil {\n\t\t\treturn false, exc\n\t\t}\n\t\t%s\n\t}, true\n", o.Name, o.condition("a.pointer == f64Type", "bn"))
 	}
 	p(`			}
 		}
 		switch bin.Operator {
 		case ast.EqOp:
+			left := vm.compile(bin.Lhs)
 			return func(fbr *fiber) (bool, exception) {
-				return fbr.get(l).Equals(b), nil
+				a, exc := left(fbr)
+				if exc != nil {
+					return false, exc
+				}
+				return a.Equals(b), nil
 			}, true
 		case ast.NotEqOp:
+			left := vm.compile(bin.Lhs)
 			return func(fbr *fiber) (bool, exception) {
-				return !fbr.get(l).Equals(b), nil
+				a, exc := left(fbr)
+				if exc != nil {
+					return false, exc
+				}
+				return !a.Equals(b), nil
 			}, true
 		}
 	case local:
@@ -310,7 +658,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 		if !o.comparison() {
 			continue
 		}
-		p("case ast.%s:\n\treturn func(fbr *fiber) (bool, exception) {\n\t\ta, b := *fbr.get(l), *fbr.get(r)\n\t\t%s\n\t}, true\n", o.Name, o.condition("a.pointer == f64Type && b.pointer == f64Type", "math.Float64frombits(b.scalar)"))
+		p("case ast.%s:\n\tleft := vm.compile(bin.Lhs)\n\treturn func(fbr *fiber) (bool, exception) {\n\t\ta, exc := left(fbr)\n\t\tif exc != nil {\n\t\t\treturn false, exc\n\t\t}\n\t\tb := *fbr.get(r)\n\t\t%s\n\t}, true\n", o.Name, o.condition("a.pointer == f64Type && b.pointer == f64Type", "math.Float64frombits(b.scalar)"))
 	}
 	p(`		}
 	}

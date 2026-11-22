@@ -29,6 +29,11 @@ func (vm *Instance) emitReturn(node ast.Return) instruction {
 						return fbr.getCaptured(v.index), signalReturn
 					}
 				}
+				if v.isBoxed {
+					return func(fbr *fiber) (Value, exception) {
+						return fbr.getBoxedLocal(v.index), signalReturn
+					}
+				}
 				return func(fbr *fiber) (Value, exception) {
 					return fbr.getLocal(v.index), signalReturn
 				}
@@ -79,28 +84,6 @@ func (vm *Instance) compileCondition(node ast.Node) func(fbr *fiber) (bool, exce
 		if fast, ok := vm.compileComparison(bin, site); ok {
 			return fast
 		}
-		if vm.cp.inline && (bin.Operator == ast.EqOp || bin.Operator == ast.NotEqOp) {
-			if rhs, ok := vm.evaluate(bin.Rhs).(Value); ok && rhs.pointer == f64Type {
-				lhs := vm.compile(bin.Lhs)
-				rn := math.Float64frombits(rhs.scalar)
-				if bin.Operator == ast.EqOp {
-					return func(fbr *fiber) (bool, exception) {
-						a, err := lhs(fbr)
-						if err != nil {
-							return false, err
-						}
-						return a.pointer == f64Type && math.Float64frombits(a.scalar) == rn, nil
-					}
-				}
-				return func(fbr *fiber) (bool, exception) {
-					a, err := lhs(fbr)
-					if err != nil {
-						return false, err
-					}
-					return a.pointer != f64Type || math.Float64frombits(a.scalar) != rn, nil
-				}
-			}
-		}
 	}
 
 	condition := vm.compile(node)
@@ -146,8 +129,360 @@ func (vm *Instance) emitConditional(node ast.Conditional) instruction {
 	}
 }
 
+// containsContinue reports whether any statement in stmts executes a continue
+// targeting the immediately enclosing loop (skipping nested loops).
+func containsContinue(stmts []ast.Node) bool {
+	found := false
+	for _, stmt := range stmts {
+		ast.Walk(stmt, func(n ast.Node) bool {
+			if found {
+				return false
+			}
+			switch n.(type) {
+			case ast.Continue:
+				found = true
+				return false
+			case ast.While, ast.For, ast.Fn, ast.ClassDefinition:
+				return false
+			}
+			return true
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+// emitCountedWhile fuses common numeric while loops (`while i < limit { ...; i += step }`)
+// directly into one Go loop without per-iteration condition, block, or step
+// closure calls. Returns nil when the loop does not match.
+func (vm *Instance) emitCountedWhile(node ast.While, site site) instruction {
+	if !vm.cp.inline {
+		return nil
+	}
+	bin, ok := node.Condition.(ast.BinOp)
+	if !ok || (bin.Operator != ast.LtOp && bin.Operator != ast.LtEqOp) {
+		return nil
+	}
+	idxIdent, ok := bin.Lhs.(ast.Ident)
+	if !ok {
+		return nil
+	}
+	idxLocal, ok := vm.evaluate(idxIdent).(local)
+	if !ok || idxLocal.isCaptured || idxLocal.isBoxed {
+		return nil
+	}
+
+	var limitLocal local
+	var limitConst float64
+	limitIsLocal := false
+	switch r := vm.evaluate(bin.Rhs).(type) {
+	case local:
+		if r.isCaptured || r.isBoxed {
+			return nil
+		}
+		limitLocal = r
+		limitIsLocal = true
+	case Value:
+		if r.pointer != f64Type {
+			return nil
+		}
+		limitConst = math.Float64frombits(r.scalar)
+	default:
+		return nil
+	}
+
+	block, ok := node.Action.(ast.Block)
+	if !ok || len(block.Code) == 0 {
+		return nil
+	}
+
+	// Check if the last statement is `i += step` where `i` matches the loop variable,
+	// nothing in the block shadows `i` (or `step`), and none of the preceding
+	// statements `continue` (which would skip the step).
+	declaresName := func(stmts []ast.Node, name string) bool {
+		for _, stmt := range stmts {
+			if d, ok := stmt.(ast.Decl); ok && d.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	hasStep := false
+	stepIsLocal := false
+	var stepLocal local
+	var stepConst float64
+	bodyNodes := block.Code
+	if mbo, ok := block.Code[len(block.Code)-1].(ast.MutableBinOp); ok && mbo.Operator == ast.AddOp {
+		if lhsIdent, ok := mbo.Lhs.(ast.Ident); ok && lhsIdent.Name == idxIdent.Name && !containsContinue(block.Code[:len(block.Code)-1]) && !declaresName(block.Code[:len(block.Code)-1], idxIdent.Name) {
+			if target, ok := vm.evaluate(lhsIdent).(local); ok && target == idxLocal && !target.isStatic {
+				switch r := vm.evaluate(mbo.Rhs).(type) {
+				case Value:
+					if r.pointer == f64Type {
+						hasStep = true
+						stepConst = math.Float64frombits(r.scalar)
+						bodyNodes = block.Code[:len(block.Code)-1]
+					}
+				case local:
+					if stepIdent, ok := mbo.Rhs.(ast.Ident); ok && !r.isCaptured && !r.isBoxed && !declaresName(block.Code[:len(block.Code)-1], stepIdent.Name) {
+						hasStep = true
+						stepIsLocal = true
+						stepLocal = r
+						bodyNodes = block.Code[:len(block.Code)-1]
+					}
+				}
+			}
+		}
+	}
+
+	cl := vm.currentClosure()
+	cl.scope.OpenBlock()
+	cl.loops++
+	stmts := make([]instruction, len(bodyNodes))
+	for i, s := range bodyNodes {
+		stmts[i] = vm.compile(s)
+	}
+	cl.loops--
+	cl.scope.CloseBlock()
+
+	// Fallback instructions only used if a runtime value stops being a number.
+	fallbackCond := vm.compileCondition(node.Condition)
+	var fallbackStep instruction
+	if hasStep {
+		fallbackStep = vm.compile(block.Code[len(block.Code)-1])
+	}
+
+	ii := int(idxLocal.index)
+	li := int(limitLocal.index)
+	si := int(stepLocal.index)
+	isLt := bin.Operator == ast.LtOp
+
+	// Specialize the ultra-hot 1-statement body with fused step (`sieve`, `matmul`, `objects`).
+	if hasStep && len(stmts) == 1 && isLt {
+		s0 := stmts[0]
+		if limitIsLocal && !stepIsLocal {
+			return func(fbr *fiber) (Value, exception) {
+				for {
+					if fbr.signaled() {
+						if exc := fbr.halt(site); exc != nil {
+							return Value{}, exc
+						}
+					}
+					s := fbr.stack[fbr.base:]
+					iv, lv := s[ii], s[li]
+					if iv.pointer == f64Type && lv.pointer == f64Type {
+						if !(math.Float64frombits(iv.scalar) < math.Float64frombits(lv.scalar)) {
+							break
+						}
+					} else {
+						ok, err := fallbackCond(fbr)
+						if err != nil {
+							return Value{}, err
+						}
+						if !ok {
+							break
+						}
+					}
+					if v, err := s0(fbr); err != nil {
+						if err == signalBreak {
+							break
+						}
+						return v, err
+					}
+					iv = fbr.stack[fbr.base+ii]
+					if iv.pointer == f64Type {
+						fbr.stack[fbr.base+ii] = Value{pointer: f64Type, scalar: math.Float64bits(math.Float64frombits(iv.scalar) + stepConst)}
+					} else if v, err := fallbackStep(fbr); err != nil {
+						return v, err
+					}
+				}
+				return Value{}, nil
+			}
+		}
+		if limitIsLocal && stepIsLocal {
+			return func(fbr *fiber) (Value, exception) {
+				for {
+					if fbr.signaled() {
+						if exc := fbr.halt(site); exc != nil {
+							return Value{}, exc
+						}
+					}
+					s := fbr.stack[fbr.base:]
+					iv, lv := s[ii], s[li]
+					if iv.pointer == f64Type && lv.pointer == f64Type {
+						if !(math.Float64frombits(iv.scalar) < math.Float64frombits(lv.scalar)) {
+							break
+						}
+					} else {
+						ok, err := fallbackCond(fbr)
+						if err != nil {
+							return Value{}, err
+						}
+						if !ok {
+							break
+						}
+					}
+					if v, err := s0(fbr); err != nil {
+						if err == signalBreak {
+							break
+						}
+						return v, err
+					}
+					s = fbr.stack[fbr.base:]
+					iv, sv := s[ii], s[si]
+					if iv.pointer == f64Type && sv.pointer == f64Type {
+						s[ii] = Value{pointer: f64Type, scalar: math.Float64bits(math.Float64frombits(iv.scalar) + math.Float64frombits(sv.scalar))}
+					} else if v, err := fallbackStep(fbr); err != nil {
+						return v, err
+					}
+				}
+				return Value{}, nil
+			}
+		}
+		if !limitIsLocal && !stepIsLocal {
+			return func(fbr *fiber) (Value, exception) {
+				for {
+					if fbr.signaled() {
+						if exc := fbr.halt(site); exc != nil {
+							return Value{}, exc
+						}
+					}
+					iv := fbr.stack[fbr.base+ii]
+					if iv.pointer == f64Type {
+						if !(math.Float64frombits(iv.scalar) < limitConst) {
+							break
+						}
+					} else {
+						ok, err := fallbackCond(fbr)
+						if err != nil {
+							return Value{}, err
+						}
+						if !ok {
+							break
+						}
+					}
+					if v, err := s0(fbr); err != nil {
+						if err == signalBreak {
+							break
+						}
+						return v, err
+					}
+					iv = fbr.stack[fbr.base+ii]
+					if iv.pointer == f64Type {
+						fbr.stack[fbr.base+ii] = Value{pointer: f64Type, scalar: math.Float64bits(math.Float64frombits(iv.scalar) + stepConst)}
+					} else if v, err := fallbackStep(fbr); err != nil {
+						return v, err
+					}
+				}
+				return Value{}, nil
+			}
+		}
+	}
+
+	return func(fbr *fiber) (Value, exception) {
+		for {
+			if fbr.signaled() {
+				if exc := fbr.halt(site); exc != nil {
+					return Value{}, exc
+				}
+			}
+			s := fbr.stack[fbr.base:]
+			iv := s[ii]
+			if limitIsLocal {
+				lv := s[li]
+				if iv.pointer == f64Type && lv.pointer == f64Type {
+					a, b := math.Float64frombits(iv.scalar), math.Float64frombits(lv.scalar)
+					if isLt {
+						if !(a < b) {
+							break
+						}
+					} else {
+						if !(a <= b) {
+							break
+						}
+					}
+				} else {
+					ok, err := fallbackCond(fbr)
+					if err != nil {
+						return Value{}, err
+					}
+					if !ok {
+						break
+					}
+				}
+			} else {
+				if iv.pointer == f64Type {
+					a := math.Float64frombits(iv.scalar)
+					if isLt {
+						if !(a < limitConst) {
+							break
+						}
+					} else {
+						if !(a <= limitConst) {
+							break
+						}
+					}
+				} else {
+					ok, err := fallbackCond(fbr)
+					if err != nil {
+						return Value{}, err
+					}
+					if !ok {
+						break
+					}
+				}
+			}
+
+			broke := false
+			continued := false
+			for _, stmt := range stmts {
+				if v, err := stmt(fbr); err != nil {
+					if err == signalContinue {
+						continued = true
+						break
+					}
+					if err == signalBreak {
+						broke = true
+						break
+					}
+					return v, err
+				}
+			}
+			if broke {
+				break
+			}
+			if continued {
+				continue
+			}
+			if hasStep {
+				s = fbr.stack[fbr.base:]
+				iv = s[ii]
+				if !stepIsLocal {
+					if iv.pointer == f64Type {
+						s[ii] = Value{pointer: f64Type, scalar: math.Float64bits(math.Float64frombits(iv.scalar) + stepConst)}
+					} else if v, err := fallbackStep(fbr); err != nil {
+						return v, err
+					}
+				} else {
+					sv := s[si]
+					if iv.pointer == f64Type && sv.pointer == f64Type {
+						s[ii] = Value{pointer: f64Type, scalar: math.Float64bits(math.Float64frombits(iv.scalar) + math.Float64frombits(sv.scalar))}
+					} else if v, err := fallbackStep(fbr); err != nil {
+						return v, err
+					}
+				}
+			}
+		}
+		return Value{}, nil
+	}
+}
+
 func (vm *Instance) emitWhile(node ast.While) instruction {
 	site := vm.at(node)
+	if fast := vm.emitCountedWhile(node, site); fast != nil {
+		return fast
+	}
 	condition := vm.compileCondition(node.Condition)
 
 	cl := vm.currentClosure()

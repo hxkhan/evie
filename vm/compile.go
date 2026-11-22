@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -191,11 +192,11 @@ func (vm *Instance) canContinue() bool {
 }
 
 // thisFieldSlot reports whether lhs refers to the current method's own `this`
-// receiver (slot 0, uncaptured, directly inside a class method) and field is
-// one of that class's declared fields. When true, the caller can access the
-// field directly by slot index on the receiver.
+// receiver (slot 0, uncaptured, unboxed, directly inside a class method) and
+// field is one of that class's declared fields. When true, the caller can
+// access the field directly by slot index on the receiver.
 func (vm *Instance) thisFieldSlot(lhs local, field fields.ID) (*userClass, int, bool) {
-	if lhs.index != 0 || lhs.isCaptured || vm.cp.closures.Len() == 0 {
+	if lhs.index != 0 || lhs.isCaptured || lhs.isBoxed || vm.cp.closures.Len() == 0 {
 		return nil, 0, false
 	}
 	uclass := vm.cp.closures.Last(0).uclass
@@ -240,6 +241,7 @@ func collectCapturedNames(body ast.Node, captured *map[string]bool) {
 			case ast.ClassDefinition:
 				if s.Parent != "" {
 					mark(s.Parent)
+					mark(s.Name)
 				}
 			}
 			return true
@@ -251,6 +253,10 @@ func collectCapturedNames(body ast.Node, captured *map[string]bool) {
 			scanNested(n.Action)
 			return false
 		case ast.ClassDefinition:
+			if n.Parent != "" {
+				mark(n.Parent)
+				mark(n.Name)
+			}
 			scanNested(n.Action)
 			return false
 		}
@@ -643,6 +649,9 @@ func (vm *Instance) bindImport(this *Package, u unit, spec ast.ImportSpec, bound
 // from inside the imported package keeps its own report, which gains a note
 // pointing at the import; any other error is reported at the import.
 func (vm *Instance) importFailed(u unit, path string, pos token.Pos, err error) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		panic(err)
+	}
 	var reporter interface{ Diagnostic() *diag.Report }
 	if errors.As(err, &reporter) {
 		r := reporter.Diagnostic()
@@ -807,6 +816,7 @@ func (vm *Instance) compileClassBody(uclass *userClass, cls ast.ClassDefinition)
 		parentUnknown := uclass.declClosure != nil
 		parentHasDyn := uclass.Parent != nil && len(uclass.Parent.FieldInits) > 0
 
+		thisLocal := local{index: 0, isBoxed: cl.mayEscape("this"), isStatic: true}
 		var steps []instruction
 		for _, decl := range bodyDecls {
 			fid := fields.Get(decl.Name)
@@ -830,7 +840,7 @@ func (vm *Instance) compileClassBody(uclass *userClass, cls ast.ClassDefinition)
 				if exc != nil {
 					return v, exc
 				}
-				ci, _ := fbr.stack[fbr.base].asClassInstance()
+				ci, _ := fbr.get(thisLocal).asClassInstance()
 				if ci.InstanceOf == uclass {
 					ci.Fields[ownSlot] = v
 					return Value{}, nil
@@ -920,7 +930,7 @@ func (vm *Instance) emitClass(cls ast.ClassDefinition) instruction {
 	hasCaptures := vm.compileClassBody(uclass, cls)
 
 	site := vm.at(cls)
-	escapes := enclosing.needsFreshCell(cls.Name)
+	escapes := enclosing.mayEscape(cls.Name)
 	if parentInst == nil && !hasCaptures {
 		boxed := boxUserClass(uclass)
 		if escapes {
@@ -984,13 +994,12 @@ func (vm *Instance) emitClass(cls ast.ClassDefinition) instruction {
 			runtimeClass.FieldInits = append(runtimeClass.FieldInits, parent.FieldInits...)
 		}
 
-		var cell *Value
 		if escapes {
-			cell = fbr.newEscapingLocal(index)
+			cell := fbr.newEscapingLocal(index)
+			*cell = boxUserClass(runtimeClass)
 		} else {
-			cell = fbr.getLocalByRef(index)
+			fbr.setLocal(index, boxUserClass(runtimeClass))
 		}
-		*cell = boxUserClass(runtimeClass)
 
 		if uclass.FieldInit != nil {
 			boundInit := bindCaptures(fbr, uclass.FieldInit)

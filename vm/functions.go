@@ -36,9 +36,10 @@ type funcInfoStatic struct {
 	isMethod   bool         // declared inside a class; args[0] is the receiver
 	minArgs    int          // fewest arguments a call may pass, receiver included
 	maxArgs    int          // most arguments a call may pass; unbounded when variadic
-	locals     []bool       // all locals & true for those that escape
-	captures   []capture    // captured references
-	recyclable int          // number of non-escaping locals
+	locals         []bool       // all locals & true for those that escape
+	escapingParams []int        // parameter indices (0..len(args)-1) that escape into nested closures
+	captures       []capture    // captured references
+	recyclable     int          // number of non-escaping locals
 	code       instruction  // the actual function code
 	def        site         // where the function was declared
 	vm         *Instance    // the corresponding vm
@@ -137,7 +138,7 @@ func (fbr *fiber) evalVariadicTail(base int, slot int, fixed int, arguments []in
 		}
 		tail[t] = arg
 	}
-	*(fbr.stack[base+slot]) = BoxArray(&Array{Data: tail})
+	fbr.stack[base+slot] = BoxArray(&Array{Data: tail})
 	return nil
 }
 
@@ -145,7 +146,7 @@ func (fbr *fiber) evalVariadicTail(base int, slot int, fixed int, arguments []in
 func (fbr *fiber) storeVariadicTail(base int, slot int, fixed int, args []Value) {
 	tail := make([]Value, len(args)-fixed)
 	copy(tail, args[fixed:])
-	*(fbr.stack[base+slot]) = BoxArray(&Array{Data: tail})
+	fbr.stack[base+slot] = BoxArray(&Array{Data: tail})
 }
 
 // callGuarded invokes the function from Go. A nil fiber borrows one from the instance.
@@ -188,25 +189,17 @@ func (fn *userFn) call(fbr *fiber, args []Value) (Value, exception) {
 			return Value{}, exc
 		}
 	}
-	base := len(fbr.stack)
-	for _, escapes := range fn.locals {
-		if !escapes {
-			fbr.stack = append(fbr.stack, fbr.pop())
-		} else {
-			fbr.stack = append(fbr.stack, &Value{})
-		}
-	}
+	base := fbr.allocFrame(len(fn.locals))
 
 	if !fn.isVariadic {
-		for idx, arg := range args {
-			*(fbr.stack[base+idx]) = arg
-		}
+		copy(fbr.stack[base:], args)
 	} else {
 		fixed := len(fn.args) - 1
-		for idx := range fixed {
-			*(fbr.stack[base+idx]) = args[idx]
-		}
+		copy(fbr.stack[base:], args[:fixed])
 		fbr.storeVariadicTail(base, fixed, fixed, args)
+	}
+	if len(fn.escapingParams) > 0 {
+		fbr.boxParams(base, fn.escapingParams)
 	}
 
 	prevBase, prevActive := fbr.base, fbr.active
@@ -214,7 +207,6 @@ func (fn *userFn) call(fbr *fiber, args []Value) (Value, exception) {
 
 	result, exc := fn.code(fbr)
 
-	fbr.push(fn.recyclable)
 	fbr.popStack(len(fn.locals))
 	fbr.base, fbr.active = prevBase, prevActive
 
@@ -236,14 +228,7 @@ func (fn *userFn) invoke(fbr *fiber, site site, arguments []instruction) (Value,
 			return Value{}, exc
 		}
 	}
-	base := len(fbr.stack)
-	for _, escapes := range fn.locals {
-		if !escapes {
-			fbr.stack = append(fbr.stack, fbr.pop())
-		} else {
-			fbr.stack = append(fbr.stack, &Value{})
-		}
-	}
+	base := fbr.allocFrame(len(fn.locals))
 
 	fixed := len(arguments)
 	if fn.isVariadic {
@@ -252,18 +237,19 @@ func (fn *userFn) invoke(fbr *fiber, site site, arguments []instruction) (Value,
 	for idx := range fixed {
 		arg, exc := arguments[idx](fbr)
 		if exc != nil {
-			fbr.push(fn.recyclable)
 			fbr.popStack(len(fn.locals))
 			return Value{}, exc
 		}
-		*(fbr.stack[base+idx]) = arg
+		fbr.stack[base+idx] = arg
 	}
 	if fn.isVariadic {
 		if exc := fbr.evalVariadicTail(base, fixed, fixed, arguments); exc != nil {
-			fbr.push(fn.recyclable)
 			fbr.popStack(len(fn.locals))
 			return Value{}, exc
 		}
+	}
+	if len(fn.escapingParams) > 0 {
+		fbr.boxParams(base, fn.escapingParams)
 	}
 
 	prevBase, prevActive := fbr.base, fbr.active
@@ -271,7 +257,6 @@ func (fn *userFn) invoke(fbr *fiber, site site, arguments []instruction) (Value,
 
 	result, exc := fn.code(fbr)
 
-	fbr.push(fn.recyclable)
 	fbr.popStack(len(fn.locals))
 	fbr.base, fbr.active = prevBase, prevActive
 
@@ -292,15 +277,8 @@ func (fn *userFn) invokeMethod(fbr *fiber, site site, this Value, arguments []in
 			return Value{}, exc
 		}
 	}
-	base := len(fbr.stack)
-	for _, escapes := range fn.locals {
-		if !escapes {
-			fbr.stack = append(fbr.stack, fbr.pop())
-		} else {
-			fbr.stack = append(fbr.stack, &Value{})
-		}
-	}
-	*(fbr.stack[base]) = this
+	base := fbr.allocFrame(len(fn.locals))
+	fbr.stack[base] = this
 
 	fixed := len(arguments)
 	if fn.isVariadic {
@@ -309,18 +287,19 @@ func (fn *userFn) invokeMethod(fbr *fiber, site site, this Value, arguments []in
 	for idx := range fixed {
 		arg, exc := arguments[idx](fbr)
 		if exc != nil {
-			fbr.push(fn.recyclable)
 			fbr.popStack(len(fn.locals))
 			return Value{}, exc
 		}
-		*(fbr.stack[base+1+idx]) = arg
+		fbr.stack[base+1+idx] = arg
 	}
 	if fn.isVariadic {
 		if exc := fbr.evalVariadicTail(base, 1+fixed, fixed, arguments); exc != nil {
-			fbr.push(fn.recyclable)
 			fbr.popStack(len(fn.locals))
 			return Value{}, exc
 		}
+	}
+	if len(fn.escapingParams) > 0 {
+		fbr.boxParams(base, fn.escapingParams)
 	}
 
 	prevBase, prevActive := fbr.base, fbr.active
@@ -328,7 +307,6 @@ func (fn *userFn) invokeMethod(fbr *fiber, site site, this Value, arguments []in
 
 	result, exc := fn.code(fbr)
 
-	fbr.push(fn.recyclable)
 	fbr.popStack(len(fn.locals))
 	fbr.base, fbr.active = prevBase, prevActive
 
@@ -465,7 +443,6 @@ func (fn *GoFunc) run(fbr *fiber, base int, pushed int) (Value, exception) {
 		result, err = fn.fn(c)
 	}
 
-	fbr.push(pushed)
 	fbr.popStack(pushed)
 	fbr.swapBase(prevBase)
 	return result, toException(err)
@@ -482,16 +459,13 @@ func (fn *GoFunc) runBlocking(fbr *fiber, c Call) (Value, error) {
 	return result, err
 }
 
-// pushArg places one evaluated argument in a fresh box on the stack
+// pushArg places one evaluated argument on the stack
 func (fbr *fiber) pushArg(v Value) {
-	box := fbr.pop()
-	*box = v
-	fbr.stack = append(fbr.stack, box)
+	fbr.stack = append(fbr.stack, v)
 }
 
-// abandonArgs releases the n argument boxes pushed so far
+// abandonArgs releases the n arguments pushed so far
 func (fbr *fiber) abandonArgs(n int) {
-	fbr.push(n)
 	fbr.popStack(n)
 }
 
@@ -554,7 +528,7 @@ func (fn *GoFunc) callGuarded(fbr *fiber, args ...Value) (result Value, exc exce
 
 	if fbr == nil {
 		fbr = &fiber{
-			boxes:  make([]Value, max(len(args), 8)),
+			stack:  make([]Value, 0, max(len(args), 8)),
 			signal: new(atomic.Uint32),
 			stop:   &stopper{ctx: context.Background()},
 		}

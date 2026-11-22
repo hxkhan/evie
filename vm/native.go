@@ -34,7 +34,7 @@ func (c Call) Arg(i int) Value {
 	if i < 0 || i >= c.n {
 		return Value{}
 	}
-	return *c.fbr.stack[c.base+i]
+	return c.fbr.stack[c.base+i]
 }
 
 // This returns the receiver of a method call
@@ -45,9 +45,7 @@ func (c Call) This() Value {
 // Args copies all arguments into a new slice
 func (c Call) Args() []Value {
 	args := make([]Value, c.n)
-	for i := range args {
-		args[i] = *c.fbr.stack[c.base+i]
-	}
+	copy(args, c.fbr.stack[c.base:c.base+c.n])
 	return args
 }
 

@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"math"
 	"unicode/utf8"
 
 	"github.com/hxkhan/evie/ast"
@@ -13,7 +14,7 @@ func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
 	if !success {
 		panic(vm.compileErrorAt(node, "double declaration of %s", node.Name))
 	}
-	escapes := cl.needsFreshCell(node.Name)
+	escapes := cl.mayEscape(node.Name)
 
 	// try to evaluate
 	switch value := vm.evaluate(node.Value).(type) {
@@ -52,6 +53,15 @@ func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
 		}
 	}
 
+	// Fused declaration of a binary op directly into a non-escaping local: `xx := x * x`
+	if !escapes && vm.cp.inline {
+		if bin, ok := node.Value.(ast.BinOp); ok {
+			if fused, ok := vm.compileLocalBinAssign(local{index: int16(index)}, bin); ok {
+				return fused
+			}
+		}
+	}
+
 	// generic
 	value := vm.compile(node.Value)
 	if escapes {
@@ -83,6 +93,12 @@ func (vm *Instance) emitIdentGet(node ast.Ident) instruction {
 
 	switch v := variable.(type) {
 	case local:
+		if !v.isCaptured && !v.isBoxed {
+			idx := int(v.index)
+			return func(fbr *fiber) (Value, exception) {
+				return fbr.stack[fbr.base+idx], nil
+			}
+		}
 		return func(fbr *fiber) (Value, exception) {
 			return *fbr.get(v), nil
 		}
@@ -155,13 +171,31 @@ func (vm *Instance) emitIdentAssign(lhs ast.Ident, rhs ast.Node) instruction {
 		panic(vm.locate(err, lhs))
 	}
 
-	value := vm.compile(rhs)
-
 	switch v := variable.(type) {
 	case local:
 		if v.isStatic {
 			panic(vm.compileErrorAt(lhs, "cannot assign to '%v' because it is a constant", lhs.Name).withHint("declare it with var to allow reassignment: var " + lhs.Name + " := ..."))
 		}
+		if vm.cp.inline {
+			if bin, ok := rhs.(ast.BinOp); ok {
+				if fused, ok := vm.compileLocalBinAssign(v, bin); ok {
+					return fused
+				}
+			}
+			switch val := vm.evaluate(rhs).(type) {
+			case Value:
+				return func(fbr *fiber) (Value, exception) {
+					fbr.set(v, val)
+					return Value{}, nil
+				}
+			case local:
+				return func(fbr *fiber) (Value, exception) {
+					fbr.set(v, *fbr.get(val))
+					return Value{}, nil
+				}
+			}
+		}
+		value := vm.compile(rhs)
 		return func(fbr *fiber) (Value, exception) {
 			vNew, err := value(fbr)
 			if err != nil {
@@ -175,6 +209,7 @@ func (vm *Instance) emitIdentAssign(lhs ast.Ident, rhs ast.Node) instruction {
 		if v.IsStatic {
 			panic(vm.compileErrorAt(lhs, "cannot assign to '%v' because it is a constant", lhs.Name).withHint("declare it with var to allow reassignment: var " + lhs.Name + " := ..."))
 		}
+		value := vm.compile(rhs)
 		return func(fbr *fiber) (Value, exception) {
 			vNew, err := value(fbr)
 			if err != nil {
@@ -307,8 +342,240 @@ func (vm *Instance) emitFieldAssign(node ast.Assign, fa ast.FieldAccess) instruc
 	}
 }
 
+func assignSubscriptValue(site site, target, keyVal, newVal Value) (Value, exception) {
+	// 1. Array index assignment: arr[i] = newVal
+	if arr, ok := target.AsArray(); ok {
+		if keyVal.pointer == f64Type {
+			f := math.Float64frombits(keyVal.scalar)
+			idx := int(f)
+			if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
+				arr.Data[idx] = newVal
+				return Value{}, nil
+			}
+		}
+		idx, ok := resolveIndex(keyVal, len(arr.Data))
+		if !ok {
+			return Value{}, indexError(site, keyVal, len(arr.Data), "array")
+		}
+		arr.Data[idx] = newVal
+		return Value{}, nil
+	}
+
+	// 2. Object key assignment: obj[key] = newVal
+	if obj, ok := target.AsObject(); ok {
+		keyStr, ok := keyVal.AsString()
+		if !ok {
+			return Value{}, errorAt(site, "object key must be a string, got '%s'", keyVal.TypeOf())
+		}
+		obj[keyStr] = newVal
+		return Value{}, nil
+	}
+
+	// 3. Class instance field assignment: classInst[key] = newVal
+	if ci, ok := target.asClassInstance(); ok {
+		keyStr, ok := keyVal.AsString()
+		if !ok {
+			return Value{}, errorAt(site, "class field key must be a string, got '%s'", keyVal.TypeOf())
+		}
+		if exc := ci.setFieldByName(site, keyStr, newVal); exc != nil {
+			return Value{}, exc
+		}
+		return Value{}, nil
+	}
+
+	// 4. Buffer byte assignment: buf[i] = byteVal
+	if buf, ok := target.AsBuffer(); ok {
+		idx, ok := resolveIndex(keyVal, len(buf))
+		if !ok {
+			return Value{}, indexError(site, keyVal, len(buf), "buffer")
+		}
+		b, exc := checkByte(site, newVal)
+		if exc != nil {
+			return Value{}, exc
+		}
+		buf[idx] = b
+		return Value{}, nil
+	}
+
+	return Value{}, errorAt(site, "cannot assign to subscript of type '%s'", target.TypeOf())
+}
+
 func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) instruction {
 	site := vm.at(node)
+
+	if targetLocal, ok := vm.evaluate(sub.Lhs).(local); ok {
+		tFlat := !targetLocal.isCaptured && !targetLocal.isBoxed
+		ti := int(targetLocal.index)
+		if keyLocal, ok := vm.evaluate(sub.Key).(local); ok {
+			kFlat := !keyLocal.isCaptured && !keyLocal.isBoxed
+			ki := int(keyLocal.index)
+			switch val := vm.evaluate(node.Value).(type) {
+			case Value:
+				if tFlat && kFlat {
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						target, keyVal := s[ti], s[ki]
+						if target.pointer != nil && !isKnown(target.pointer) {
+							if target.scalar == kindArray && keyVal.pointer == f64Type {
+								arr := (*Array)(target.pointer)
+								f := math.Float64frombits(keyVal.scalar)
+								idx := int(f)
+								if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
+									arr.Data[idx] = val
+									return Value{}, nil
+								}
+							} else if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
+								(*(*map[string]Value)(target.pointer))[*(*string)(keyVal.pointer)] = val
+								return Value{}, nil
+							}
+						}
+						return assignSubscriptValue(site, target, keyVal, val)
+					}
+				}
+				return func(fbr *fiber) (Value, exception) {
+					target := *fbr.get(targetLocal)
+					keyVal := *fbr.get(keyLocal)
+					if target.pointer != nil && !isKnown(target.pointer) {
+						if target.scalar == kindArray && keyVal.pointer == f64Type {
+							arr := (*Array)(target.pointer)
+							f := math.Float64frombits(keyVal.scalar)
+							idx := int(f)
+							if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
+								arr.Data[idx] = val
+								return Value{}, nil
+							}
+						} else if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
+							(*(*map[string]Value)(target.pointer))[*(*string)(keyVal.pointer)] = val
+							return Value{}, nil
+						}
+					}
+					return assignSubscriptValue(site, target, keyVal, val)
+				}
+			case local:
+				if tFlat && kFlat && !val.isCaptured && !val.isBoxed {
+					vi := int(val.index)
+					return func(fbr *fiber) (Value, exception) {
+						s := fbr.stack[fbr.base:]
+						target, keyVal, newVal := s[ti], s[ki], s[vi]
+						if target.pointer != nil && !isKnown(target.pointer) {
+							if target.scalar == kindArray && keyVal.pointer == f64Type {
+								arr := (*Array)(target.pointer)
+								f := math.Float64frombits(keyVal.scalar)
+								idx := int(f)
+								if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
+									arr.Data[idx] = newVal
+									return Value{}, nil
+								}
+							} else if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
+								(*(*map[string]Value)(target.pointer))[*(*string)(keyVal.pointer)] = newVal
+								return Value{}, nil
+							}
+						}
+						return assignSubscriptValue(site, target, keyVal, newVal)
+					}
+				}
+				return func(fbr *fiber) (Value, exception) {
+					target := *fbr.get(targetLocal)
+					keyVal := *fbr.get(keyLocal)
+					newVal := *fbr.get(val)
+					if target.pointer != nil && !isKnown(target.pointer) {
+						if target.scalar == kindArray && keyVal.pointer == f64Type {
+							arr := (*Array)(target.pointer)
+							f := math.Float64frombits(keyVal.scalar)
+							idx := int(f)
+							if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
+								arr.Data[idx] = newVal
+								return Value{}, nil
+							}
+						} else if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
+							(*(*map[string]Value)(target.pointer))[*(*string)(keyVal.pointer)] = newVal
+							return Value{}, nil
+						}
+					}
+					return assignSubscriptValue(site, target, keyVal, newVal)
+				}
+			}
+			valCompiled := vm.compile(node.Value)
+			if tFlat && kFlat {
+				return func(fbr *fiber) (Value, exception) {
+					s := fbr.stack[fbr.base:]
+					target, keyVal := s[ti], s[ki]
+					newVal, err := valCompiled(fbr)
+					if err != nil {
+						return newVal, err
+					}
+					if target.pointer != nil && !isKnown(target.pointer) {
+						if target.scalar == kindArray && keyVal.pointer == f64Type {
+							arr := (*Array)(target.pointer)
+							f := math.Float64frombits(keyVal.scalar)
+							idx := int(f)
+							if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
+								arr.Data[idx] = newVal
+								return Value{}, nil
+							}
+						} else if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
+							(*(*map[string]Value)(target.pointer))[*(*string)(keyVal.pointer)] = newVal
+							return Value{}, nil
+						}
+					}
+					return assignSubscriptValue(site, target, keyVal, newVal)
+				}
+			}
+			return func(fbr *fiber) (Value, exception) {
+				target := *fbr.get(targetLocal)
+				keyVal := *fbr.get(keyLocal)
+				newVal, err := valCompiled(fbr)
+				if err != nil {
+					return newVal, err
+				}
+				if target.pointer != nil && !isKnown(target.pointer) {
+					if target.scalar == kindArray && keyVal.pointer == f64Type {
+						arr := (*Array)(target.pointer)
+						f := math.Float64frombits(keyVal.scalar)
+						idx := int(f)
+						if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
+							arr.Data[idx] = newVal
+							return Value{}, nil
+						}
+					} else if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
+						(*(*map[string]Value)(target.pointer))[*(*string)(keyVal.pointer)] = newVal
+						return Value{}, nil
+					}
+				}
+				return assignSubscriptValue(site, target, keyVal, newVal)
+			}
+		}
+
+		keyCompiled := vm.compile(sub.Key)
+		valCompiled := vm.compile(node.Value)
+		return func(fbr *fiber) (Value, exception) {
+			target := *fbr.get(targetLocal)
+			keyVal, err := keyCompiled(fbr)
+			if err != nil {
+				return keyVal, err
+			}
+			newVal, err := valCompiled(fbr)
+			if err != nil {
+				return newVal, err
+			}
+			if target.pointer != nil && !isKnown(target.pointer) {
+				if target.scalar == kindObject && keyVal.scalar == kindString && !isKnown(keyVal.pointer) {
+					(*(*map[string]Value)(target.pointer))[*(*string)(keyVal.pointer)] = newVal
+					return Value{}, nil
+				} else if target.scalar == kindArray && keyVal.pointer == f64Type {
+					arr := (*Array)(target.pointer)
+					f := math.Float64frombits(keyVal.scalar)
+					idx := int(f)
+					if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
+						arr.Data[idx] = newVal
+						return Value{}, nil
+					}
+				}
+			}
+			return assignSubscriptValue(site, target, keyVal, newVal)
+		}
+	}
+
 	targetCompiled := vm.compile(sub.Lhs)
 	keyCompiled := vm.compile(sub.Key)
 	valCompiled := vm.compile(node.Value)
@@ -329,53 +596,7 @@ func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) inst
 			return newVal, err
 		}
 
-		// 1. Array index assignment: arr[i] = newVal
-		if arr, ok := target.AsArray(); ok {
-			idx, ok := resolveIndex(keyVal, len(arr.Data))
-			if !ok {
-				return Value{}, indexError(site, keyVal, len(arr.Data), "array")
-			}
-			arr.Data[idx] = newVal
-			return Value{}, nil
-		}
-
-		// 2. Object key assignment: obj[key] = newVal
-		if obj, ok := target.AsObject(); ok {
-			keyStr, ok := keyVal.AsString()
-			if !ok {
-				return Value{}, errorAt(site, "object key must be a string, got '%s'", keyVal.TypeOf())
-			}
-			obj[keyStr] = newVal
-			return Value{}, nil
-		}
-
-		// 3. Class instance field assignment: classInst[key] = newVal
-		if ci, ok := target.asClassInstance(); ok {
-			keyStr, ok := keyVal.AsString()
-			if !ok {
-				return Value{}, errorAt(site, "class field key must be a string, got '%s'", keyVal.TypeOf())
-			}
-			if exc := ci.setFieldByName(site, keyStr, newVal); exc != nil {
-				return Value{}, exc
-			}
-			return Value{}, nil
-		}
-
-		// 4. Buffer byte assignment: buf[i] = byteVal
-		if buf, ok := target.AsBuffer(); ok {
-			idx, ok := resolveIndex(keyVal, len(buf))
-			if !ok {
-				return Value{}, indexError(site, keyVal, len(buf), "buffer")
-			}
-			b, exc := checkByte(site, newVal)
-			if exc != nil {
-				return Value{}, exc
-			}
-			buf[idx] = b
-			return Value{}, nil
-		}
-
-		return Value{}, errorAt(site, "cannot assign to subscript of type '%s'", target.TypeOf())
+		return assignSubscriptValue(site, target, keyVal, newVal)
 	}
 }
 
@@ -408,7 +629,7 @@ func (vm *Instance) resolveSuper(node ast.Node) (uclass *userClass, classLocal l
 		for depth := range vm.cp.closures.Len() {
 			if vm.cp.closures.Last(depth) == uclass.declClosure {
 				if depth == 0 {
-					classLocal = local{index: int16(uclass.declIndex), isCaptured: false, isStatic: true}
+					classLocal = local{index: int16(uclass.declIndex), isCaptured: false, isBoxed: uclass.declClosure.mayEscape(uclass.Name), isStatic: true}
 				} else {
 					classLocal = local{index: int16(vm.cp.addToCaptured(depth, uclass.declIndex)), isCaptured: true, isStatic: true}
 				}
@@ -469,7 +690,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 					if field, exists := thisVal.getField(key); exists {
 						return field, nil
 					}
-					return Value{}, memberError(site, node.Rhs, *thisVal)
+					return Value{}, memberError(site, node.Rhs, thisVal)
 				}
 			}
 
@@ -584,8 +805,208 @@ func indexError(site site, keyVal Value, length int, kind string) exception {
 	return errorAt(site, "IndexError: %s index %d out of bounds (length %d)", kind, idx, length)
 }
 
+func subscriptValue(site site, target, indexVal Value) (Value, exception) {
+	// 1. Array indexing: arr[0], arr[-1]
+	if arr, ok := target.AsArray(); ok {
+		if indexVal.pointer == f64Type {
+			f := math.Float64frombits(indexVal.scalar)
+			idx := int(f)
+			if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
+				return arr.Data[idx], nil
+			}
+		}
+		idx, ok := resolveIndex(indexVal, len(arr.Data))
+		if !ok {
+			return Value{}, indexError(site, indexVal, len(arr.Data), "array")
+		}
+		return arr.Data[idx], nil
+	}
+
+	// 2. Object key access: obj["key"]
+	if obj, ok := target.AsObject(); ok {
+		keyStr, ok := indexVal.AsString()
+		if !ok {
+			return Value{}, errorAt(site, "object key must be a string, got '%s'", indexVal.TypeOf())
+		}
+		return obj[keyStr], nil
+	}
+
+	// 3. Class instance field access: classInstance["field"]
+	if ci, ok := target.asClassInstance(); ok {
+		keyStr, ok := indexVal.AsString()
+		if !ok {
+			return Value{}, errorAt(site, "class field key must be a string, got '%s'", indexVal.TypeOf())
+		}
+		val, exists := ci.getFieldByName(keyStr)
+		if !exists {
+			return Value{}, errorAt(site, "undefined field '%s' in class", keyStr)
+		}
+		return val, nil
+	}
+
+	// 4. String indexing (UTF-8 runes): "héllo"[1] -> "é"
+	if str, ok := target.AsString(); ok {
+		idxFloat, ok := indexVal.AsFloat64()
+		if !ok {
+			return Value{}, indexError(site, indexVal, 0, "string")
+		}
+		idx := int(idxFloat)
+		if float64(idx) != idxFloat {
+			return Value{}, indexError(site, indexVal, 0, "string")
+		}
+		ch, length, ok := runeAt(str, idx)
+		if !ok {
+			return Value{}, indexError(site, indexVal, length, "string")
+		}
+		return BoxString(ch), nil
+	}
+
+	// 5. Buffer indexing: buf[0] -> byte value as number
+	if buf, ok := target.AsBuffer(); ok {
+		idx, ok := resolveIndex(indexVal, len(buf))
+		if !ok {
+			return Value{}, indexError(site, indexVal, len(buf), "buffer")
+		}
+		return BoxNumber(float64(buf[idx])), nil
+	}
+
+	return Value{}, errorAt(site, "cannot index value of type '%s'", target.TypeOf())
+}
+
 func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 	site := vm.at(node)
+
+	if lhsLocal, ok := vm.evaluate(node.Lhs).(local); ok {
+		lFlat := !lhsLocal.isCaptured && !lhsLocal.isBoxed
+		li := int(lhsLocal.index)
+		switch keyOp := vm.evaluate(node.Key).(type) {
+		case local:
+			if lFlat && !keyOp.isCaptured && !keyOp.isBoxed {
+				ki := int(keyOp.index)
+				return func(fbr *fiber) (Value, exception) {
+					s := fbr.stack[fbr.base:]
+					target, indexVal := s[li], s[ki]
+					if target.pointer != nil && !isKnown(target.pointer) {
+						if target.scalar == kindArray && indexVal.pointer == f64Type {
+							arr := (*Array)(target.pointer)
+							f := math.Float64frombits(indexVal.scalar)
+							idx := int(f)
+							if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
+								return arr.Data[idx], nil
+							}
+						} else if target.scalar == kindObject && indexVal.scalar == kindString && !isKnown(indexVal.pointer) {
+							return (*(*map[string]Value)(target.pointer))[*(*string)(indexVal.pointer)], nil
+						}
+					}
+					return subscriptValue(site, target, indexVal)
+				}
+			}
+			return func(fbr *fiber) (Value, exception) {
+				target := *fbr.get(lhsLocal)
+				indexVal := *fbr.get(keyOp)
+				if target.pointer != nil && !isKnown(target.pointer) {
+					if target.scalar == kindArray && indexVal.pointer == f64Type {
+						arr := (*Array)(target.pointer)
+						f := math.Float64frombits(indexVal.scalar)
+						idx := int(f)
+						if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
+							return arr.Data[idx], nil
+						}
+					} else if target.scalar == kindObject && indexVal.scalar == kindString && !isKnown(indexVal.pointer) {
+						return (*(*map[string]Value)(target.pointer))[*(*string)(indexVal.pointer)], nil
+					}
+				}
+				return subscriptValue(site, target, indexVal)
+			}
+		case Value:
+			if keyOp.pointer == f64Type {
+				f := math.Float64frombits(keyOp.scalar)
+				idx := int(f)
+				if idx >= 0 && float64(idx) == f {
+					return func(fbr *fiber) (Value, exception) {
+						target := *fbr.get(lhsLocal)
+						if target.pointer != nil && !isKnown(target.pointer) && target.scalar == kindArray {
+							arr := (*Array)(target.pointer)
+							if idx < len(arr.Data) {
+								return arr.Data[idx], nil
+							}
+						}
+						return subscriptValue(site, target, keyOp)
+					}
+				}
+			} else if keyStr, ok := keyOp.AsString(); ok {
+				return func(fbr *fiber) (Value, exception) {
+					target := *fbr.get(lhsLocal)
+					if target.pointer != nil && !isKnown(target.pointer) && target.scalar == kindObject {
+						return (*(*map[string]Value)(target.pointer))[keyStr], nil
+					}
+					return subscriptValue(site, target, keyOp)
+				}
+			}
+		}
+
+		key := vm.compile(node.Key)
+		return func(fbr *fiber) (Value, exception) {
+			target := *fbr.get(lhsLocal)
+			indexVal, err := key(fbr)
+			if err != nil {
+				return indexVal, err
+			}
+			if target.pointer != nil && !isKnown(target.pointer) {
+				if target.scalar == kindObject && indexVal.scalar == kindString && !isKnown(indexVal.pointer) {
+					return (*(*map[string]Value)(target.pointer))[*(*string)(indexVal.pointer)], nil
+				} else if target.scalar == kindArray && indexVal.pointer == f64Type {
+					arr := (*Array)(target.pointer)
+					f := math.Float64frombits(indexVal.scalar)
+					idx := int(f)
+					if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
+						return arr.Data[idx], nil
+					}
+				}
+			}
+			return subscriptValue(site, target, indexVal)
+		}
+	}
+
+	if keyLocal, ok := vm.evaluate(node.Key).(local); ok {
+		lhs := vm.compile(node.Lhs)
+		if !keyLocal.isCaptured && !keyLocal.isBoxed {
+			ki := int(keyLocal.index)
+			return func(fbr *fiber) (Value, exception) {
+				target, err := lhs(fbr)
+				if err != nil {
+					return target, err
+				}
+				indexVal := fbr.stack[fbr.base+ki]
+				if target.pointer != nil && !isKnown(target.pointer) && target.scalar == kindArray && indexVal.pointer == f64Type {
+					arr := (*Array)(target.pointer)
+					f := math.Float64frombits(indexVal.scalar)
+					idx := int(f)
+					if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
+						return arr.Data[idx], nil
+					}
+				}
+				return subscriptValue(site, target, indexVal)
+			}
+		}
+		return func(fbr *fiber) (Value, exception) {
+			target, err := lhs(fbr)
+			if err != nil {
+				return target, err
+			}
+			indexVal := *fbr.get(keyLocal)
+			if target.pointer != nil && !isKnown(target.pointer) && target.scalar == kindArray && indexVal.pointer == f64Type {
+				arr := (*Array)(target.pointer)
+				f := math.Float64frombits(indexVal.scalar)
+				idx := int(f)
+				if uint(idx) < uint(len(arr.Data)) && float64(idx) == f {
+					return arr.Data[idx], nil
+				}
+			}
+			return subscriptValue(site, target, indexVal)
+		}
+	}
+
 	lhs := vm.compile(node.Lhs)
 	key := vm.compile(node.Key)
 
@@ -600,68 +1021,7 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 			return indexVal, err
 		}
 
-		// 1. Array indexing: arr[0], arr[-1]
-		if arr, ok := target.AsArray(); ok {
-			idx, ok := resolveIndex(indexVal, len(arr.Data))
-			if !ok {
-				return Value{}, indexError(site, indexVal, len(arr.Data), "array")
-			}
-			return arr.Data[idx], nil
-		}
-
-		// 2. Object key access: obj["key"]
-		if obj, ok := target.AsObject(); ok {
-			keyStr, ok := indexVal.AsString()
-			if !ok {
-				return Value{}, errorAt(site, "object key must be a string, got '%s'", indexVal.TypeOf())
-			}
-			val, exists := obj[keyStr]
-			if !exists {
-				return Value{}, nil
-			}
-			return val, nil
-		}
-
-		// 3. Class instance field access: classInstance["field"]
-		if ci, ok := target.asClassInstance(); ok {
-			keyStr, ok := indexVal.AsString()
-			if !ok {
-				return Value{}, errorAt(site, "class field key must be a string, got '%s'", indexVal.TypeOf())
-			}
-			val, exists := ci.getFieldByName(keyStr)
-			if !exists {
-				return Value{}, errorAt(site, "undefined field '%s' in class", keyStr)
-			}
-			return val, nil
-		}
-
-		// 4. String indexing (UTF-8 runes): "hÃ©llo"[1] -> "Ã©"
-		if str, ok := target.AsString(); ok {
-			idxFloat, ok := indexVal.AsFloat64()
-			if !ok {
-				return Value{}, indexError(site, indexVal, 0, "string")
-			}
-			idx := int(idxFloat)
-			if float64(idx) != idxFloat {
-				return Value{}, indexError(site, indexVal, 0, "string")
-			}
-			ch, length, ok := runeAt(str, idx)
-			if !ok {
-				return Value{}, indexError(site, indexVal, length, "string")
-			}
-			return BoxString(ch), nil
-		}
-
-		// 5. Buffer indexing: buf[0] -> byte value as number
-		if buf, ok := target.AsBuffer(); ok {
-			idx, ok := resolveIndex(indexVal, len(buf))
-			if !ok {
-				return Value{}, indexError(site, indexVal, len(buf), "buffer")
-			}
-			return BoxNumber(float64(buf[idx])), nil
-		}
-
-		return Value{}, errorAt(site, "cannot index value of type '%s'", target.TypeOf())
+		return subscriptValue(site, target, indexVal)
 	}
 }
 

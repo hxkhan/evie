@@ -314,7 +314,10 @@ func (vm *Instance) runPackage(moduleID string, units []unit) (Value, exception)
 	if id == "" {
 		id = name
 	}
-	if existing, exists := vm.rt.packages[id]; exists {
+	vm.rt.registry.Lock()
+	existing, exists := vm.rt.packages[id]
+	vm.rt.registry.Unlock()
+	if exists {
 		ce := vm.compileErrorAt(units[0].node, "package '%s' is already loaded", name)
 		if existing.origin != "" {
 			ce.Message = fmt.Sprintf("package '%s' is already loaded from %s", name, existing.origin)
@@ -327,14 +330,18 @@ func (vm *Instance) runPackage(moduleID string, units []unit) (Value, exception)
 	this.origin = units[0].src.Name
 	this.compiled = true
 	vm.cp.pkg = this
+	vm.rt.registry.Lock()
 	vm.rt.packages[id] = this
 	prevByName, hadByName := vm.rt.byName[name]
 	if !hadByName || name == "main" {
 		vm.rt.byName[name] = this
 	}
+	vm.rt.registry.Unlock()
 	loaded := false
 	defer func() {
 		if !loaded {
+			vm.rt.registry.Lock()
+			defer vm.rt.registry.Unlock()
 			if vm.rt.packages[id] == this {
 				delete(vm.rt.packages, id)
 			}
@@ -463,7 +470,9 @@ func (vm *Instance) runPackage(moduleID string, units []unit) (Value, exception)
 		}
 	}
 	loaded = true
+	vm.rt.registry.Lock()
 	vm.rt.packageOrder = append(vm.rt.packageOrder, id)
+	vm.rt.registry.Unlock()
 	return Value{}, nil
 }
 
@@ -595,12 +604,16 @@ func (vm *Instance) bindImport(this *Package, u unit, spec ast.ImportSpec, bound
 			pkg.setName(strings.TrimSuffix(base, filepath.Ext(base)))
 		}
 		pkgID := pkg.ID()
-		if existing, ok := vm.rt.packages[pkgID]; !ok {
+		vm.rt.registry.Lock()
+		existing, ok := vm.rt.packages[pkgID]
+		if !ok {
 			vm.rt.packages[pkgID] = pkg
 			if _, exists := vm.rt.byName[pkg.Name()]; !exists {
 				vm.rt.byName[pkg.Name()] = pkg
 			}
-		} else if existing != pkg {
+		}
+		vm.rt.registry.Unlock()
+		if ok && existing != pkg {
 			ce := vm.compileErrorAtPos(pos, "cannot import '%s': it declares package '%s', which is already loaded", path, pkg.Name())
 			if existing.origin != "" {
 				ce.Message += " from " + existing.origin

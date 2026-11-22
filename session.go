@@ -47,6 +47,8 @@ func (s *Session) EvalContext(ctx context.Context, code string) (val vm.Value, h
 	if err := s.eng.usable(); err != nil {
 		return vm.Value{}, false, err
 	}
+	s.eng.loading.Lock()
+	defer s.eng.loading.Unlock()
 	s.turn++
 	src := diag.NewSource(fmt.Sprintf("<session:%d>", s.turn), []byte(code))
 	node, err := parser.ParseSource(src)
@@ -61,6 +63,8 @@ func (s *Session) EvalContext(ctx context.Context, code string) (val vm.Value, h
 // Compile parses and compiles code against the session without running its
 // top-level statements (intended for validation or Engine.Dump).
 func (s *Session) Compile(code string) error {
+	s.eng.loading.Lock()
+	defer s.eng.loading.Unlock()
 	s.turn++
 	src := diag.NewSource(fmt.Sprintf("<session:%d>", s.turn), []byte(code))
 	node, err := parser.ParseSource(src)
@@ -76,6 +80,13 @@ func (s *Session) Compile(code string) error {
 // directory path) and binds it in the session under alias (or the package's
 // declared name when alias is empty).
 func (s *Session) Import(importPath, alias string) (*vm.Package, error) {
+	s.eng.loading.Lock()
+	defer s.eng.loading.Unlock()
+	return s.bind(importPath, alias)
+}
+
+// bind is Import for a caller that holds the engine's loading lock
+func (s *Session) bind(importPath, alias string) (*vm.Package, error) {
 	prevRoot := s.eng.root
 	if s.eng.opts.FS == nil && s.eng.root == "" {
 		s.eng.root = "."
@@ -100,6 +111,8 @@ func (s *Session) LoadFile(filePath string) (vm.Value, bool, error) {
 	if err := s.eng.usable(); err != nil {
 		return vm.Value{}, false, err
 	}
+	s.eng.loading.Lock()
+	defer s.eng.loading.Unlock()
 	b, err := parseFile(s.eng.sfs(), filePath, "", s.eng.opts.FS)
 	if err != nil {
 		return vm.Value{}, false, err
@@ -139,7 +152,7 @@ func (s *Session) LoadFile(filePath string) (vm.Value, bool, error) {
 			s.vm.BindImport(cmp.Or(spec.Alias, dep.Name()), spec.Path, dep)
 			continue
 		}
-		if _, err := s.Import(spec.Path, spec.Alias); err != nil {
+		if _, err := s.bind(spec.Path, spec.Alias); err != nil {
 			return vm.Value{}, false, err
 		}
 	}
@@ -216,6 +229,6 @@ func (s *Session) autoImportStd(root ast.Node) {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		_, _ = s.Import(name, "")
+		_, _ = s.bind(name, "")
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"maps"
 	"os"
 	"slices"
 	"sync"
@@ -46,6 +47,7 @@ type compiler struct {
 	inline    bool         // use dispatch inlining (combining instructions into one)
 	debugInfo bool         // record slot names and nested closures for Dump
 	prelude   *Package     // symbols visible to every package without an import
+	registry  *sync.RWMutex // the runtime's registry lock, which also guards the prelude
 	src       *diag.Source // the source being compiled, for error positions
 
 	pkg      *Package           // the package being compiled right now
@@ -62,6 +64,7 @@ type runtime struct {
 	fibers       sync.Pool           // pooled fibers for this vm
 	runner       sync.Mutex          // held by the fiber that is executing evie code
 	wg           sync.WaitGroup      // wait for all fibers to complete
+	registry     sync.RWMutex        // guards packages, byName, packageOrder and the prelude's symbols, which hosts read while code loads
 	stdout       io.Writer           // where echo writes
 	stops                            // when running code has to stop
 }
@@ -111,6 +114,7 @@ func New(opts Options) (vm *Instance) {
 		},
 	}
 
+	vm.cp.registry = &vm.rt.registry
 	if vm.rt.stdout == nil {
 		vm.rt.stdout = os.Stdout
 	}
@@ -303,9 +307,7 @@ func (vm *Instance) LoadPackage(ctx context.Context, moduleID string, parsed []P
 	if id == "" {
 		id = units[0].node.Name
 	}
-	vm.rt.acquire()
-	defer vm.rt.release()
-	return vm.rt.packages[id], nil
+	return vm.PackageByID(id), nil
 }
 
 // evalPackageUnits runs runPackage under the runner, turning panics into errors
@@ -329,7 +331,10 @@ func (vm *Instance) evalPackageUnits(moduleID string, units []unit, s *stopper) 
 // Packages iterates through loaded packages
 func (vm *Instance) Packages() iter.Seq[*Package] {
 	return func(yield func(*Package) bool) {
-		for _, pkg := range vm.rt.packages {
+		vm.rt.registry.RLock()
+		pkgs := slices.Collect(maps.Values(vm.rt.packages))
+		vm.rt.registry.RUnlock()
+		for _, pkg := range pkgs {
 			if !yield(pkg) {
 				return
 			}
@@ -339,12 +344,16 @@ func (vm *Instance) Packages() iter.Seq[*Package] {
 
 // PackageByID retrieves a loaded package by its exact canonical module ID.
 func (vm *Instance) PackageByID(id string) *Package {
+	vm.rt.registry.RLock()
+	defer vm.rt.registry.RUnlock()
 	return vm.rt.packages[id]
 }
 
 // Package retrieves a loaded package by canonical module ID or declared short
 // name; returns nil if not found.
 func (vm *Instance) Package(key string) *Package {
+	vm.rt.registry.RLock()
+	defer vm.rt.registry.RUnlock()
 	if pkg, exists := vm.rt.packages[key]; exists {
 		return pkg
 	}
@@ -412,7 +421,10 @@ func (cp *compiler) reach(name string) (binding, error) {
 				return ref, nil
 			}
 		}
-		if ref, exists := cp.prelude.globals[id]; exists {
+		cp.registry.RLock()
+		ref, exists := cp.prelude.globals[id]
+		cp.registry.RUnlock()
+		if exists {
 			return ref, nil
 		}
 	}
@@ -440,9 +452,11 @@ func (cp *compiler) visibleNames() []string {
 			names = append(names, fields.Lookup(id))
 		}
 	}
+	cp.registry.RLock()
 	for id := range cp.prelude.globals {
 		names = append(names, fields.Lookup(id))
 	}
+	cp.registry.RUnlock()
 	return names
 }
 

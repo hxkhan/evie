@@ -40,6 +40,8 @@ func (vm *Instance) NewSession(name string) *Session {
 	vm.rt.acquire()
 	defer vm.rt.release()
 
+	vm.rt.registry.Lock()
+	defer vm.rt.registry.Unlock()
 	pkg := vm.rt.packages[name]
 	if pkg == nil || !pkg.compiled {
 		pkg = NewPackage(name)
@@ -65,12 +67,14 @@ func (s *Session) BindImport(bindName, importPath string, dep *Package) {
 	defer s.vm.rt.release()
 
 	depID := dep.ID()
+	s.vm.rt.registry.Lock()
 	if _, exists := s.vm.rt.packages[depID]; !exists {
 		s.vm.rt.packages[depID] = dep
 		if _, hasShort := s.vm.rt.byName[dep.Name()]; !hasShort {
 			s.vm.rt.byName[dep.Name()] = dep
 		}
 	}
+	s.vm.rt.registry.Unlock()
 
 	v := dep.Box()
 	s.pkg.globals[fields.Get(bindName)] = pkgGlobal{

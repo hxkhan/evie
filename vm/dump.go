@@ -3,6 +3,8 @@ package vm
 import (
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
@@ -21,8 +23,12 @@ func (vm *Instance) Dump(w io.Writer) {
 	}
 	fmt.Fprintf(w, "evie dump (fast-paths: %s)\n", fastPaths)
 
-	for _, name := range vm.rt.packageOrder {
-		pkg := vm.rt.packages[name]
+	vm.rt.registry.RLock()
+	order := slices.Clone(vm.rt.packageOrder)
+	pkgs := maps.Clone(vm.rt.packages)
+	vm.rt.registry.RUnlock()
+	for _, name := range order {
+		pkg := pkgs[name]
 		if pkg == nil || !pkg.compiled {
 			continue
 		}

@@ -1161,7 +1161,7 @@ func (vm *Instance) emitObject(node ast.Object) instruction {
 	keys = slices.Clip(keys)
 	var index map[string]int
 	if len(keys) > maxLinearKeys {
-		index = maps(keys)
+		index = indexOf(keys)
 	}
 
 	return func(fbr *fiber) (Value, exception) {

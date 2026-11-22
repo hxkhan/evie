@@ -119,7 +119,7 @@ func (o *Object) add(key string, v Value) {
 		o.keys = append(make([]string, 0, len(o.keys)+4), o.keys...)
 		o.shared = false
 		if o.index != nil {
-			o.index = maps(o.keys)
+			o.index = indexOf(o.keys)
 		}
 	}
 	o.keys = append(o.keys, key)
@@ -128,7 +128,7 @@ func (o *Object) add(key string, v Value) {
 	case o.index != nil:
 		o.index[key] = len(o.keys) - 1
 	case len(o.keys) > maxLinearKeys:
-		o.index = maps(o.keys)
+		o.index = indexOf(o.keys)
 	}
 }
 
@@ -146,7 +146,7 @@ func (o *Object) Delete(key string) bool {
 	if o.index != nil {
 		o.index = nil
 		if len(o.keys) > maxLinearKeys {
-			o.index = maps(o.keys)
+			o.index = indexOf(o.keys)
 		}
 	}
 	return true
@@ -201,8 +201,8 @@ func (o *Object) Map() map[string]Value {
 	return m
 }
 
-// maps builds the key -> slot index of keys
-func maps(keys []string) map[string]int {
+// indexOf builds the key -> slot index of keys
+func indexOf(keys []string) map[string]int {
 	index := make(map[string]int, len(keys))
 	for i, k := range keys {
 		index[k] = i

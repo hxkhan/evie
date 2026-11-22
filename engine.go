@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/hxkhan/evie/diag"
@@ -24,6 +25,10 @@ import (
 // An engine runs one program. Packages are identified by the file or folder
 // they come from, and each package name can be loaded once. Close an engine
 // when done with it.
+//
+// An engine can be used from several goroutines: loads and evaluations take
+// turns, while Call, Lookup and Interrupt work alongside them. Looking up a
+// package's symbols while that same package is still loading is not safe.
 type Engine struct {
 	vm *vm.Instance
 
@@ -35,6 +40,7 @@ type Engine struct {
 	curBundlePkg *parsedPackage         // package currently being compiled during LoadBundle
 	ran          bool
 	closed       atomic.Bool
+	loading      sync.Mutex // held by a load or evaluation, so they take turns over the compiler
 }
 
 // usable reports ErrClosed once the engine is closed
@@ -91,6 +97,8 @@ func (e *Engine) EvalContext(ctx context.Context, script string) (vm.Value, erro
 	if err := e.usable(); err != nil {
 		return vm.Value{}, err
 	}
+	e.loading.Lock()
+	defer e.loading.Unlock()
 	return e.vm.EvalSource(ctx, diag.NewSource("", []byte(script)))
 }
 
@@ -106,6 +114,8 @@ func (e *Engine) Load(name string, src []byte) (*vm.Package, error) {
 	if err != nil {
 		return nil, err
 	}
+	e.loading.Lock()
+	defer e.loading.Unlock()
 	return e.vm.LoadPackage(context.Background(), "", []vm.ParsedUnit{{Source: source, Node: node}})
 }
 
@@ -193,7 +203,11 @@ func (e *Engine) resolve(importPath string) (*vm.Package, error) {
 		return pkg, nil
 	}
 	if e.opts.Resolve != nil {
+		// every resolve runs inside a load, which holds the loading lock; the host's
+		// resolver may load a package itself, so it runs without it
+		e.loading.Unlock()
 		pkg, err := e.opts.Resolve(importPath)
+		e.loading.Lock()
 		if err != nil {
 			return nil, err
 		}
@@ -304,6 +318,8 @@ func (e *Engine) adopt(b *Bundle) error {
 // dependency order without running main.main (or a bare script). When ctx is
 // done, package initializers stop with ctx's cause.
 func (e *Engine) LoadBundle(ctx context.Context, b *Bundle) error {
+	e.loading.Lock()
+	defer e.loading.Unlock()
 	if err := e.adopt(b); err != nil {
 		return err
 	}
@@ -323,11 +339,14 @@ func (e *Engine) LoadBundle(ctx context.Context, b *Bundle) error {
 // the script itself. When ctx is done, package initializers, main.main, and
 // any tasks they start stop with ctx's cause.
 func (e *Engine) RunBundle(ctx context.Context, b *Bundle) (vm.Value, error) {
+	e.loading.Lock()
 	if err := e.adopt(b); err != nil {
+		e.loading.Unlock()
 		return vm.Value{}, err
 	}
 	if b.script != nil {
 		result, err := e.vm.EvalUnit(ctx, vm.ParsedUnit{Source: b.script.src, Node: b.script.node})
+		e.loading.Unlock()
 		if ctx.Err() == nil {
 			e.Wait()
 		}
@@ -335,9 +354,11 @@ func (e *Engine) RunBundle(ctx context.Context, b *Bundle) (vm.Value, error) {
 	}
 	for _, p := range b.packages {
 		if err := e.compileParsedPackage(ctx, p); err != nil {
+			e.loading.Unlock()
 			return vm.Value{}, err
 		}
 	}
+	e.loading.Unlock() // main runs without it, so the host can load or call alongside
 	return e.runMain(ctx)
 }
 

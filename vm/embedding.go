@@ -27,11 +27,15 @@ func (vm *Instance) Lookup(path string) (Value, bool) {
 			return v, true
 		}
 	}
+	vm.rt.registry.RLock()
+	defer vm.rt.registry.RUnlock()
 	return vm.cp.prelude.Get(path)
 }
 
 // SetStatic binds a symbol in the prelude, visible to every package
 func (vm *Instance) SetStatic(name string, val Value) {
+	vm.rt.registry.Lock()
+	defer vm.rt.registry.Unlock()
 	vm.cp.prelude.Set(name, val)
 }
 

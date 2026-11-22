@@ -197,6 +197,46 @@ func TestOneFiberRunsAtATime(t *testing.T) {
 }
 
 // several instances run in parallel without sharing anything
+// a host can call into an engine while another goroutine loads packages into
+// it and sets statics; run with -race to see the guarantee
+func TestCallsWhileLoading(t *testing.T) {
+	eng := evie.New()
+	defer eng.Close()
+	if _, err := eng.Eval("package main\nvar ticks := 0\nfn tick() { ticks += 1; return ticks }"); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := range 50 {
+			name := "p" + string(rune('a'+i%26)) + string(rune('a'+i/26))
+			if _, err := eng.Load(name+".ev", []byte("package "+name+"\nfn f() => 1\nx := f() + 1\n")); err != nil {
+				t.Error(err)
+				return
+			}
+			eng.SetStatic("s"+name, vm.BoxNumber(float64(i)))
+		}
+	}()
+	calls := 0
+	for {
+		select {
+		case <-done:
+			if calls == 0 {
+				t.Fatal("no call ran while the packages loaded")
+			}
+			return
+		default:
+		}
+		if _, err := eng.Call("main.tick"); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := eng.Lookup("sabc"); ok {
+			t.Fatal("found a static that was never set")
+		}
+		calls++
+	}
+}
+
 func TestInstancesRunInParallel(t *testing.T) {
 	const instances = 4
 	results := make(chan float64, instances)

@@ -1,6 +1,10 @@
 package vm
 
-import "math"
+import (
+	"math"
+
+	"github.com/hxkhan/evie/ast"
+)
 
 func (x Value) add(y Value) (z Value, ok bool) {
 	if x.pointer == f64Type && y.pointer == f64Type {
@@ -86,4 +90,27 @@ func (x Value) greaterThanOrEqualTo(y Value) (z Value, ok bool) {
 		return BoxBool(math.Float64frombits(x.scalar) >= math.Float64frombits(y.scalar)), true
 	}
 	return Value{}, false
+}
+
+// fastCompound is the number path of a compound assignment such as `x.n += 1`:
+// it applies op to x and y when both are numbers and op is + - * or /, and is
+// small enough to inline at every site; anything else takes the general path
+func fastCompound(op ast.Operator, x, y Value) (Value, bool) {
+	if x.pointer != f64Type || y.pointer != f64Type || op > ast.DivOp {
+		return Value{}, false
+	}
+	return BoxNumber(arith(op, math.Float64frombits(x.scalar), math.Float64frombits(y.scalar))), true
+}
+
+// arith applies + - * or / to two numbers
+func arith(op ast.Operator, a, b float64) float64 {
+	switch op {
+	case ast.AddOp:
+		return a + b
+	case ast.SubOp:
+		return a - b
+	case ast.MulOp:
+		return a * b
+	}
+	return a / b
 }

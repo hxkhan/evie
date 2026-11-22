@@ -44,6 +44,7 @@ func (op Operator) String() string {
 }
 
 const (
+	// the vm relies on + - * / coming first, in this order
 	AddOp Operator = iota + 1
 	SubOp
 	MulOp

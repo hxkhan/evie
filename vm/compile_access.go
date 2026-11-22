@@ -1349,6 +1349,7 @@ func (vm *Instance) compoundOperator(node ast.MutableBinOp) func(fbr *fiber, cur
 func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldAccess) instruction {
 	site := vm.at(node)
 	apply := vm.compoundOperator(node)
+	op := node.Operator
 	index := fields.Get(fa.Rhs)
 
 	if lhs, ok := vm.evaluate(fa.Lhs).(local); ok {
@@ -1368,6 +1369,10 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 				thisVal := fbr.stack[fbr.base]
 				if ci, ok := thisVal.asClassInstance(); ok {
 					if ci.InstanceOf == uclass && slot < len(ci.Fields) {
+						if result, ok := fastCompound(op, ci.Fields[slot], value); ok {
+							ci.Fields[slot] = result
+							return Value{}, nil
+						}
 						result, exc := apply(fbr, ci.Fields[slot], value)
 						if exc != nil {
 							return result, exc
@@ -1393,6 +1398,10 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 			}
 			if ci, ok := obj.asClassInstance(); ok {
 				if ci.InstanceOf == cachedClass && cachedSlot >= 0 {
+					if result, ok := fastCompound(op, ci.Fields[cachedSlot], value); ok {
+						ci.Fields[cachedSlot] = result
+						return Value{}, nil
+					}
 					result, exc := apply(fbr, ci.Fields[cachedSlot], value)
 					if exc != nil {
 						return result, exc
@@ -1418,6 +1427,10 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 				current, exists := m[fa.Rhs]
 				if !exists {
 					return Value{}, errorAt(site, "undefined key '%s' in object", fa.Rhs)
+				}
+				if result, ok := fastCompound(op, current, value); ok {
+					m[fa.Rhs] = result
+					return Value{}, nil
 				}
 				result, exc := apply(fbr, current, value)
 				if exc != nil {
@@ -1471,6 +1484,10 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 			if !exists {
 				return Value{}, errorAt(site, "undefined key '%s' in object", fa.Rhs)
 			}
+			if result, ok := fastCompound(op, current, value); ok {
+				m[fa.Rhs] = result
+				return Value{}, nil
+			}
 			result, exc := apply(fbr, current, value)
 			if exc != nil {
 				return result, exc
@@ -1502,85 +1519,113 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 // emitCompoundSubscriptAssign compiles `x[key] op= value`, evaluating `x` and `key` exactly once
 func (vm *Instance) emitCompoundSubscriptAssign(node ast.MutableBinOp, sub ast.Subscript) instruction {
 	site := vm.at(node)
+	apply := vm.compoundOperator(node)
+	op := node.Operator
+	rhs := vm.compile(node.Rhs)
+
+	// `arr[i] += x` with both in stack slots: read them directly and update numbers in place
+	if t, ok := vm.evaluate(sub.Lhs).(local); ok && !t.isCaptured && !t.isBoxed {
+		if k, ok := vm.evaluate(sub.Key).(local); ok && !k.isCaptured && !k.isBoxed {
+			ti, ki := int(t.index), int(k.index)
+			return func(fbr *fiber) (Value, exception) {
+				value, exc := rhs(fbr)
+				if exc != nil {
+					return value, exc
+				}
+				obj, keyVal := fbr.stack[fbr.base+ti], fbr.stack[fbr.base+ki]
+				if arr, ok := obj.AsArray(); ok && keyVal.pointer == f64Type {
+					f := math.Float64frombits(keyVal.scalar)
+					if idx := int(f); float64(idx) == f && idx >= 0 && idx < len(arr.Data) {
+						if result, ok := fastCompound(op, arr.Data[idx], value); ok {
+							arr.Data[idx] = result
+							return Value{}, nil
+						}
+					}
+				}
+				return compoundSubscript(fbr, site, apply, obj, keyVal, value)
+			}
+		}
+	}
+
 	target := vm.compile(sub.Lhs)
 	key := vm.compile(sub.Key)
-	rhs := vm.compile(node.Rhs)
-	apply := vm.compoundOperator(node)
-
 	return func(fbr *fiber) (Value, exception) {
 		obj, exc := target(fbr)
 		if exc != nil {
 			return obj, exc
 		}
-
 		keyVal, exc := key(fbr)
 		if exc != nil {
 			return keyVal, exc
 		}
-
 		value, exc := rhs(fbr)
 		if exc != nil {
 			return value, exc
 		}
+		return compoundSubscript(fbr, site, apply, obj, keyVal, value)
+	}
+}
 
-		if arr, ok := obj.AsArray(); ok {
-			idx, ok := resolveIndex(keyVal, len(arr.Data))
-			if !ok {
-				return Value{}, indexError(site, keyVal, len(arr.Data), "array")
-			}
-			result, exc := apply(fbr, arr.Data[idx], value)
-			if exc != nil {
-				return result, exc
-			}
-			arr.Data[idx] = result
-			return Value{}, nil
+// compoundSubscript applies a compound assignment to obj[keyVal] once the
+// target, key and right-hand side are known
+func compoundSubscript(fbr *fiber, site site, apply func(fbr *fiber, current, rhs Value) (Value, exception), obj, keyVal, value Value) (Value, exception) {
+	if arr, ok := obj.AsArray(); ok {
+		idx, ok := resolveIndex(keyVal, len(arr.Data))
+		if !ok {
+			return Value{}, indexError(site, keyVal, len(arr.Data), "array")
 		}
-
-		keyStr, isString := keyVal.AsString()
-
-		if m, ok := obj.AsObject(); ok {
-			if !isString {
-				return Value{}, errorAt(site, "object key must be a string, got '%s'", keyVal.TypeOf())
-			}
-			current, exists := m[keyStr]
-			if !exists {
-				return Value{}, errorAt(site, "undefined key '%s' in object", keyStr)
-			}
-			result, exc := apply(fbr, current, value)
-			if exc != nil {
-				return result, exc
-			}
-			m[keyStr] = result
-			return Value{}, nil
+		result, exc := apply(fbr, arr.Data[idx], value)
+		if exc != nil {
+			return result, exc
 		}
+		arr.Data[idx] = result
+		return Value{}, nil
+	}
 
-		if ci, ok := obj.asClassInstance(); ok {
-			if !isString {
-				return Value{}, errorAt(site, "class field key must be a string, got '%s'", keyVal.TypeOf())
-			}
-			exc := ci.updateFieldByName(site, keyStr, func(current Value) (Value, exception) {
-				return apply(fbr, current, value)
-			})
+	keyStr, isString := keyVal.AsString()
+
+	if m, ok := obj.AsObject(); ok {
+		if !isString {
+			return Value{}, errorAt(site, "object key must be a string, got '%s'", keyVal.TypeOf())
+		}
+		current, exists := m[keyStr]
+		if !exists {
+			return Value{}, errorAt(site, "undefined key '%s' in object", keyStr)
+		}
+		result, exc := apply(fbr, current, value)
+		if exc != nil {
+			return result, exc
+		}
+		m[keyStr] = result
+		return Value{}, nil
+	}
+
+	if ci, ok := obj.asClassInstance(); ok {
+		if !isString {
+			return Value{}, errorAt(site, "class field key must be a string, got '%s'", keyVal.TypeOf())
+		}
+		exc := ci.updateFieldByName(site, keyStr, func(current Value) (Value, exception) {
+			return apply(fbr, current, value)
+		})
+		return Value{}, exc
+	}
+
+	if buf, ok := obj.AsBuffer(); ok {
+		idx, ok := resolveIndex(keyVal, len(buf))
+		if !ok {
+			return Value{}, indexError(site, keyVal, len(buf), "buffer")
+		}
+		result, exc := apply(fbr, BoxNumber(float64(buf[idx])), value)
+		if exc != nil {
+			return result, exc
+		}
+		b, exc := checkByte(site, result)
+		if exc != nil {
 			return Value{}, exc
 		}
-
-		if buf, ok := obj.AsBuffer(); ok {
-			idx, ok := resolveIndex(keyVal, len(buf))
-			if !ok {
-				return Value{}, indexError(site, keyVal, len(buf), "buffer")
-			}
-			result, exc := apply(fbr, BoxNumber(float64(buf[idx])), value)
-			if exc != nil {
-				return result, exc
-			}
-			b, exc := checkByte(site, result)
-			if exc != nil {
-				return Value{}, exc
-			}
-			buf[idx] = b
-			return Value{}, nil
-		}
-
-		return Value{}, errorAt(site, "cannot assign to subscript of type '%s'", obj.TypeOf())
+		buf[idx] = b
+		return Value{}, nil
 	}
+
+	return Value{}, errorAt(site, "cannot assign to subscript of type '%s'", obj.TypeOf())
 }

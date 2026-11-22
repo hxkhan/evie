@@ -825,6 +825,38 @@ func TestParametersDoNotMakeOuterLocalsEscape(t *testing.T) {
 	}
 }
 
+// compound updates of fields and elements take an inlined path for numbers and
+// keep every other behaviour: strings, negative indexes, %, and type errors
+func TestCompoundUpdatesOfFieldsAndElements(t *testing.T) {
+	val := run(t, `package main
+	class C() {
+		var n := 1
+		var s := "a"
+		fn bump() { this.n += 2; this.n *= 3; this.n %= 5; this.s += "b"; return [this.n, this.s] }
+	}
+	fn main() {
+		c := C()
+		r := c.bump()
+		var arr := [1, 2, "x"]
+		var i := 0
+		var k := 2
+		arr[i] += 10
+		arr[k] += "y"
+		var neg := -1
+		arr[neg] += "z"
+		var o := { a: 1, b: "p" }
+		o.a -= 3
+		o.b += "q"
+		c.n /= 2
+		var half := 0.5
+		return [r, arr, o.a, o.b, c.n, catch { arr[half] += 1 }.message, catch { c.s -= 1 }.message]
+	}`)
+	want := `[[4, "ab"], [11, 2, "xyz"], -2, "pq", 2, "array index must be an integer, got 0.5", "cannot apply '-' to a string and a number"]`
+	if val.String() != want {
+		t.Fatalf("got  %s\nwant %s", val, want)
+	}
+}
+
 // a '(' or '[' at the start of a line begins a new statement instead of calling
 // or indexing the line before; a '.' still continues it
 func TestLineBreakEndsCallsAndIndexes(t *testing.T) {

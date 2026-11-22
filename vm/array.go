@@ -42,6 +42,22 @@ func (arr *Array) writeTo(builder *strings.Builder, seen map[unsafe.Pointer]bool
 	builder.WriteByte(']')
 }
 
+// push appends v. A full array doubles its capacity: append grows a large
+// slice by only a quarter, which copies a growing array far more often.
+func (arr *Array) push(v Value) {
+	if len(arr.Data) == cap(arr.Data) {
+		arr.grow()
+	}
+	arr.Data = append(arr.Data, v)
+}
+
+//go:noinline
+func (arr *Array) grow() {
+	grown := make([]Value, len(arr.Data), max(2*cap(arr.Data), 4))
+	copy(grown, arr.Data)
+	arr.Data = grown
+}
+
 func NewArray(values ...Value) *Array {
 	return &Array{Data: values}
 }

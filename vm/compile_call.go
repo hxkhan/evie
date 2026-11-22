@@ -551,7 +551,7 @@ func (vm *Instance) emitMemberCall(iFA ast.FieldAccess, lhs local, argNodes []as
 				return func(fbr *fiber) (Value, exception) {
 					obj := *fbr.get(lhs)
 					if arr, ok := obj.AsArray(); ok {
-						arr.Data = append(arr.Data, arg)
+						arr.push(arg)
 						return obj, nil
 					}
 					return m.call(fbr, obj, arguments)
@@ -560,7 +560,7 @@ func (vm *Instance) emitMemberCall(iFA ast.FieldAccess, lhs local, argNodes []as
 				return func(fbr *fiber) (Value, exception) {
 					obj := *fbr.get(lhs)
 					if arr, ok := obj.AsArray(); ok {
-						arr.Data = append(arr.Data, *fbr.get(arg))
+						arr.push(*fbr.get(arg))
 						return obj, nil
 					}
 					return m.call(fbr, obj, arguments)
@@ -574,7 +574,7 @@ func (vm *Instance) emitMemberCall(iFA ast.FieldAccess, lhs local, argNodes []as
 						if exc != nil {
 							return v, exc
 						}
-						arr.Data = append(arr.Data, v)
+						arr.push(v)
 						return obj, nil
 					}
 					return m.call(fbr, obj, arguments)

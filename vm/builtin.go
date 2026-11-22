@@ -339,7 +339,7 @@ func sliceArgs(c Call, n int) (int, int, error) {
 
 var arrayPush = newMethod("push", 1, func(c Call) (Value, error) {
 	arr := c.This().mustArray()
-	arr.Data = append(arr.Data, c.Arg(1))
+	arr.push(c.Arg(1))
 	return c.This(), nil
 })
 

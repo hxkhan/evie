@@ -152,11 +152,19 @@ func (vm *Instance) releaseFiber(fbr *fiber) {
 }
 
 // evalNode runs a parsed source under the runner. Code it runs stops with s,
-// or with the stopper of the load in progress when s is nil.
-func (vm *Instance) evalNode(node ast.Node, s *stopper) (result Value, err error) {
+// or with the stopper of the load in progress when s is nil. src is set as the
+// compiler's source only once the runner is held, so concurrent evaluations
+// cannot swap it under each other.
+func (vm *Instance) evalNode(src *diag.Source, node ast.Node, s *stopper) (result Value, err error) {
 	vm.rt.acquire()
 	defer vm.rt.release()
 	defer vm.rt.loadingUnder(s)()
+	if src == nil {
+		src = diag.NewSource("", nil)
+	}
+	prevSrc := vm.cp.src
+	vm.cp.src = src
+	defer func() { vm.cp.src = prevSrc }()
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -173,10 +181,6 @@ func (vm *Instance) evalNode(node ast.Node, s *stopper) (result Value, err error
 	}()
 
 	if pkg, isPackage := node.(ast.Package); isPackage {
-		src := vm.cp.src
-		if src == nil {
-			src = diag.NewSource("", nil)
-		}
 		v, exc := vm.runPackage("", []unit{{src: src, node: pkg}})
 		if exc != nil {
 			return v, exc
@@ -188,7 +192,7 @@ func (vm *Instance) evalNode(node ast.Node, s *stopper) (result Value, err error
 	defer vm.releaseFiber(fbr)
 	fbr.running = true // the runner is held above
 
-	info := &funcInfoStatic{name: "anonymous", def: site{src: vm.cp.src}, vm: vm}
+	info := &funcInfoStatic{name: "anonymous", def: site{src: src}, vm: vm}
 	prevClosures := vm.cp.closures.Len()
 	cl := &closure{freeVars: ds.Set[int]{}, info: info, capturedNames: findCapturedNames(node)}
 	cl.scope.TrackSlots = vm.cp.debugInfo
@@ -224,30 +228,30 @@ type ParsedUnit struct {
 	Node   ast.Node
 }
 
-// EvalSource parses and evaluates a named source; errors show its text
-func (vm *Instance) EvalSource(src *diag.Source) (Value, error) {
-	return vm.evalSource(src, nil)
+// EvalSource parses and evaluates a named source; errors show its text. A
+// source that declares a package is loaded as that package and gives nil; a
+// bare script gives its result. When ctx is done, the code stops with an error
+// whose cause is ctx's cause, and so do the packages it imports while it loads.
+func (vm *Instance) EvalSource(ctx context.Context, src *diag.Source) (Value, error) {
+	node, err := parser.ParseSource(src)
+	if err != nil {
+		return Value{}, err
+	}
+	return vm.EvalUnit(ctx, ParsedUnit{Source: src, Node: node})
 }
 
-// EvalParsedSourceContext evaluates an already-parsed source bound to ctx.
-func (vm *Instance) EvalParsedSourceContext(ctx context.Context, pu ParsedUnit) (Value, error) {
+// EvalUnit is EvalSource for a source that is already parsed
+func (vm *Instance) EvalUnit(ctx context.Context, pu ParsedUnit) (Value, error) {
 	s := vm.rt.scope(ctx)
 	defer s.drop()
-
-	prev := vm.cp.src
-	vm.cp.src = pu.Source
-	defer func() { vm.cp.src = prev }()
-	return vm.evalNode(pu.Node, s)
+	return vm.evalNode(pu.Source, pu.Node, s)
 }
 
-// CompileParsedSource compiles an already-parsed bare script without executing
-// it. If pu.Node is an ast.Package, it is loaded normally.
-func (vm *Instance) CompileParsedSource(pu ParsedUnit) (err error) {
+// CompileUnit compiles a parsed bare script without running it, so Dump can
+// show it. A unit that declares a package is loaded the way EvalUnit loads it.
+func (vm *Instance) CompileUnit(pu ParsedUnit) (err error) {
 	if pkg, isPackage := pu.Node.(ast.Package); isPackage {
-		prev := vm.cp.src
-		vm.cp.src = pu.Source
-		defer func() { vm.cp.src = prev }()
-		_, err = vm.evalNode(pkg, nil)
+		_, err = vm.evalNode(pu.Source, pkg, nil)
 		return err
 	}
 
@@ -285,50 +289,15 @@ func (vm *Instance) CompileParsedSource(pu ParsedUnit) (err error) {
 	return nil
 }
 
-// EvalSourceContext is EvalSource bound to ctx: when ctx is done, the code
-// stops with an error whose cause is ctx's cause. Packages the source imports
-// while it loads stop with it.
-func (vm *Instance) EvalSourceContext(ctx context.Context, src *diag.Source) (Value, error) {
-	s := vm.rt.scope(ctx)
-	defer s.drop()
-	return vm.evalSource(src, s)
-}
-
-func (vm *Instance) evalSource(src *diag.Source, s *stopper) (Value, error) {
-	node, err := parser.ParseSource(src)
-	if err != nil {
-		return Value{}, err
-	}
-
-	prev := vm.cp.src
-	vm.cp.src = src
-	defer func() { vm.cp.src = prev }()
-	return vm.evalNode(node, s)
-}
-
-// EvalPackage compiles one package from all of its source files and runs its
+// LoadPackage compiles one package from its parsed files and runs its
 // initializers. The files are compiled together, so any of them can use what
-// another declares; each must declare the same package.
-func (vm *Instance) EvalPackage(sources ...*diag.Source) (*Package, error) {
-	return vm.evalPackage(nil, sources)
-}
-
-// EvalPackageContext is EvalPackage bound to ctx: when ctx is done, the
-// initializers stop with an error whose cause is ctx's cause, and so do those
-// of the packages it imports.
-func (vm *Instance) EvalPackageContext(ctx context.Context, sources ...*diag.Source) (*Package, error) {
-	s := vm.rt.scope(ctx)
-	defer s.drop()
-	return vm.evalPackage(s, sources)
-}
-
-// EvalParsedPackageContext compiles one package from pre-parsed AST units and
-// runs its initializers under ctx, without re-parsing source text. moduleID
-// uniquely identifies the module (such as its canonical file or directory path);
-// when empty, the package's declared name is used.
-func (vm *Instance) EvalParsedPackageContext(ctx context.Context, moduleID string, parsed []ParsedUnit) (*Package, error) {
+// another declares; each must declare the same package. moduleID identifies
+// the module, such as its canonical file or directory path; when empty, the
+// package's declared name is used. When ctx is done, the initializers stop with
+// an error whose cause is ctx's cause, and so do those of the packages it imports.
+func (vm *Instance) LoadPackage(ctx context.Context, moduleID string, parsed []ParsedUnit) (*Package, error) {
 	if len(parsed) == 0 {
-		return nil, errors.New("EvalParsedPackageContext needs at least one unit")
+		return nil, errors.New("LoadPackage needs at least one unit")
 	}
 	units := make([]unit, len(parsed))
 	for i, pu := range parsed {
@@ -347,29 +316,9 @@ func (vm *Instance) EvalParsedPackageContext(ctx context.Context, moduleID strin
 	if id == "" {
 		id = units[0].node.Name
 	}
+	vm.rt.acquire()
+	defer vm.rt.release()
 	return vm.rt.packages[id], nil
-}
-
-func (vm *Instance) evalPackage(s *stopper, sources []*diag.Source) (*Package, error) {
-	if len(sources) == 0 {
-		return nil, errors.New("EvalPackage needs at least one source")
-	}
-	units := make([]unit, len(sources))
-	for i, src := range sources {
-		node, err := parser.ParseSource(src)
-		if err != nil {
-			return nil, err
-		}
-		pkg, ok := node.(ast.Package)
-		if !ok {
-			return nil, fmt.Errorf("%s does not declare a package", src.Name)
-		}
-		units[i] = unit{src: src, node: pkg}
-	}
-	if err := vm.evalPackageUnits("", units, s); err != nil {
-		return nil, err
-	}
-	return vm.rt.packages[units[0].node.Name], nil
 }
 
 // evalPackageUnits runs runPackage under the runner, turning panics into errors
@@ -426,7 +375,8 @@ func (vm *Instance) Package(key string) *Package {
 	return nil
 }
 
-func (vm *Instance) WaitForNoActivity() {
+// Wait blocks until every task the instance's code started has finished
+func (vm *Instance) Wait() {
 	vm.rt.wg.Wait()
 }
 

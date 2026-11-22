@@ -1,7 +1,6 @@
 package evie
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	iofs "io/fs"
@@ -17,7 +16,6 @@ import (
 	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/parser"
 	"github.com/hxkhan/evie/token"
-	"github.com/hxkhan/evie/vm"
 )
 
 // Bundle is a parsed, import-resolved Evie program ready to be loaded or run
@@ -83,48 +81,35 @@ func (b *Bundle) Packages() []string {
 	return out
 }
 
-// Run creates a fresh Engine with opts, loads the bundle, and executes its
-// entry point (main.main or the bare script).
-func (b *Bundle) Run(opts ...Options) (vm.Value, error) {
-	return b.RunContext(context.Background(), opts...)
-}
-
-// RunContext is Run bound to ctx.
-func (b *Bundle) RunContext(ctx context.Context, opts ...Options) (vm.Value, error) {
-	return New(opts...).RunBundleContext(ctx, b)
-}
-
-// ParseFile parses a single Evie file and all of its path-imported packages
-// from the OS filesystem without executing any code.
-func ParseFile(filePath string) (*Bundle, error) {
-	return parseFile(osSourceFS{}, filePath, "", nil)
-}
-
-// ParseProject parses an Evie project directory (every top-level file declaring
-// package main) and all of its path-imported packages from the OS filesystem
-// without executing any code.
-func ParseProject(dirPath string) (*Bundle, error) {
-	return parseProject(osSourceFS{}, dirPath, nil)
-}
-
-// ParseFileFS parses a single Evie file and all of its path-imported packages
-// from fsys without executing any code. Imports are sandboxed to fsys and
-// cannot escape its root.
-func ParseFileFS(fsys iofs.FS, filePath string) (*Bundle, error) {
+// ParseFile parses a single Evie file and every package it imports by path,
+// without running any code. The file and its imports are read from fsys, and
+// cannot escape its root; a nil fsys means the operating system's file system.
+func ParseFile(fsys iofs.FS, filePath string) (*Bundle, error) {
 	if fsys == nil {
-		return nil, errors.New("ParseFileFS requires a non-nil fs.FS")
+		return parseFile(osSourceFS{}, filePath, "", nil)
 	}
 	return parseFile(virtualSourceFS{fsys: fsys}, filePath, "", fsys)
 }
 
-// ParseProjectFS parses an Evie project directory and all of its path-imported
-// packages from fsys without executing any code. Imports are sandboxed to fsys
-// and cannot escape its root.
-func ParseProjectFS(fsys iofs.FS, dirPath string) (*Bundle, error) {
+// ParseProject parses an Evie project directory (every top-level file declaring
+// package main) and every package it imports by path, without running any
+// code. It reads from fsys the way ParseFile does.
+func ParseProject(fsys iofs.FS, dirPath string) (*Bundle, error) {
 	if fsys == nil {
-		return nil, errors.New("ParseProjectFS requires a non-nil fs.FS")
+		return parseProject(osSourceFS{}, dirPath, nil)
 	}
 	return parseProject(virtualSourceFS{fsys: fsys}, dirPath, fsys)
+}
+
+// ParseSource parses a program given as source text, and every package it
+// imports by path, without running any code. name is what errors call the
+// source; path imports resolve against the working directory.
+func ParseSource(name string, src []byte) (*Bundle, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	return parseUnit(osSourceFS{}, diag.NewSource(name, src), name, dir, dir, nil)
 }
 
 // ---------------------------------------------------------------------------
@@ -399,21 +384,27 @@ func parseFile(sfs sourceFS, filePath, root string, fsys iofs.FS) (*Bundle, erro
 	if err != nil {
 		return nil, err
 	}
+	return parseUnit(sfs, src, absPath, dir, root, fsys)
+}
+
+// parseUnit parses the entry source of a program found at path, and its imports
+// relative to dir
+func parseUnit(sfs sourceFS, src *diag.Source, path, dir, root string, fsys iofs.FS) (*Bundle, error) {
 	node, err := parser.ParseSource(src)
 	if err != nil {
 		return nil, err
 	}
 	if _, isPkg := node.(ast.Package); !isPkg {
 		return &Bundle{
-			script: &parsedUnit{path: absPath, src: src, node: node},
+			script: &parsedUnit{path: path, src: src, node: node},
 			root:   root,
 			fsys:   fsys,
 		}, nil
 	}
 
 	loader := newGraphLoader(sfs, root)
-	key := sfs.canonical(absPath)
-	if _, err := loader.loadUnits(key, absPath, dir, []parsedUnit{{path: absPath, src: src, node: node}}, true, nil); err != nil {
+	key := sfs.canonical(path)
+	if _, err := loader.loadUnits(key, path, dir, []parsedUnit{{path: path, src: src, node: node}}, true, nil); err != nil {
 		return nil, err
 	}
 	return &Bundle{

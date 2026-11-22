@@ -78,3 +78,19 @@ func TestIsIncompleteInput(t *testing.T) {
 		}
 	}
 }
+
+// -e code is a program when it declares a package, comments before the header included
+func TestHasPackageHeader(t *testing.T) {
+	cases := map[string]bool{
+		"package main\nfn main() => 1":           true,
+		"// note\npackage main\nfn main() => 1":  true,
+		"/* note */ package main fn main() => 1": true,
+		"1 + 2":                                  false,
+		"packages := 1":                          false,
+	}
+	for code, want := range cases {
+		if got := hasPackageHeader(code); got != want {
+			t.Errorf("hasPackageHeader(%q) = %v, want %v", code, got, want)
+		}
+	}
+}

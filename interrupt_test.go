@@ -226,7 +226,7 @@ func TestInterruptStopsBackgroundTasks(t *testing.T) {
 	}
 	time.Sleep(20 * time.Millisecond)
 	eng.Interrupt()
-	within(t, 5*time.Second, "background tasks", eng.Close)
+	within(t, 5*time.Second, "background tasks", eng.Wait)
 
 	v, err := eng.Call("main.add", 1, 2)
 	if err != nil || intOf(v) != 3 {
@@ -371,7 +371,7 @@ func TestAwaitRaceForeignStopIsCatchable(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected deadline error, got %v", err)
 	}
-	eng.Close()
+	eng.Wait()
 
 	res, err := eng.Call("main.inspect")
 	if err != nil || res.String() != "[true, true]" {

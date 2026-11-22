@@ -7,10 +7,11 @@ import (
 	goio "io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
+	"sync/atomic"
 
 	"github.com/hxkhan/evie/diag"
+	"github.com/hxkhan/evie/parser"
 	"github.com/hxkhan/evie/std/fs"
 	"github.com/hxkhan/evie/std/io"
 	"github.com/hxkhan/evie/vm"
@@ -21,7 +22,8 @@ import (
 // imports.
 //
 // An engine runs one program. Packages are identified by the file or folder
-// they come from, and each package name can be loaded once.
+// they come from, and each package name can be loaded once. Close an engine
+// when done with it.
 type Engine struct {
 	vm *vm.Instance
 
@@ -31,27 +33,33 @@ type Engine struct {
 	packages     map[string]*vm.Package // host packages by name (cloned per engine)
 	bundleLoaded map[string]*vm.Package // canonical key -> compiled package for path-imported modules
 	curBundlePkg *parsedPackage         // package currently being compiled during LoadBundle
-	loadedFiles  []string
 	ran          bool
+	closed       atomic.Bool
 }
 
-// errRanAlready is returned when an engine is asked to run a second program
-var errRanAlready = errors.New("this engine already ran a program; create a new engine for each program")
-
-// LoadedFiles returns a copy of every file path that has been evaluated, in order
-func (e *Engine) LoadedFiles() []string {
-	return slices.Clone(e.loadedFiles)
+// usable reports ErrClosed once the engine is closed
+func (e *Engine) usable() error {
+	if e.closed.Load() {
+		return ErrClosed
+	}
+	return nil
 }
 
 // Call looks up a callable by path (such as "main.add"), boxes the Go arguments
 // with BoxAny and invokes it on a borrowed fiber.
 func (e *Engine) Call(path string, args ...any) (vm.Value, error) {
+	if err := e.usable(); err != nil {
+		return vm.Value{}, err
+	}
 	return e.vm.Call(path, args...)
 }
 
 // CallContext is Call bound to ctx: when ctx is done, the call and any tasks it
 // starts stop with ctx's cause.
 func (e *Engine) CallContext(ctx context.Context, path string, args ...any) (vm.Value, error) {
+	if err := e.usable(); err != nil {
+		return vm.Value{}, err
+	}
 	return e.vm.CallContext(ctx, path, args...)
 }
 
@@ -65,7 +73,8 @@ func (e *Engine) SetStatic(name string, val vm.Value) {
 	e.vm.SetStatic(name, val)
 }
 
-// Interrupt stops all code currently running or waiting in this engine.
+// Interrupt stops all code currently running or waiting in this engine. The
+// engine stays usable.
 func (e *Engine) Interrupt() {
 	e.vm.Interrupt()
 }
@@ -73,31 +82,45 @@ func (e *Engine) Interrupt() {
 // Eval parses and runs a script. A script that declares a package is loaded
 // as that package and nil is returned; a bare script returns its result.
 func (e *Engine) Eval(script string) (vm.Value, error) {
-	return e.vm.EvalSource(diag.NewSource("", []byte(script)))
+	return e.EvalContext(context.Background(), script)
 }
 
 // EvalContext is Eval bound to ctx: when ctx is done, the script stops with an
 // error whose cause is ctx's cause, such as context.DeadlineExceeded
 func (e *Engine) EvalContext(ctx context.Context, script string) (vm.Value, error) {
-	return e.vm.EvalSourceContext(ctx, diag.NewSource("", []byte(script)))
+	if err := e.usable(); err != nil {
+		return vm.Value{}, err
+	}
+	return e.vm.EvalSource(ctx, diag.NewSource("", []byte(script)))
 }
 
 // Load compiles a source that declares a package and returns the package;
 // name is what errors call the source. Loading a package name a second time
 // is an error.
 func (e *Engine) Load(name string, src []byte) (*vm.Package, error) {
-	return e.vm.EvalPackage(diag.NewSource(name, src))
+	if err := e.usable(); err != nil {
+		return nil, err
+	}
+	source := diag.NewSource(name, src)
+	node, err := parser.ParseSource(source)
+	if err != nil {
+		return nil, err
+	}
+	return e.vm.LoadPackage(context.Background(), "", []vm.ParsedUnit{{Source: source, Node: node}})
 }
 
-// LoadContext is Load bound to ctx: when ctx is done, package initializers
-// stop with ctx's cause.
-func (e *Engine) LoadContext(ctx context.Context, name string, src []byte) (*vm.Package, error) {
-	return e.vm.EvalPackageContext(ctx, diag.NewSource(name, src))
+// Wait blocks until every task the engine's code started has finished
+func (e *Engine) Wait() {
+	e.vm.Wait()
 }
 
-// Close waits for every task of the engine to finish
+// Close stops everything still running in the engine, waits for it to end,
+// and makes every later load, run or call return ErrClosed. Use Wait instead
+// to let background tasks finish.
 func (e *Engine) Close() {
-	e.vm.WaitForNoActivity()
+	e.closed.Store(true)
+	e.vm.Interrupt()
+	e.vm.Wait()
 }
 
 // Dump writes a human-readable summary of every compiled package, global,
@@ -236,15 +259,13 @@ func (e *Engine) noteShadowed(name string, pkg *vm.Package, kind string) {
 
 func (e *Engine) compileParsedPackage(ctx context.Context, p *parsedPackage) error {
 	vmUnits := make([]vm.ParsedUnit, len(p.units))
-	paths := make([]string, len(p.units))
 	for i, u := range p.units {
 		vmUnits[i] = vm.ParsedUnit{Source: u.src, Node: u.node}
-		paths[i] = u.path
 	}
 
 	prevPkg := e.curBundlePkg
 	e.curBundlePkg = p
-	pkg, err := e.vm.EvalParsedPackageContext(ctx, p.key, vmUnits)
+	pkg, err := e.vm.LoadPackage(ctx, p.key, vmUnits)
 	e.curBundlePkg = prevPkg
 	if err != nil {
 		if p.importedBy != nil {
@@ -253,38 +274,42 @@ func (e *Engine) compileParsedPackage(ctx context.Context, p *parsedPackage) err
 		return err
 	}
 	e.bundleLoaded[p.key] = pkg
-	e.loadedFiles = append(e.loadedFiles, paths...)
+	return nil
+}
+
+// adopt prepares the engine for running a bundle: it marks the program as
+// started and takes the bundle's root and file system where the engine has
+// none, so imports the program resolves later look where the bundle came from
+func (e *Engine) adopt(b *Bundle) error {
+	if b == nil {
+		return errors.New("cannot load a nil Bundle")
+	}
+	if err := e.usable(); err != nil {
+		return err
+	}
+	if e.ran {
+		return ErrRanAlready
+	}
+	e.ran = true
+	if e.opts.FS == nil && b.fsys != nil {
+		e.opts.FS = b.fsys
+	}
+	if e.root == "" {
+		e.root = b.root
+	}
 	return nil
 }
 
 // LoadBundle compiles and loads a pre-parsed Bundle into the engine in
-// topological dependency order without invoking main.main (and without
-// executing a bare script).
-func (e *Engine) LoadBundle(b *Bundle) error {
-	return e.LoadBundleContext(context.Background(), b)
-}
-
-// LoadBundleContext is LoadBundle bound to ctx.
-func (e *Engine) LoadBundleContext(ctx context.Context, b *Bundle) error {
-	if b == nil {
-		return errors.New("cannot load a nil Bundle")
+// dependency order without running main.main (or a bare script). When ctx is
+// done, package initializers stop with ctx's cause.
+func (e *Engine) LoadBundle(ctx context.Context, b *Bundle) error {
+	if err := e.adopt(b); err != nil {
+		return err
 	}
-	if e.ran {
-		return errRanAlready
-	}
-	e.ran = true
-	if e.root == "" {
-		e.root = b.root
-	}
-
 	if b.script != nil {
-		if err := e.vm.CompileParsedSource(vm.ParsedUnit{Source: b.script.src, Node: b.script.node}); err != nil {
-			return err
-		}
-		e.loadedFiles = append(e.loadedFiles, b.script.path)
-		return nil
+		return e.vm.CompileUnit(vm.ParsedUnit{Source: b.script.src, Node: b.script.node})
 	}
-
 	for _, p := range b.packages {
 		if err := e.compileParsedPackage(ctx, p); err != nil {
 			return err
@@ -293,38 +318,21 @@ func (e *Engine) LoadBundleContext(ctx context.Context, b *Bundle) error {
 	return nil
 }
 
-// RunBundle compiles, loads, and executes a pre-parsed Bundle without touching
-// the filesystem or re-parsing any source files.
-func (e *Engine) RunBundle(b *Bundle) (vm.Value, error) {
-	return e.RunBundleContext(context.Background(), b)
-}
-
-// RunBundleContext is RunBundle bound to ctx: when ctx is done, package
-// initializers, main.main, and any tasks they start stop with ctx's cause.
-func (e *Engine) RunBundleContext(ctx context.Context, b *Bundle) (vm.Value, error) {
-	if b == nil {
-		return vm.Value{}, errors.New("cannot run a nil Bundle")
+// RunBundle compiles, loads, and runs a pre-parsed Bundle without touching
+// the filesystem or re-parsing any source files: main.main for a program, or
+// the script itself. When ctx is done, package initializers, main.main, and
+// any tasks they start stop with ctx's cause.
+func (e *Engine) RunBundle(ctx context.Context, b *Bundle) (vm.Value, error) {
+	if err := e.adopt(b); err != nil {
+		return vm.Value{}, err
 	}
-	if e.ran {
-		return vm.Value{}, errRanAlready
-	}
-	e.ran = true
-	if e.root == "" {
-		e.root = b.root
-	}
-
 	if b.script != nil {
-		result, err := e.vm.EvalParsedSourceContext(ctx, vm.ParsedUnit{Source: b.script.src, Node: b.script.node})
+		result, err := e.vm.EvalUnit(ctx, vm.ParsedUnit{Source: b.script.src, Node: b.script.node})
 		if ctx.Err() == nil {
-			e.Close()
+			e.Wait()
 		}
-		if err != nil {
-			return vm.Value{}, err
-		}
-		e.loadedFiles = append(e.loadedFiles, b.script.path)
-		return result, nil
+		return result, err
 	}
-
 	for _, p := range b.packages {
 		if err := e.compileParsedPackage(ctx, p); err != nil {
 			return vm.Value{}, err
@@ -342,60 +350,35 @@ func (e *Engine) RunFile(filePath string) (vm.Value, error) {
 // RunFileContext is RunFile bound to ctx: when ctx is done, the program stops
 // with an error whose cause is ctx's cause, such as context.DeadlineExceeded.
 func (e *Engine) RunFileContext(ctx context.Context, filePath string) (vm.Value, error) {
+	if err := e.usable(); err != nil {
+		return vm.Value{}, err
+	}
 	if e.ran {
-		return vm.Value{}, errRanAlready
+		return vm.Value{}, ErrRanAlready
 	}
 	bundle, err := parseFile(e.sfs(), filePath, e.root, e.opts.FS)
 	if err != nil {
 		return vm.Value{}, err
 	}
-	return e.RunBundleContext(ctx, bundle)
-}
-
-// LoadFile compiles and loads a single file and all of its imports without
-// invoking main.main. For bare scripts without a package header, the script is
-// compiled without executing it.
-func (e *Engine) LoadFile(filePath string) error {
-	if e.ran {
-		return errRanAlready
-	}
-	bundle, err := parseFile(e.sfs(), filePath, e.root, e.opts.FS)
-	if err != nil {
-		return err
-	}
-	return e.LoadBundle(bundle)
+	return e.RunBundle(ctx, bundle)
 }
 
 // RunProject runs the program in a directory (on disk or inside Options.FS).
 // Every file at its top level that declares package main is part of the main
-// package; the other files and subfolders are packages imported by path.
+// package; the other files and subfolders are packages imported by path. To
+// bind the run to a context, parse it with ParseProject and use RunBundle.
 func (e *Engine) RunProject(dirPath string) (vm.Value, error) {
-	return e.RunProjectContext(context.Background(), dirPath)
-}
-
-// RunProjectContext is RunProject bound to ctx, the way RunFileContext is.
-func (e *Engine) RunProjectContext(ctx context.Context, dirPath string) (vm.Value, error) {
+	if err := e.usable(); err != nil {
+		return vm.Value{}, err
+	}
 	if e.ran {
-		return vm.Value{}, errRanAlready
+		return vm.Value{}, ErrRanAlready
 	}
 	bundle, err := parseProject(e.sfs(), dirPath, e.opts.FS)
 	if err != nil {
 		return vm.Value{}, err
 	}
-	return e.RunBundleContext(ctx, bundle)
-}
-
-// LoadProject compiles and loads the program in a directory without invoking
-// main.main.
-func (e *Engine) LoadProject(dirPath string) error {
-	if e.ran {
-		return errRanAlready
-	}
-	bundle, err := parseProject(e.sfs(), dirPath, e.opts.FS)
-	if err != nil {
-		return err
-	}
-	return e.LoadBundle(bundle)
+	return e.RunBundle(context.Background(), bundle)
 }
 
 // runMain calls main.main when the program defines it and waits for its tasks
@@ -413,7 +396,7 @@ func (e *Engine) runMain(ctx context.Context) (vm.Value, error) {
 	}
 	res, err := e.CallContext(ctx, "main.main", args...)
 	if ctx.Err() == nil {
-		e.Close()
+		e.Wait()
 	}
 	return res, err
 }

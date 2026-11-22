@@ -186,7 +186,7 @@ func TestLoaderRunProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	val, err := evie.RunProject(dir)
+	val, err := evie.New().RunProject(dir)
 	if err != nil {
 		t.Fatalf("RunProject failed: %v", err)
 	}

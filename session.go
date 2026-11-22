@@ -1,9 +1,9 @@
 package evie
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"os"
 	"sort"
 
 	"github.com/hxkhan/evie/ast"
@@ -36,11 +36,6 @@ func (e *Engine) NewSession() *Session {
 	}
 }
 
-// Engine returns the Engine backing this session.
-func (s *Session) Engine() *Engine {
-	return s.eng
-}
-
 // Eval parses and executes one snippet against the session. When hasVal is
 // true, val is the result of the trailing expression (or an explicit return).
 func (s *Session) Eval(code string) (val vm.Value, hasVal bool, err error) {
@@ -49,6 +44,9 @@ func (s *Session) Eval(code string) (val vm.Value, hasVal bool, err error) {
 
 // EvalContext is Eval bound to ctx.
 func (s *Session) EvalContext(ctx context.Context, code string) (val vm.Value, hasVal bool, err error) {
+	if err := s.eng.usable(); err != nil {
+		return vm.Value{}, false, err
+	}
 	s.turn++
 	src := diag.NewSource(fmt.Sprintf("<session:%d>", s.turn), []byte(code))
 	node, err := parser.ParseSource(src)
@@ -95,36 +93,59 @@ func (s *Session) Import(importPath, alias string) (*vm.Package, error) {
 	return dep, nil
 }
 
-// LoadFile reads a .ev file and evaluates its statements into the session.
-// Files that declare a non-main package are imported as packages instead.
+// LoadFile reads a .ev file, inside Options.FS when one is set, and evaluates
+// its statements into the session; its imports resolve relative to the file.
+// A file that declares a package other than main is imported as that package.
 func (s *Session) LoadFile(filePath string) (vm.Value, bool, error) {
-	data, err := os.ReadFile(filePath)
+	if err := s.eng.usable(); err != nil {
+		return vm.Value{}, false, err
+	}
+	b, err := parseFile(s.eng.sfs(), filePath, "", s.eng.opts.FS)
 	if err != nil {
 		return vm.Value{}, false, err
 	}
-	src := diag.NewSource(display(filePath), data)
-	if pkgName := parser.PeekPackageName(src); pkgName != "" && pkgName != "main" {
-		dep, err := s.Import(filePath, "")
-		if err != nil {
-			return vm.Value{}, false, err
-		}
-		return dep.Box(), false, nil
+	if b.script != nil {
+		s.autoImportStd(b.script.node)
+		return s.vm.EvalContext(context.Background(), b.script.src, b.script.node)
 	}
 
-	node, err := parser.ParseSource(src)
-	if err != nil {
-		return vm.Value{}, false, err
+	// the entry package comes last; the packages it imports by path come before it
+	entry := b.packages[len(b.packages)-1]
+	for _, p := range b.packages[:len(b.packages)-1] {
+		if _, loaded := s.eng.bundleLoaded[p.key]; loaded {
+			continue
+		}
+		if err := s.eng.compileParsedPackage(context.Background(), p); err != nil {
+			return vm.Value{}, false, err
+		}
 	}
-	if pkg, isPkg := node.(ast.Package); isPkg {
-		for _, spec := range pkg.Imports {
-			if _, err := s.Import(spec.Path, spec.Alias); err != nil {
+	if entry.name != "main" {
+		if _, loaded := s.eng.bundleLoaded[entry.key]; !loaded {
+			if err := s.eng.compileParsedPackage(context.Background(), entry); err != nil {
 				return vm.Value{}, false, err
 			}
 		}
-		node = ast.Block{Pos: pkg.Pos, Code: pkg.Code}
+		pkg := s.eng.bundleLoaded[entry.key]
+		s.vm.BindImport(pkg.Name(), filePath, pkg)
+		return pkg.Box(), false, nil
 	}
+
+	// a main file runs in the session: bind its imports, then run its statements
+	unit := entry.units[0]
+	pkg := unit.node.(ast.Package)
+	for _, spec := range pkg.Imports {
+		if key, ok := entry.deps[spec.Path]; ok {
+			dep := s.eng.bundleLoaded[key]
+			s.vm.BindImport(cmp.Or(spec.Alias, dep.Name()), spec.Path, dep)
+			continue
+		}
+		if _, err := s.Import(spec.Path, spec.Alias); err != nil {
+			return vm.Value{}, false, err
+		}
+	}
+	node := ast.Block{Pos: pkg.Pos, Code: pkg.Code}
 	s.autoImportStd(node)
-	return s.vm.EvalContext(context.Background(), src, node)
+	return s.vm.EvalContext(context.Background(), unit.src, node)
 }
 
 // Symbols returns every binding currently defined in the session, sorted by name.

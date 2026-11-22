@@ -1,6 +1,7 @@
 package evie_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,7 +27,6 @@ func run(t *testing.T, code string) vm.Value {
 // not recover panics: nothing a script does may panic across the host boundary,
 // and a panic here must fail the test.
 func runCode(code string) (resVal vm.Value, retErr error) {
-	evm := evie.New()
 	trimmed := strings.TrimSpace(code)
 	script := code
 	if !strings.HasPrefix(trimmed, "package ") {
@@ -37,25 +37,11 @@ func runCode(code string) (resVal vm.Value, retErr error) {
 		}
 	}
 
-	_, err := evm.Eval(script)
+	bundle, err := evie.ParseSource("", []byte(script))
 	if err != nil {
 		return vm.Value{}, err
 	}
-
-	fn, ok := evm.Lookup("main.main")
-	if !ok {
-		return vm.Value{}, nil
-	}
-	if !fn.IsCallable() {
-		return vm.Value{}, fmt.Errorf("main is not a function")
-	}
-
-	res, exc := fn.Call()
-	evm.Close()
-	if exc != nil {
-		return res, exc
-	}
-	return res, nil
+	return evie.New().RunBundle(context.Background(), bundle)
 }
 
 func assertNumber(t *testing.T, val vm.Value, expected float64) {
@@ -1626,7 +1612,7 @@ func TestConstantFolding(t *testing.T) {
 	vmNoInline := vm.New(vm.Options{
 		DisableInlining: true,
 	})
-	resNoInline, err := vmNoInline.EvalSource(diag.NewSource("", []byte("return 10 + 20 * 3")))
+	resNoInline, err := vmNoInline.EvalSource(context.Background(), diag.NewSource("", []byte("return 10 + 20 * 3")))
 	if err != nil {
 		t.Fatalf("unexpected error with inlining disabled: %v", err)
 	}

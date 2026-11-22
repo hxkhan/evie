@@ -11,7 +11,7 @@ import (
 // long-lived context does not collect children
 func TestScopedStoppersAreReleased(t *testing.T) {
 	evm := New(Options{})
-	_, err := evm.EvalSource(diag.NewSource("", []byte(`package main
+	_, err := evm.EvalSource(context.Background(), diag.NewSource("", []byte(`package main
 	fn work(n) => n * 2
 	fn spawner() {
 		t := go work(4)
@@ -31,7 +31,7 @@ func TestScopedStoppersAreReleased(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	evm.WaitForNoActivity()
+	evm.Wait()
 
 	evm.rt.stops.mu.Lock()
 	left := len(evm.rt.stops.scoped)

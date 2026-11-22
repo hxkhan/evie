@@ -2,7 +2,7 @@
 //
 //	evie                  start an interactive REPL
 //	evie file.ev          run a file's main function
-//	evie project/         run a project directory's main.ev
+//	evie project/         run the package main files of a project directory
 //	evie -e 'code'        run code given on the command line
 //	evie --version        print the version
 //
@@ -11,6 +11,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,10 +19,11 @@ import (
 	"os/signal"
 	"runtime"
 	"runtime/debug"
-	"strings"
 	"time"
 
 	"github.com/hxkhan/evie"
+	"github.com/hxkhan/evie/diag"
+	"github.com/hxkhan/evie/parser"
 	"github.com/hxkhan/evie/vm"
 )
 
@@ -87,12 +89,7 @@ func main() {
 		if hasCode {
 			err = dumpInline(eng, *code)
 		} else {
-			target := flag.Arg(0)
-			if info, statErr := os.Stat(target); statErr == nil && info.IsDir() {
-				err = eng.LoadProject(target)
-			} else {
-				err = eng.LoadFile(target)
-			}
+			err = dumpTarget(eng, flag.Arg(0))
 		}
 		if err != nil {
 			report(err)
@@ -107,7 +104,7 @@ func main() {
 	var err error
 
 	if hasCode {
-		res, err = runInline(eng, *code, scriptArgs)
+		res, err = runInline(eng, *code)
 	} else {
 		target := flag.Arg(0)
 		if info, statErr := os.Stat(target); statErr == nil && info.IsDir() {
@@ -131,67 +128,52 @@ func main() {
 }
 
 // runInline runs code from the command line. A program that declares its own
-// package runs as written (calling main.main with scriptArgs); anything else
-// runs in a session with automatic stdlib imports and prints its trailing
+// package runs as written (calling main.main with the engine's Args); anything
+// else runs in a session with automatic stdlib imports and gives its trailing
 // expression value.
-func runInline(eng *evie.Engine, code string, scriptArgs []string) (vm.Value, error) {
-	if hasPackageHeader(code) {
-		return runSource(eng, code, scriptArgs)
+func runInline(eng *evie.Engine, code string) (vm.Value, error) {
+	if !hasPackageHeader(code) {
+		val, _, err := eng.NewSession().Eval(code)
+		eng.Wait()
+		return val, err
 	}
-	val, _, err := eng.NewSession().Eval(code)
-	eng.Close()
-	return val, err
+	b, err := evie.ParseSource("-e", []byte(code))
+	if err != nil {
+		return vm.Value{}, err
+	}
+	return eng.RunBundle(context.Background(), b)
 }
 
 func dumpInline(eng *evie.Engine, code string) error {
-	if hasPackageHeader(code) {
-		_, err := eng.Load("-e", []byte(code))
+	if !hasPackageHeader(code) {
+		return eng.NewSession().Compile(code)
+	}
+	b, err := evie.ParseSource("-e", []byte(code))
+	if err != nil {
 		return err
 	}
-	return eng.NewSession().Compile(code)
+	return eng.LoadBundle(context.Background(), b)
 }
 
-// hasPackageHeader reports whether code starts with a `package <name>` header
-// after skipping leading whitespace and line comments.
+// dumpTarget compiles a file or project directory without running main
+func dumpTarget(eng *evie.Engine, target string) error {
+	var b *evie.Bundle
+	var err error
+	if info, statErr := os.Stat(target); statErr == nil && info.IsDir() {
+		b, err = evie.ParseProject(nil, target)
+	} else {
+		b, err = evie.ParseFile(nil, target)
+	}
+	if err != nil {
+		return err
+	}
+	return eng.LoadBundle(context.Background(), b)
+}
+
+// hasPackageHeader reports whether code starts with a `package <name>` header,
+// skipping whitespace and comments the way the parser does
 func hasPackageHeader(code string) bool {
-	s := code
-	for {
-		s = strings.TrimLeft(s, " \t\r\n")
-		if strings.HasPrefix(s, "//") {
-			if nl := strings.IndexByte(s, '\n'); nl >= 0 {
-				s = s[nl+1:]
-				continue
-			}
-			return false
-		}
-		break
-	}
-	if !strings.HasPrefix(s, "package") {
-		return false
-	}
-	rest := s[len("package"):]
-	return len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t' || rest[0] == '\r' || rest[0] == '\n')
-}
-
-func runSource(eng *evie.Engine, src string, scriptArgs []string) (vm.Value, error) {
-	if _, err := eng.Load("-e", []byte(src)); err != nil {
-		return vm.Value{}, err
-	}
-	mainFn, ok := eng.Lookup("main.main")
-	if !ok || !mainFn.IsCallable() {
-		eng.Close()
-		return vm.Value{}, nil
-	}
-	var args []any
-	if len(scriptArgs) > 0 && mainFn.AcceptsArgs() {
-		args = make([]any, len(scriptArgs))
-		for i, arg := range scriptArgs {
-			args[i] = arg
-		}
-	}
-	res, err := eng.Call("main.main", args...)
-	eng.Close()
-	return res, err
+	return parser.PeekPackageName(diag.NewSource("-e", []byte(code))) != ""
 }
 
 // buildVersion is set at release build time via -ldflags "-X main.buildVersion=..."

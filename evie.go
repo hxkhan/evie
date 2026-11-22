@@ -3,8 +3,8 @@
 // Create an [Engine] with [New] to evaluate scripts, call Evie functions from Go,
 // and expose host packages with [Options]. For multi-file programs or concurrent
 // execution across isolated engines, parse once into an immutable [Bundle] with
-// [ParseFile], [ParseProject], [ParseFileFS], or [ParseProjectFS]. Use [Format]
-// to render parse, compile, and runtime errors with source excerpts and traces.
+// [ParseFile], [ParseProject] or [ParseSource]. Use [Format] to render parse,
+// compile, and runtime errors with source excerpts and traces.
 //
 //	eng := evie.New()
 //	defer eng.Close()
@@ -143,7 +143,8 @@ func RunFile(path string) (vm.Value, error) {
 	return New().RunFile(path)
 }
 
-// RunProject executes the main.ev of a project directory in a fresh engine
-func RunProject(dir string) (vm.Value, error) {
-	return New().RunProject(dir)
-}
+// ErrRanAlready is returned when an engine is asked to run a second program
+var ErrRanAlready = errors.New("this engine already ran a program; create a new engine for each program")
+
+// ErrClosed is returned by an engine that was closed
+var ErrClosed = errors.New("the engine is closed")

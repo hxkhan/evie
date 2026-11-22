@@ -55,7 +55,7 @@ func ExampleEngine_Call() {
 	// score = 41
 }
 
-func ExampleParseProjectFS() {
+func ExampleParseProject() {
 	fsys := fstest.MapFS{
 		"main.ev": &fstest.MapFile{
 			Data: []byte(`package main imports("io", "./util" as u)
@@ -71,16 +71,16 @@ func ExampleParseProjectFS() {
 	}
 
 	// Parse once into an immutable Bundle, then run in a sandboxed Engine.
-	bundle, err := evie.ParseProjectFS(fsys, ".")
+	bundle, err := evie.ParseProject(fsys, ".")
 	if err != nil {
 		panic(err)
 	}
 
 	var stdout bytes.Buffer
-	val, err := bundle.Run(evie.Options{
+	val, err := evie.New(evie.Options{
 		Stdlib: []string{"io"},
 		Stdout: &stdout,
-	})
+	}).RunBundle(context.Background(), bundle)
 	if err != nil {
 		panic(err)
 	}

@@ -69,11 +69,11 @@ func TestLoaderProjectMainAcrossFiles(t *testing.T) {
 		"greet.ev":  "package main\nfn greet(who) => \"hello \" + who",
 		"helper.ev": "package helper\nfn name() => \"project\"",
 	})
-	val, err := evie.RunProject(dir)
+	val, err := evie.New().RunProject(dir)
 	expectResult(t, val, err, "hello project")
 
 	empty := writeTree(t, map[string]string{"lib.ev": "package lib"})
-	_, err = evie.RunProject(empty)
+	_, err = evie.New().RunProject(empty)
 	expectError(t, err, "declares package main")
 }
 

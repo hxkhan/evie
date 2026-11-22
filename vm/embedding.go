@@ -30,11 +30,6 @@ func (vm *Instance) Lookup(path string) (Value, bool) {
 	return vm.cp.prelude.Get(path)
 }
 
-// Prelude returns the package whose symbols every script sees without an import
-func (vm *Instance) Prelude() *Package {
-	return vm.cp.prelude
-}
-
 // SetStatic binds a symbol in the prelude, visible to every package
 func (vm *Instance) SetStatic(name string, val Value) {
 	vm.cp.prelude.Set(name, val)

@@ -76,7 +76,7 @@ func TestFSImportSandboxBlocksEscape(t *testing.T) {
 			fsys := fstest.MapFS{
 				"main.ev": &fstest.MapFile{Data: []byte(src + "\nfn main() => 0\n")},
 			}
-			_, err := evie.ParseFileFS(fsys, "main.ev")
+			_, err := evie.ParseFile(fsys, "main.ev")
 			expectError(t, err, "escapes filesystem root")
 
 			_, err = evie.New(evie.Options{FS: fsys}).RunFile("main.ev")
@@ -86,7 +86,7 @@ func TestFSImportSandboxBlocksEscape(t *testing.T) {
 
 	// Entry path itself cannot escape FS root either
 	fsys := fstest.MapFS{"main.ev": &fstest.MapFile{Data: []byte("package main\nfn main() => 1\n")}}
-	if _, err := evie.ParseFileFS(fsys, "../main.ev"); err == nil || !strings.Contains(err.Error(), "escapes filesystem root") {
+	if _, err := evie.ParseFile(fsys, "../main.ev"); err == nil || !strings.Contains(err.Error(), "escapes filesystem root") {
 		t.Fatalf("expected escape error for ../main.ev, got %v", err)
 	}
 }
@@ -153,7 +153,7 @@ fn main(tag) {
 	}
 
 	// Phase 1: parse once without executing anything
-	bundle, err := evie.ParseProjectFS(fsys, ".")
+	bundle, err := evie.ParseProject(fsys, ".")
 	if err != nil {
 		t.Fatalf("ParseProjectFS failed: %v", err)
 	}
@@ -176,10 +176,10 @@ fn main(tag) {
 			defer wg.Done()
 			var stdout bytes.Buffer
 			tag := fmt.Sprintf("w%d", id)
-			val, err := bundle.Run(evie.Options{
+			val, err := evie.New(evie.Options{
 				Args:   []string{tag},
 				Stdout: &stdout,
-			})
+			}).RunBundle(context.Background(), bundle)
 			if err != nil {
 				errs <- fmt.Errorf("worker %d: %w", id, err)
 				return
@@ -213,7 +213,7 @@ fn main() {
 `)},
 	}
 
-	bundle, err := evie.ParseFileFS(fsys, "main.ev")
+	bundle, err := evie.ParseFile(fsys, "main.ev")
 	if err != nil {
 		t.Fatalf("ParseFileFS failed: %v", err)
 	}
@@ -225,7 +225,7 @@ fn main() {
 		Packages: []*vm.Package{host},
 		Debug:    evie.Debug{DebugInfo: true},
 	})
-	if err := eng.LoadBundle(bundle); err != nil {
+	if err := eng.LoadBundle(context.Background(), bundle); err != nil {
 		t.Fatalf("LoadBundle failed: %v", err)
 	}
 	val, err := eng.Call("main.compute", 20)
@@ -241,13 +241,13 @@ fn main() {
 	stuckFS := fstest.MapFS{
 		"main.ev": &fstest.MapFile{Data: []byte("package main\nfn main() { while true {} }\n")},
 	}
-	stuckBundle, err := evie.ParseFileFS(stuckFS, "main.ev")
+	stuckBundle, err := evie.ParseFile(stuckFS, "main.ev")
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
-	_, err = stuckBundle.RunContext(ctx)
+	_, err = evie.New().RunBundle(ctx, stuckBundle)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected DeadlineExceeded, got %v", err)
 	}
@@ -258,11 +258,11 @@ func TestBundleShadowHintAndCycleDetection(t *testing.T) {
 		"math.ev": &fstest.MapFile{Data: []byte("package mymath\nfn mine() => 1\n")},
 		"main.ev": &fstest.MapFile{Data: []byte("package main imports(\"math\")\nfn main() => math.mine()\n")},
 	}
-	bundle, err := evie.ParseFileFS(shadowFS, "main.ev")
+	bundle, err := evie.ParseFile(shadowFS, "main.ev")
 	if err != nil {
 		t.Fatalf("ParseFileFS failed: %v", err)
 	}
-	_, err = bundle.Run()
+	_, err = evie.New().RunBundle(context.Background(), bundle)
 	if err == nil {
 		t.Fatal("expected error calling math.mine()")
 	}
@@ -276,7 +276,7 @@ func TestBundleShadowHintAndCycleDetection(t *testing.T) {
 		"b.ev":    &fstest.MapFile{Data: []byte("package b imports(\"./a\")\nfn x() => 1\n")},
 		"main.ev": &fstest.MapFile{Data: []byte("package main imports(\"./a\")\nfn main() => 0\n")},
 	}
-	_, err = evie.ParseFileFS(cycleFS, "main.ev")
+	_, err = evie.ParseFile(cycleFS, "main.ev")
 	expectError(t, err, "cyclic import detected")
 }
 
@@ -302,12 +302,12 @@ func TestCanonicalModuleIdentityAndImportAliases(t *testing.T) {
 		}`)},
 	}
 
-	bundle, err := evie.ParseFileFS(fsys, "main.ev")
+	bundle, err := evie.ParseFile(fsys, "main.ev")
 	if err != nil {
 		t.Fatalf("ParseFileFS failed: %v", err)
 	}
 	eng := evie.New(evie.Options{Debug: evie.Debug{DebugInfo: true}})
-	val, err := eng.RunBundle(bundle)
+	val, err := eng.RunBundle(context.Background(), bundle)
 	// a.run() mutates shared db/util.n from 1 -> 11; http/util.n stays 2; 11 + 2 + 100 = 113
 	expectResult(t, val, err, `["db:11", "http:2", 113]`)
 
@@ -365,6 +365,6 @@ func TestCanonicalModuleIdentityAndImportAliases(t *testing.T) {
 	badAliasFS := fstest.MapFS{
 		"main.ev": &fstest.MapFile{Data: []byte("package main imports(\"math\" as fn)\nfn main() => 0\n")},
 	}
-	_, err = evie.ParseFileFS(badAliasFS, "main.ev")
+	_, err = evie.ParseFile(badAliasFS, "main.ev")
 	expectError(t, err, "keyword")
 }

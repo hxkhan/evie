@@ -41,6 +41,7 @@ The `evie` package wraps all of this in an `Engine`; this is the same thing on t
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/hxkhan/evie/diag"
@@ -66,9 +67,9 @@ func main() {
 	}
 
 	evm := vm.New(vm.Options{Prelude: prelude, Resolver: resolver})
-	defer evm.Close()
+	defer evm.Wait() // let tasks the script started finish
 
-	_, err := evm.EvalSource(diag.NewSource("main.ev", []byte(`package main imports("io", "time")
+	_, err := evm.EvalSource(context.Background(), diag.NewSource("main.ev", []byte(`package main imports("io", "time")
 
 	fn add(a, b) {
 		io.println("add called in the evie world")

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -234,5 +236,67 @@ func TestSessionInterruptKeepsSessionAlive(t *testing.T) {
 	val, _, err := s.Eval("saved + 1")
 	if err != nil || val.String() != "124" {
 		t.Fatalf("after timeout: val=%v err=%v", val, err)
+	}
+}
+
+// LoadFile takes a plain file name, resolves the file's imports next to it, and
+// imports a file that declares another package as that package
+func TestSessionLoadFile(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"util.ev":     "package util\nfn twice(x) => x * 2\n",
+		"lib/text.ev": "package text\nfn shout(s) => s.toUpper()\n",
+		"lib/main.ev": "package main imports(\"./text\")\ngreeting := text.shout(\"hi\")\n",
+	}
+	for name, src := range files {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(dir)
+
+	eng := evie.New()
+	defer eng.Close()
+	s := eng.NewSession()
+	if _, _, err := s.LoadFile("util.ev"); err != nil {
+		t.Fatalf("LoadFile(util.ev): %v", err)
+	}
+	if _, _, err := s.LoadFile(filepath.Join("lib", "main.ev")); err != nil {
+		t.Fatalf("LoadFile(lib/main.ev): %v", err)
+	}
+	val, _, err := s.Eval("[util.twice(21), greeting]")
+	if err != nil || val.String() != `[42, "HI"]` {
+		t.Fatalf("got %v, %v", val, err)
+	}
+}
+
+// Close stops tasks that would never end instead of waiting for them, and the
+// engine refuses work afterwards
+func TestCloseStopsTasksAndRefusesWork(t *testing.T) {
+	eng := evie.New()
+	if _, err := eng.Eval(`package main imports("time")
+	fn start() { go time.sleep(1000000000) }
+	fn add(a, b) => a + b`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Call("main.start"); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { eng.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close waited for a task that never ends")
+	}
+	if _, err := eng.Call("main.add", 1, 2); !errors.Is(err, evie.ErrClosed) {
+		t.Fatalf("Call after Close = %v, want ErrClosed", err)
+	}
+	if _, err := eng.Eval("1"); !errors.Is(err, evie.ErrClosed) {
+		t.Fatalf("Eval after Close = %v, want ErrClosed", err)
 	}
 }

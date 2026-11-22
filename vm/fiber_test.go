@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"context"
 	"testing"
 
 	"github.com/hxkhan/evie/diag"
@@ -10,7 +11,7 @@ import (
 // including when an argument throws before the callee runs
 func TestCallsReleaseFiberStateOnException(t *testing.T) {
 	evm := New(Options{})
-	_, err := evm.EvalSource(diag.NewSource("", []byte(`
+	_, err := evm.EvalSource(context.Background(), diag.NewSource("", []byte(`
 	package main
 
 	class Box(n) {

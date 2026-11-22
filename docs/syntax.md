@@ -859,16 +859,17 @@ The pieces, from most to least convenient:
 | full control of arguments and errors | `pkg.Func(name, arity, func(c vm.Call) (vm.Value, error))`; mark it `Blocking` if it sleeps or waits on I/O, and watch `c.Context()` so it wakes when the script is stopped |
 | a group of functions scripts import by name | `vm.NewPackage("name")` passed in `evie.Options.Packages` |
 | sandbox stdlib, filesystem imports, or I/O per engine | `evie.Options.FS` (`embed.FS` / `io/fs.FS`; confines imports, and `fs` reads only from it and cannot write), `Options.Stdlib` (allowlist), `Options.NoStdlib`, `Options.Stdin`, `Options.Stdout` |
-| parse a multi-file program once and run in many engines | `evie.ParseFile`, `ParseProject`, `ParseFileFS`, `ParseProjectFS` → `*evie.Bundle` with `bundle.Run(opts...)`, `eng.LoadBundle(b)`, `eng.RunBundle(b)` |
+| parse a multi-file program once and run in many engines | `evie.ParseFile(fsys, path)`, `ParseProject(fsys, dir)` (a nil `fsys` is the OS) or `ParseSource(name, src)` → `*evie.Bundle`, then `eng.RunBundle(ctx, b)` or `eng.LoadBundle(ctx, b)` |
 | symbols visible without an import | `eng.SetStatic` or `evie.Options.Prelude` |
 | lend a Go value to scripts as it is | `vm.NewHostType[T]("Name")` with `Method`, `Constructor`, `Wrap` |
 | a native whose work takes a while | return `c.Async(func(ctx context.Context) (vm.Value, error) { ... })` (lifecycle-bound task) |
 | call a script function | `eng.Call("pkg.fn", goArgs...)`, or `value.Call(evieArgs...)` on a value from `eng.Lookup("pkg.fn")` |
 | run a file or a project directory | `eng.RunFile`, `eng.RunProject`, or `evie.RunFile` for a one-off |
 | read a result | `AsFloat64`, `AsString`, `AsArray`, `AsObject` and the other `As` methods, `Field(name)` / `ClassName()` on objects and class instances, `ToGo`, `Unmarshal(&target)`, `json.Marshal(val)` |
-| behave like the language in a native | `a.Add(b)`, `a.LessThan(b)` and the other operators, `Equals`, `IsTruthy`; a type mismatch returns the script's error |
+| compare values the way the language does | `a.Equals(b)`, `v.IsTruthy()` |
 | show an error | `evie.Format(err, colors)` renders it the way the `evie` command does |
-| stop a runaway script or release engine resources | `eng.Interrupt()`, `eng.Close()`, or a context: `eng.RunFileContext`, `RunProjectContext`, `EvalContext`, `CallContext` |
+| stop a runaway script | `eng.Interrupt()`, or a context: `eng.RunFileContext`, `EvalContext`, `CallContext`, `RunBundle(ctx, b)` |
+| finish with an engine | `eng.Wait()` lets background tasks finish; `eng.Close()` stops them, waits, and makes later calls return `evie.ErrClosed` |
 
 A stopped script fails at its next loop iteration or call, or as soon as it wakes from an `await`, `time.sleep` or a blocking native that watches `c.Context()`. The error says where it stopped, its cause is `vm.ErrInterrupted` or the context's cause, and `catch` lets it pass. A context stops only the run it was given and the tasks that run started; `Interrupt` stops everything the instance is running, and the instance stays usable afterwards.
 

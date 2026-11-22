@@ -635,7 +635,7 @@ func TestRunProjectIgnoresBrokenUnimportedSibling(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "broken.ev"), []byte("package unused\nfn bad( { @@@\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	val, err := evie.RunProject(dir)
+	val, err := evie.New().RunProject(dir)
 	if err != nil {
 		t.Fatalf("RunProject should ignore unimported broken sibling file, got: %v", err)
 	}
@@ -860,7 +860,7 @@ func TestLoaderHardening(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "main.ev"), []byte("package main imports(\"./sub/child\")\nfn main() => child.v()\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := evie.RunProject(dir); err == nil {
+	if _, err := evie.New().RunProject(dir); err == nil {
 		t.Fatal("expected ./util inside sub/ to fail rather than falling back to root/util.ev")
 	}
 

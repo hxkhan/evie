@@ -66,7 +66,7 @@ Two tasks incrementing one global always end at the exact total, because fibers 
   - Go functions become natives through typed wrappers (`vm.Func1(goFunc)`) or reflection (`vm.Reflect(goFunc)`).
   - Bidirectional marshaling and unmarshaling into native Go structs (`val.Unmarshal(&struct)`, `json.Marshal(val)`).
   - Per-engine stdlib sandboxing (`Options.Stdlib`, `Options.NoStdlib`), virtual/embedded filesystems (`Options.FS` confines imports and the `fs` package, which can then only read from it), and custom I/O streams (`Options.Stdin`, `Options.Stdout`).
-  - Parse once, run anywhere: `evie.ParseProject` / `ParseProjectFS` produces an immutable `*evie.Bundle` that can be instantiated concurrently across independent engines.
+  - Parse once, run anywhere: `evie.ParseFile`, `ParseProject` and `ParseSource` produce an immutable `*evie.Bundle` that `eng.RunBundle` runs in any number of independent engines at once.
   - One-line script execution (`evie.Eval(...)`).
   - Stopping runaway scripts with `Interrupt()` or a context deadline, without the script being able to catch it.
 - **Pure Go (Zero CGO)**:

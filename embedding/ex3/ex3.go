@@ -31,7 +31,7 @@ func main() {
 	}
 
 	// Parse and validate the whole dependency graph once (no VM execution yet).
-	bundle, err := evie.ParseProjectFS(scriptsFS, ".")
+	bundle, err := evie.ParseProject(scriptsFS, ".")
 	if err != nil {
 		fmt.Print(evie.Format(err, false))
 		panic(err)
@@ -71,7 +71,7 @@ func main() {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 
-			if err := eng.LoadBundleContext(ctx, bundle); err != nil {
+			if err := eng.LoadBundle(ctx, bundle); err != nil {
 				results[idx].err = err
 				return
 			}

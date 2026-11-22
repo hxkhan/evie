@@ -194,27 +194,33 @@ func runSource(eng *evie.Engine, src string, scriptArgs []string) (vm.Value, err
 	return res, err
 }
 
-// versionString names the build: the module version when installed with go
-// install, otherwise the commit it was built from
+// buildVersion is set at release build time via -ldflags "-X main.buildVersion=..."
+var buildVersion string
+
+// versionString names the build: an injected release version, the module
+// version when installed with go install, or the commit it was built from.
 func versionString() string {
-	version := "devel"
-	if info, ok := debug.ReadBuildInfo(); ok {
-		if v := info.Main.Version; v != "" && v != "(devel)" {
-			version = v
-		} else {
-			var revision, modified string
-			for _, s := range info.Settings {
-				switch s.Key {
-				case "vcs.revision":
-					revision = s.Value
-				case "vcs.modified":
-					if s.Value == "true" {
-						modified = "+dirty"
+	version := buildVersion
+	if version == "" {
+		version = "devel"
+		if info, ok := debug.ReadBuildInfo(); ok {
+			if v := info.Main.Version; v != "" && v != "(devel)" {
+				version = v
+			} else {
+				var revision, modified string
+				for _, s := range info.Settings {
+					switch s.Key {
+					case "vcs.revision":
+						revision = s.Value
+					case "vcs.modified":
+						if s.Value == "true" {
+							modified = "+dirty"
+						}
 					}
 				}
-			}
-			if len(revision) >= 7 {
-				version = "devel " + revision[:7] + modified
+				if len(revision) >= 7 {
+					version = "devel " + revision[:7] + modified
+				}
 			}
 		}
 	}

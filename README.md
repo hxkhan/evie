@@ -170,6 +170,7 @@ _, err := eng.CallContext(ctx, "main.status", 42) // errors.Is(err, context.Dead
 - [x] Standard library (`io`, `fs`, `math`, `time`, `json`)
 - [x] Compiler-style diagnostics (source excerpts, spans, hints, did-you-mean, stack traces)
 - [x] Interrupts and deadlines for runaway scripts (`Interrupt`, `RunFileContext`, `CallContext`)
+- [x] Interactive REPL (`evie` with multi-line input, persistent `vm.Session` state, and `:help` commands)
 - [ ] Package management ⏳
 
 ---
@@ -183,25 +184,24 @@ For a comprehensive guide covering grammar, types, standard methods, and concurr
 
 ## Benchmarks
 
-| Language | fib(35)  | Host Language |
-| :-       | :-       | :-            |
-| [**Evie**](https://github.com/hxkhan/evie) | `457ms` | Go |
-| [PUC Lua 5.4.2](https://lua.org/) | `587ms` | C |
-| [JS - QuickJS](https://bellard.org/quickjs/) | `693ms` | C |
-| [JS - V8 Ignition](https://v8.dev/docs/ignition) (`node --jitless`) | `779ms` | C++ |
-| [Python 3.13](https://python.org/) | `983ms` | C |
-| [Wren](https://wren.io/) | `1030ms` | C |
-| [Tengo](https://github.com/d5/tengo) | `1826ms` | Go |
+Across the 8-workload checksum-verified [cross-language suite](./benchmarks/compare) (median wall time of 5 runs after 1 warm-up on P-cores, process startup included):
 
-> Measured on an Intel i5-13400F under Windows 11 with the programs in [examples/](./examples) (`fib.ev`, `fib.lua`, `fib.js`, ...). Each figure is the median wall time of five runs after a warm-up, process start included.
+| Benchmark | **Evie** (Go) | Lua 5.4 (C) | QuickJS (C) | Python 3 (C) | V8 `--jitless` (C++) | Wren (C) | Tengo (Go) |
+| :- | -: | -: | -: | -: | -: | -: | -: |
+| `classes` | **30.1ms** | 40.5ms | 61.2ms | 72.7ms | 78.7ms | 50.9ms | 151.4ms |
+| `closures` | **33.6ms** | 36.0ms | 52.0ms | 93.1ms | 81.6ms | 78.6ms | 136.1ms |
+| `fib` | **413.3ms** | 479.6ms | 687.8ms | 926.2ms | 701.1ms | 973.5ms | 1.81s |
+| `mandelbrot` | 90.9ms | **61.5ms** | 151.8ms | 232.6ms | 179.6ms | 244.5ms | 569.0ms |
+| `matmul` | 40.4ms | **27.0ms** | 66.1ms | 85.5ms | 109.0ms | 136.7ms | 209.4ms |
+| `objects` | 37.1ms | **21.3ms** | 39.6ms | 49.8ms | 75.0ms | 64.4ms | 118.8ms |
+| `sieve` | 82.0ms | **55.1ms** | 109.7ms | 132.2ms | 129.3ms | 154.9ms | 488.6ms |
+| `strings` | **46.8ms** | 106.2ms | 54.3ms | 51.7ms | 99.8ms | 409.5ms | 101.6ms |
+| **Geomean** | **62.0ms** | **58.9ms** | **92.1ms** | **119.8ms** | **130.7ms** | **164.3ms** | **267.5ms** |
+| **vs Evie** | **1.00x** | **0.95x** | **1.49x** | **1.93x** | **2.11x** | **2.65x** | **4.31x** |
 
-The [benchmark suite](./benchmarks) tracks 30 programs covering calls, closures, classes, method dispatch, host calls, strings, objects, errors and tasks; [results/latest.md](./benchmarks/results/latest.md) has the current numbers.
+> Measured on an Intel i5-13400F under Windows 11 (`.\benchmarks\compare\bench.ps1 -Runs 5 -Warmup 1 -Affinity 0x0FFF`). `>1.00x` means Evie is faster.
 
-Why `fib(35)`? Because micro-benchmarks measure fundamental VM metrics:
-- Function invocation and call-frame overhead (`29,860,703` recursive calls)
-- Bytecode instruction dispatch performance
-- Primitive number crunching
-- Conditional branch prediction
+The internal [benchmark suite](./benchmarks) tracks 30 programs covering calls, closures, classes, method dispatch, host calls, strings, objects, errors and tasks; [results/latest.md](./benchmarks/results/latest.md) has the current numbers.
 
 ---
 
@@ -210,13 +210,14 @@ Why `fib(35)`? Because micro-benchmarks measure fundamental VM metrics:
 ### Prerequisites
 - Go 1.27+ installed ([go.dev/doc/install](https://go.dev/doc/install))
 
-### Build & Run
+### Install or Build
 ```bash
-# Clone the repository
+# Install the CLI directly with Go
+go install github.com/hxkhan/evie/evie@latest
+
+# Or clone and build from source
 git clone https://github.com/hxkhan/evie.git
 cd evie
-
-# Build the CLI executable
 go build ./evie
 
 # Start an interactive REPL (multi-line input, persistent state, :help for commands)
@@ -243,3 +244,9 @@ go build ./evie
 go test ./...
 go vet ./...
 ```
+
+---
+
+## License
+
+Licensed under the [Apache License, Version 2.0](./LICENSE). See [NOTICE](./NOTICE) for attribution details.

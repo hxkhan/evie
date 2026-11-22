@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Verify tests before release
+        run: |
+          go vet ./...
+          go test -race -count=1 ./...
+
+      - name: Build release archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          mkdir -p dist
+
+          targets=(
+            "linux amd64 tar.gz"
+            "linux arm64 tar.gz"
+            "darwin amd64 tar.gz"
+            "darwin arm64 tar.gz"
+            "windows amd64 zip"
+            "windows arm64 zip"
+          )
+
+          for target in "${targets[@]}"; do
+            read -r goos goarch ext <<< "$target"
+            stage="dist/evie_${version}_${goos}_${goarch}"
+            mkdir -p "$stage"
+            bin="evie"
+            if [ "$goos" = "windows" ]; then
+              bin="evie.exe"
+            fi
+
+            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build \
+              -trimpath \
+              -ldflags="-s -w -X main.buildVersion=${version}" \
+              -o "${stage}/${bin}" \
+              ./evie
+
+            cp LICENSE NOTICE README.md "$stage/"
+
+            if [ "$ext" = "tar.gz" ]; then
+              tar -czf "dist/evie_${version}_${goos}_${goarch}.tar.gz" -C dist "evie_${version}_${goos}_${goarch}"
+            else
+              (cd dist && zip -qr "evie_${version}_${goos}_${goarch}.zip" "evie_${version}_${goos}_${goarch}")
+            fi
+            rm -rf "$stage"
+          done
+
+          (cd dist && sha256sum evie_* > checksums.txt)
+          cat dist/checksums.txt
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/evie_* dist/checksums.txt \
+            --title "Evie ${GITHUB_REF_NAME}" \
+            --generate-notes

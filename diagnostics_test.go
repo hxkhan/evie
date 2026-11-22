@@ -187,3 +187,13 @@ fn main() {
 		}
 	}
 }
+
+// the caret counts characters, not bytes, on a line with non-ASCII text
+func TestRenderedCaretAfterNonASCII(t *testing.T) {
+	expectRendering(t, "package main\nfn main() => \"héllo wörld\" + )\n", `error: unexpected ')': nothing is open here
+ --> example.ev:2:32
+  |
+2 | fn main() => "héllo wörld" + )
+  |                              ^
+  |`)
+}

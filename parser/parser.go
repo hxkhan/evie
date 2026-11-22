@@ -708,7 +708,12 @@ func (ps *parser) parseArgs(open token.Token, what string) []ast.Node {
 func (ps *parser) parseObject(main token.Token) ast.Node {
 	obj := ast.Object{Pos: main.Pos}
 	ps.list(main, "}", "the object", func() {
-		key := ps.name("a field name")
+		// a key may be named like a keyword, as a member after '.' may
+		if ps.PeekToken().Type != token.Word {
+			ps.expected("a field name", token.Token{}, "")
+		}
+		key := ps.NextToken()
+		ps.last = key
 		if !ps.consume(":") {
 			ps.expected(fmt.Sprintf("':' after the field name '%s'", key.Literal), main, "in this object")
 		}

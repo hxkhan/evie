@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 	"sync"
 )
 
@@ -136,12 +137,14 @@ func (r *Report) Render(p Palette) string {
 			return false
 		}
 		text := strings.ReplaceAll(string(line), "\t", "    ")
-		// a column counts tabs before it as four columns too
-		colByte := max(pos.Column-1, 0)
-		col := colByte + 3*strings.Count(string(line[:min(colByte, len(line))]), "\t")
-		length := max(pos.Length, 1)
-		if col+length > len(text) {
-			length = max(len(text)-col, 1)
+		// positions count bytes; the excerpt shows characters, and a tab as four
+		cols := func(s string) int { return utf8.RuneCountInString(s) + 3*strings.Count(s, "\t") }
+		colByte := min(max(pos.Column-1, 0), len(line))
+		end := min(colByte+max(pos.Length, 1), len(line))
+		col := cols(string(line[:colByte]))
+		length := max(cols(string(line[colByte:end])), 1)
+		if total := cols(string(line)); col+length > total {
+			length = max(total-col, 1)
 		}
 		fmt.Fprintf(&b, "%s %s\n", pad, gutter("|"))
 		fmt.Fprintf(&b, "%s %s %s\n", gutter(fmt.Sprintf("%*d", width, pos.Line)), gutter("|"), text)

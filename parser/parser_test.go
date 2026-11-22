@@ -69,6 +69,8 @@ func TestParseErrors(t *testing.T) {
 		"x := 0x10":   "'0x10' is not a valid number",
 		"x := 123abc": "'123abc' is not a valid number",
 		"x := 1.25":   "",
+		// object keys may be named like keywords, as members after '.' may
+		"x := {default: 1, in: 2, fn: 3}":                                   "",
 		"fn main() { if a {}" + strings.Repeat(" else if a {}", 200) + " }": "",
 	}
 	for src, want := range cases {

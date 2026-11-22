@@ -9,8 +9,8 @@ import (
 )
 
 // emitBinOp compiles a binary operator. Operands that are locals or constants
-// are read without evaluating an instruction, and the operator's method is
-// called directly from the closure so that it inlines.
+// are read without evaluating an instruction, and numbers are handled in the
+// closure itself or by a method small enough to inline.
 func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 	site := vm.at(node)
 	if val, ok := vm.evaluate(node).(Value); ok {
@@ -29,6 +29,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 				case ast.AddOp:
 					return func(fbr *fiber) (Value, exception) {
 						b := fbr.stack[fbr.base+ri]
+						if l.pointer == f64Type && b.pointer == f64Type {
+							return BoxNumber(math.Float64frombits(l.scalar) + math.Float64frombits(b.scalar)), nil
+						}
 						if result, ok := l.add(b); ok {
 							return result, nil
 						}
@@ -61,6 +64,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 				case ast.ModOp:
 					return func(fbr *fiber) (Value, exception) {
 						b := fbr.stack[fbr.base+ri]
+						if l.pointer == f64Type && b.pointer == f64Type {
+							return modNumbers(math.Float64frombits(l.scalar), math.Float64frombits(b.scalar)), nil
+						}
 						if result, ok := l.mod(b); ok {
 							return result, nil
 						}
@@ -69,12 +75,18 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 				case ast.EqOp:
 					return func(fbr *fiber) (Value, exception) {
 						b := fbr.stack[fbr.base+ri]
-						return BoxBool(l.Equals(b)), nil
+						if l.pointer == f64Type && b.pointer == f64Type {
+							return BoxBool(math.Float64frombits(l.scalar) == math.Float64frombits(b.scalar)), nil
+						}
+						return BoxBool(l.equalsSlow(b)), nil
 					}
 				case ast.NotEqOp:
 					return func(fbr *fiber) (Value, exception) {
 						b := fbr.stack[fbr.base+ri]
-						return BoxBool(!l.Equals(b)), nil
+						if l.pointer == f64Type && b.pointer == f64Type {
+							return BoxBool(math.Float64frombits(l.scalar) != math.Float64frombits(b.scalar)), nil
+						}
+						return BoxBool(!l.equalsSlow(b)), nil
 					}
 				case ast.LtOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -124,6 +136,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.AddOp:
 				return func(fbr *fiber) (Value, exception) {
 					b := *fbr.get(r)
+					if l.pointer == f64Type && b.pointer == f64Type {
+						return BoxNumber(math.Float64frombits(l.scalar) + math.Float64frombits(b.scalar)), nil
+					}
 					if result, ok := l.add(b); ok {
 						return result, nil
 					}
@@ -156,6 +171,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.ModOp:
 				return func(fbr *fiber) (Value, exception) {
 					b := *fbr.get(r)
+					if l.pointer == f64Type && b.pointer == f64Type {
+						return modNumbers(math.Float64frombits(l.scalar), math.Float64frombits(b.scalar)), nil
+					}
 					if result, ok := l.mod(b); ok {
 						return result, nil
 					}
@@ -164,12 +182,18 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.EqOp:
 				return func(fbr *fiber) (Value, exception) {
 					b := *fbr.get(r)
-					return BoxBool(l.Equals(b)), nil
+					if l.pointer == f64Type && b.pointer == f64Type {
+						return BoxBool(math.Float64frombits(l.scalar) == math.Float64frombits(b.scalar)), nil
+					}
+					return BoxBool(l.equalsSlow(b)), nil
 				}
 			case ast.NotEqOp:
 				return func(fbr *fiber) (Value, exception) {
 					b := *fbr.get(r)
-					return BoxBool(!l.Equals(b)), nil
+					if l.pointer == f64Type && b.pointer == f64Type {
+						return BoxBool(math.Float64frombits(l.scalar) != math.Float64frombits(b.scalar)), nil
+					}
+					return BoxBool(!l.equalsSlow(b)), nil
 				}
 			case ast.LtOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -226,6 +250,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					return func(fbr *fiber) (Value, exception) {
 						s := fbr.stack[fbr.base:]
 						a, b := s[li], s[ri]
+						if a.pointer == f64Type && b.pointer == f64Type {
+							return BoxNumber(math.Float64frombits(a.scalar) + math.Float64frombits(b.scalar)), nil
+						}
 						if result, ok := a.add(b); ok {
 							return result, nil
 						}
@@ -262,6 +289,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					return func(fbr *fiber) (Value, exception) {
 						s := fbr.stack[fbr.base:]
 						a, b := s[li], s[ri]
+						if a.pointer == f64Type && b.pointer == f64Type {
+							return modNumbers(math.Float64frombits(a.scalar), math.Float64frombits(b.scalar)), nil
+						}
 						if result, ok := a.mod(b); ok {
 							return result, nil
 						}
@@ -271,13 +301,19 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					return func(fbr *fiber) (Value, exception) {
 						s := fbr.stack[fbr.base:]
 						a, b := s[li], s[ri]
-						return BoxBool(a.Equals(b)), nil
+						if a.pointer == f64Type && b.pointer == f64Type {
+							return BoxBool(math.Float64frombits(a.scalar) == math.Float64frombits(b.scalar)), nil
+						}
+						return BoxBool(a.equalsSlow(b)), nil
 					}
 				case ast.NotEqOp:
 					return func(fbr *fiber) (Value, exception) {
 						s := fbr.stack[fbr.base:]
 						a, b := s[li], s[ri]
-						return BoxBool(!a.Equals(b)), nil
+						if a.pointer == f64Type && b.pointer == f64Type {
+							return BoxBool(math.Float64frombits(a.scalar) != math.Float64frombits(b.scalar)), nil
+						}
+						return BoxBool(!a.equalsSlow(b)), nil
 					}
 				case ast.LtOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -333,6 +369,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.AddOp:
 				return func(fbr *fiber) (Value, exception) {
 					a, b := *fbr.get(l), *fbr.get(r)
+					if a.pointer == f64Type && b.pointer == f64Type {
+						return BoxNumber(math.Float64frombits(a.scalar) + math.Float64frombits(b.scalar)), nil
+					}
 					if result, ok := a.add(b); ok {
 						return result, nil
 					}
@@ -365,6 +404,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.ModOp:
 				return func(fbr *fiber) (Value, exception) {
 					a, b := *fbr.get(l), *fbr.get(r)
+					if a.pointer == f64Type && b.pointer == f64Type {
+						return modNumbers(math.Float64frombits(a.scalar), math.Float64frombits(b.scalar)), nil
+					}
 					if result, ok := a.mod(b); ok {
 						return result, nil
 					}
@@ -373,12 +415,18 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.EqOp:
 				return func(fbr *fiber) (Value, exception) {
 					a, b := *fbr.get(l), *fbr.get(r)
-					return BoxBool(a.Equals(b)), nil
+					if a.pointer == f64Type && b.pointer == f64Type {
+						return BoxBool(math.Float64frombits(a.scalar) == math.Float64frombits(b.scalar)), nil
+					}
+					return BoxBool(a.equalsSlow(b)), nil
 				}
 			case ast.NotEqOp:
 				return func(fbr *fiber) (Value, exception) {
 					a, b := *fbr.get(l), *fbr.get(r)
-					return BoxBool(!a.Equals(b)), nil
+					if a.pointer == f64Type && b.pointer == f64Type {
+						return BoxBool(math.Float64frombits(a.scalar) != math.Float64frombits(b.scalar)), nil
+					}
+					return BoxBool(!a.equalsSlow(b)), nil
 				}
 			case ast.LtOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -431,6 +479,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 				case ast.AddOp:
 					return func(fbr *fiber) (Value, exception) {
 						a := fbr.stack[fbr.base+li]
+						if a.pointer == f64Type && r.pointer == f64Type {
+							return BoxNumber(math.Float64frombits(a.scalar) + math.Float64frombits(r.scalar)), nil
+						}
 						if result, ok := a.add(r); ok {
 							return result, nil
 						}
@@ -463,6 +514,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 				case ast.ModOp:
 					return func(fbr *fiber) (Value, exception) {
 						a := fbr.stack[fbr.base+li]
+						if a.pointer == f64Type && r.pointer == f64Type {
+							return modNumbers(math.Float64frombits(a.scalar), math.Float64frombits(r.scalar)), nil
+						}
 						if result, ok := a.mod(r); ok {
 							return result, nil
 						}
@@ -471,12 +525,18 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 				case ast.EqOp:
 					return func(fbr *fiber) (Value, exception) {
 						a := fbr.stack[fbr.base+li]
-						return BoxBool(a.Equals(r)), nil
+						if a.pointer == f64Type && r.pointer == f64Type {
+							return BoxBool(math.Float64frombits(a.scalar) == math.Float64frombits(r.scalar)), nil
+						}
+						return BoxBool(a.equalsSlow(r)), nil
 					}
 				case ast.NotEqOp:
 					return func(fbr *fiber) (Value, exception) {
 						a := fbr.stack[fbr.base+li]
-						return BoxBool(!a.Equals(r)), nil
+						if a.pointer == f64Type && r.pointer == f64Type {
+							return BoxBool(math.Float64frombits(a.scalar) != math.Float64frombits(r.scalar)), nil
+						}
+						return BoxBool(!a.equalsSlow(r)), nil
 					}
 				case ast.LtOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -526,6 +586,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.AddOp:
 				return func(fbr *fiber) (Value, exception) {
 					a := *fbr.get(l)
+					if a.pointer == f64Type && r.pointer == f64Type {
+						return BoxNumber(math.Float64frombits(a.scalar) + math.Float64frombits(r.scalar)), nil
+					}
 					if result, ok := a.add(r); ok {
 						return result, nil
 					}
@@ -558,6 +621,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.ModOp:
 				return func(fbr *fiber) (Value, exception) {
 					a := *fbr.get(l)
+					if a.pointer == f64Type && r.pointer == f64Type {
+						return modNumbers(math.Float64frombits(a.scalar), math.Float64frombits(r.scalar)), nil
+					}
 					if result, ok := a.mod(r); ok {
 						return result, nil
 					}
@@ -566,12 +632,18 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			case ast.EqOp:
 				return func(fbr *fiber) (Value, exception) {
 					a := *fbr.get(l)
-					return BoxBool(a.Equals(r)), nil
+					if a.pointer == f64Type && r.pointer == f64Type {
+						return BoxBool(math.Float64frombits(a.scalar) == math.Float64frombits(r.scalar)), nil
+					}
+					return BoxBool(a.equalsSlow(r)), nil
 				}
 			case ast.NotEqOp:
 				return func(fbr *fiber) (Value, exception) {
 					a := *fbr.get(l)
-					return BoxBool(!a.Equals(r)), nil
+					if a.pointer == f64Type && r.pointer == f64Type {
+						return BoxBool(math.Float64frombits(a.scalar) != math.Float64frombits(r.scalar)), nil
+					}
+					return BoxBool(!a.equalsSlow(r)), nil
 				}
 			case ast.LtOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -635,6 +707,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							return a, exc
 						}
 						b := fbr.stack[fbr.base+ri]
+						if a.pointer == f64Type && b.pointer == f64Type {
+							return BoxNumber(math.Float64frombits(a.scalar) + math.Float64frombits(b.scalar)), nil
+						}
 						if result, ok := a.add(b); ok {
 							return result, nil
 						}
@@ -683,6 +758,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							return a, exc
 						}
 						b := fbr.stack[fbr.base+ri]
+						if a.pointer == f64Type && b.pointer == f64Type {
+							return modNumbers(math.Float64frombits(a.scalar), math.Float64frombits(b.scalar)), nil
+						}
 						if result, ok := a.mod(b); ok {
 							return result, nil
 						}
@@ -695,7 +773,10 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							return a, exc
 						}
 						b := fbr.stack[fbr.base+ri]
-						return BoxBool(a.Equals(b)), nil
+						if a.pointer == f64Type && b.pointer == f64Type {
+							return BoxBool(math.Float64frombits(a.scalar) == math.Float64frombits(b.scalar)), nil
+						}
+						return BoxBool(a.equalsSlow(b)), nil
 					}
 				case ast.NotEqOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -704,7 +785,10 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 							return a, exc
 						}
 						b := fbr.stack[fbr.base+ri]
-						return BoxBool(!a.Equals(b)), nil
+						if a.pointer == f64Type && b.pointer == f64Type {
+							return BoxBool(math.Float64frombits(a.scalar) != math.Float64frombits(b.scalar)), nil
+						}
+						return BoxBool(!a.equalsSlow(b)), nil
 					}
 				case ast.LtOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -764,6 +848,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						return a, exc
 					}
 					b := *fbr.get(r)
+					if a.pointer == f64Type && b.pointer == f64Type {
+						return BoxNumber(math.Float64frombits(a.scalar) + math.Float64frombits(b.scalar)), nil
+					}
 					if result, ok := a.add(b); ok {
 						return result, nil
 					}
@@ -812,6 +899,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						return a, exc
 					}
 					b := *fbr.get(r)
+					if a.pointer == f64Type && b.pointer == f64Type {
+						return modNumbers(math.Float64frombits(a.scalar), math.Float64frombits(b.scalar)), nil
+					}
 					if result, ok := a.mod(b); ok {
 						return result, nil
 					}
@@ -824,7 +914,10 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						return a, exc
 					}
 					b := *fbr.get(r)
-					return BoxBool(a.Equals(b)), nil
+					if a.pointer == f64Type && b.pointer == f64Type {
+						return BoxBool(math.Float64frombits(a.scalar) == math.Float64frombits(b.scalar)), nil
+					}
+					return BoxBool(a.equalsSlow(b)), nil
 				}
 			case ast.NotEqOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -833,7 +926,10 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						return a, exc
 					}
 					b := *fbr.get(r)
-					return BoxBool(!a.Equals(b)), nil
+					if a.pointer == f64Type && b.pointer == f64Type {
+						return BoxBool(math.Float64frombits(a.scalar) != math.Float64frombits(b.scalar)), nil
+					}
+					return BoxBool(!a.equalsSlow(b)), nil
 				}
 			case ast.LtOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -894,6 +990,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if exc != nil {
 						return a, exc
 					}
+					if a.pointer == f64Type && r.pointer == f64Type {
+						return BoxNumber(math.Float64frombits(a.scalar) + math.Float64frombits(r.scalar)), nil
+					}
 					if result, ok := a.add(r); ok {
 						return result, nil
 					}
@@ -938,6 +1037,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if exc != nil {
 						return a, exc
 					}
+					if a.pointer == f64Type && r.pointer == f64Type {
+						return modNumbers(math.Float64frombits(a.scalar), math.Float64frombits(r.scalar)), nil
+					}
 					if result, ok := a.mod(r); ok {
 						return result, nil
 					}
@@ -949,7 +1051,10 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if exc != nil {
 						return a, exc
 					}
-					return BoxBool(a.Equals(r)), nil
+					if a.pointer == f64Type && r.pointer == f64Type {
+						return BoxBool(math.Float64frombits(a.scalar) == math.Float64frombits(r.scalar)), nil
+					}
+					return BoxBool(a.equalsSlow(r)), nil
 				}
 			case ast.NotEqOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -957,7 +1062,10 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if exc != nil {
 						return a, exc
 					}
-					return BoxBool(!a.Equals(r)), nil
+					if a.pointer == f64Type && r.pointer == f64Type {
+						return BoxBool(math.Float64frombits(a.scalar) != math.Float64frombits(r.scalar)), nil
+					}
+					return BoxBool(!a.equalsSlow(r)), nil
 				}
 			case ast.LtOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -1017,6 +1125,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if exc != nil {
 							return b, exc
 						}
+						if a.pointer == f64Type && b.pointer == f64Type {
+							return BoxNumber(math.Float64frombits(a.scalar) + math.Float64frombits(b.scalar)), nil
+						}
 						if result, ok := a.add(b); ok {
 							return result, nil
 						}
@@ -1065,6 +1176,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if exc != nil {
 							return b, exc
 						}
+						if a.pointer == f64Type && b.pointer == f64Type {
+							return modNumbers(math.Float64frombits(a.scalar), math.Float64frombits(b.scalar)), nil
+						}
 						if result, ok := a.mod(b); ok {
 							return result, nil
 						}
@@ -1077,7 +1191,10 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if exc != nil {
 							return b, exc
 						}
-						return BoxBool(a.Equals(b)), nil
+						if a.pointer == f64Type && b.pointer == f64Type {
+							return BoxBool(math.Float64frombits(a.scalar) == math.Float64frombits(b.scalar)), nil
+						}
+						return BoxBool(a.equalsSlow(b)), nil
 					}
 				case ast.NotEqOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -1086,7 +1203,10 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if exc != nil {
 							return b, exc
 						}
-						return BoxBool(!a.Equals(b)), nil
+						if a.pointer == f64Type && b.pointer == f64Type {
+							return BoxBool(math.Float64frombits(a.scalar) != math.Float64frombits(b.scalar)), nil
+						}
+						return BoxBool(!a.equalsSlow(b)), nil
 					}
 				case ast.LtOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -1146,6 +1266,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if exc != nil {
 						return b, exc
 					}
+					if a.pointer == f64Type && b.pointer == f64Type {
+						return BoxNumber(math.Float64frombits(a.scalar) + math.Float64frombits(b.scalar)), nil
+					}
 					if result, ok := a.add(b); ok {
 						return result, nil
 					}
@@ -1194,6 +1317,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if exc != nil {
 						return b, exc
 					}
+					if a.pointer == f64Type && b.pointer == f64Type {
+						return modNumbers(math.Float64frombits(a.scalar), math.Float64frombits(b.scalar)), nil
+					}
 					if result, ok := a.mod(b); ok {
 						return result, nil
 					}
@@ -1206,7 +1332,10 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if exc != nil {
 						return b, exc
 					}
-					return BoxBool(a.Equals(b)), nil
+					if a.pointer == f64Type && b.pointer == f64Type {
+						return BoxBool(math.Float64frombits(a.scalar) == math.Float64frombits(b.scalar)), nil
+					}
+					return BoxBool(a.equalsSlow(b)), nil
 				}
 			case ast.NotEqOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -1215,7 +1344,10 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if exc != nil {
 						return b, exc
 					}
-					return BoxBool(!a.Equals(b)), nil
+					if a.pointer == f64Type && b.pointer == f64Type {
+						return BoxBool(math.Float64frombits(a.scalar) != math.Float64frombits(b.scalar)), nil
+					}
+					return BoxBool(!a.equalsSlow(b)), nil
 				}
 			case ast.LtOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -1276,6 +1408,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if exc != nil {
 						return b, exc
 					}
+					if l.pointer == f64Type && b.pointer == f64Type {
+						return BoxNumber(math.Float64frombits(l.scalar) + math.Float64frombits(b.scalar)), nil
+					}
 					if result, ok := l.add(b); ok {
 						return result, nil
 					}
@@ -1320,6 +1455,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if exc != nil {
 						return b, exc
 					}
+					if l.pointer == f64Type && b.pointer == f64Type {
+						return modNumbers(math.Float64frombits(l.scalar), math.Float64frombits(b.scalar)), nil
+					}
 					if result, ok := l.mod(b); ok {
 						return result, nil
 					}
@@ -1331,7 +1469,10 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if exc != nil {
 						return b, exc
 					}
-					return BoxBool(l.Equals(b)), nil
+					if l.pointer == f64Type && b.pointer == f64Type {
+						return BoxBool(math.Float64frombits(l.scalar) == math.Float64frombits(b.scalar)), nil
+					}
+					return BoxBool(l.equalsSlow(b)), nil
 				}
 			case ast.NotEqOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -1339,7 +1480,10 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if exc != nil {
 						return b, exc
 					}
-					return BoxBool(!l.Equals(b)), nil
+					if l.pointer == f64Type && b.pointer == f64Type {
+						return BoxBool(math.Float64frombits(l.scalar) != math.Float64frombits(b.scalar)), nil
+					}
+					return BoxBool(!l.equalsSlow(b)), nil
 				}
 			case ast.LtOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -1401,6 +1545,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if exc != nil {
 				return b, exc
 			}
+			if a.pointer == f64Type && b.pointer == f64Type {
+				return BoxNumber(math.Float64frombits(a.scalar) + math.Float64frombits(b.scalar)), nil
+			}
 			if result, ok := a.add(b); ok {
 				return result, nil
 			}
@@ -1461,6 +1608,9 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if exc != nil {
 				return b, exc
 			}
+			if a.pointer == f64Type && b.pointer == f64Type {
+				return modNumbers(math.Float64frombits(a.scalar), math.Float64frombits(b.scalar)), nil
+			}
 			if result, ok := a.mod(b); ok {
 				return result, nil
 			}
@@ -1476,7 +1626,10 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if exc != nil {
 				return b, exc
 			}
-			return BoxBool(a.Equals(b)), nil
+			if a.pointer == f64Type && b.pointer == f64Type {
+				return BoxBool(math.Float64frombits(a.scalar) == math.Float64frombits(b.scalar)), nil
+			}
+			return BoxBool(a.equalsSlow(b)), nil
 		}
 	case ast.NotEqOp:
 		return func(fbr *fiber) (Value, exception) {
@@ -1488,7 +1641,10 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if exc != nil {
 				return b, exc
 			}
-			return BoxBool(!a.Equals(b)), nil
+			if a.pointer == f64Type && b.pointer == f64Type {
+				return BoxBool(math.Float64frombits(a.scalar) != math.Float64frombits(b.scalar)), nil
+			}
+			return BoxBool(!a.equalsSlow(b)), nil
 		}
 	case ast.LtOp:
 		return func(fbr *fiber) (Value, exception) {
@@ -1609,6 +1765,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 					return func(fbr *fiber) (Value, exception) {
 						s := fbr.stack[fbr.base:]
 						cell, b := &s[li], s[ri]
+						if cell.pointer == f64Type && b.pointer == f64Type {
+							*cell = BoxNumber(math.Float64frombits(cell.scalar) + math.Float64frombits(b.scalar))
+							return Value{}, nil
+						}
 						if result, ok := cell.add(b); ok {
 							*cell = result
 							return Value{}, nil
@@ -1649,6 +1809,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 					return func(fbr *fiber) (Value, exception) {
 						s := fbr.stack[fbr.base:]
 						cell, b := &s[li], s[ri]
+						if cell.pointer == f64Type && b.pointer == f64Type {
+							*cell = modNumbers(math.Float64frombits(cell.scalar), math.Float64frombits(b.scalar))
+							return Value{}, nil
+						}
 						if result, ok := cell.mod(b); ok {
 							*cell = result
 							return Value{}, nil
@@ -1661,6 +1825,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 			case ast.AddOp:
 				return func(fbr *fiber) (Value, exception) {
 					cell, b := fbr.get(lhs), *fbr.get(rhs)
+					if cell.pointer == f64Type && b.pointer == f64Type {
+						*cell = BoxNumber(math.Float64frombits(cell.scalar) + math.Float64frombits(b.scalar))
+						return Value{}, nil
+					}
 					if result, ok := cell.add(b); ok {
 						*cell = result
 						return Value{}, nil
@@ -1697,6 +1865,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 			case ast.ModOp:
 				return func(fbr *fiber) (Value, exception) {
 					cell, b := fbr.get(lhs), *fbr.get(rhs)
+					if cell.pointer == f64Type && b.pointer == f64Type {
+						*cell = modNumbers(math.Float64frombits(cell.scalar), math.Float64frombits(b.scalar))
+						return Value{}, nil
+					}
 					if result, ok := cell.mod(b); ok {
 						*cell = result
 						return Value{}, nil
@@ -1711,6 +1883,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 				case ast.AddOp:
 					return func(fbr *fiber) (Value, exception) {
 						cell := &fbr.stack[fbr.base+li]
+						if cell.pointer == f64Type && rhs.pointer == f64Type {
+							*cell = BoxNumber(math.Float64frombits(cell.scalar) + math.Float64frombits(rhs.scalar))
+							return Value{}, nil
+						}
 						if result, ok := cell.add(rhs); ok {
 							*cell = result
 							return Value{}, nil
@@ -1747,6 +1923,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 				case ast.ModOp:
 					return func(fbr *fiber) (Value, exception) {
 						cell := &fbr.stack[fbr.base+li]
+						if cell.pointer == f64Type && rhs.pointer == f64Type {
+							*cell = modNumbers(math.Float64frombits(cell.scalar), math.Float64frombits(rhs.scalar))
+							return Value{}, nil
+						}
 						if result, ok := cell.mod(rhs); ok {
 							*cell = result
 							return Value{}, nil
@@ -1759,6 +1939,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 			case ast.AddOp:
 				return func(fbr *fiber) (Value, exception) {
 					cell := fbr.get(lhs)
+					if cell.pointer == f64Type && rhs.pointer == f64Type {
+						*cell = BoxNumber(math.Float64frombits(cell.scalar) + math.Float64frombits(rhs.scalar))
+						return Value{}, nil
+					}
 					if result, ok := cell.add(rhs); ok {
 						*cell = result
 						return Value{}, nil
@@ -1795,6 +1979,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 			case ast.ModOp:
 				return func(fbr *fiber) (Value, exception) {
 					cell := fbr.get(lhs)
+					if cell.pointer == f64Type && rhs.pointer == f64Type {
+						*cell = modNumbers(math.Float64frombits(cell.scalar), math.Float64frombits(rhs.scalar))
+						return Value{}, nil
+					}
 					if result, ok := cell.mod(rhs); ok {
 						*cell = result
 						return Value{}, nil
@@ -1814,6 +2002,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 						return b, exc
 					}
 					cell := &fbr.stack[fbr.base+li]
+					if cell.pointer == f64Type && b.pointer == f64Type {
+						*cell = BoxNumber(math.Float64frombits(cell.scalar) + math.Float64frombits(b.scalar))
+						return Value{}, nil
+					}
 					if result, ok := cell.add(b); ok {
 						*cell = result
 						return Value{}, nil
@@ -1866,6 +2058,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 						return b, exc
 					}
 					cell := &fbr.stack[fbr.base+li]
+					if cell.pointer == f64Type && b.pointer == f64Type {
+						*cell = modNumbers(math.Float64frombits(cell.scalar), math.Float64frombits(b.scalar))
+						return Value{}, nil
+					}
 					if result, ok := cell.mod(b); ok {
 						*cell = result
 						return Value{}, nil
@@ -1882,6 +2078,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 					return b, exc
 				}
 				cell := fbr.get(lhs)
+				if cell.pointer == f64Type && b.pointer == f64Type {
+					*cell = BoxNumber(math.Float64frombits(cell.scalar) + math.Float64frombits(b.scalar))
+					return Value{}, nil
+				}
 				if result, ok := cell.add(b); ok {
 					*cell = result
 					return Value{}, nil
@@ -1934,6 +2134,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 					return b, exc
 				}
 				cell := fbr.get(lhs)
+				if cell.pointer == f64Type && b.pointer == f64Type {
+					*cell = modNumbers(math.Float64frombits(cell.scalar), math.Float64frombits(b.scalar))
+					return Value{}, nil
+				}
 				if result, ok := cell.mod(b); ok {
 					*cell = result
 					return Value{}, nil
@@ -1955,6 +2159,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 				if exc != nil {
 					return b, exc
 				}
+				if cell.pointer == f64Type && b.pointer == f64Type {
+					*cell = BoxNumber(math.Float64frombits(cell.scalar) + math.Float64frombits(b.scalar))
+					return Value{}, nil
+				}
 				if result, ok := cell.add(b); ok {
 					*cell = result
 					return Value{}, nil
@@ -2002,6 +2210,10 @@ func (vm *Instance) emitMutableBinOp(node ast.MutableBinOp) instruction {
 				b, exc := rhs(fbr)
 				if exc != nil {
 					return b, exc
+				}
+				if cell.pointer == f64Type && b.pointer == f64Type {
+					*cell = modNumbers(math.Float64frombits(cell.scalar), math.Float64frombits(b.scalar))
+					return Value{}, nil
 				}
 				if result, ok := cell.mod(b); ok {
 					*cell = result
@@ -2034,6 +2246,10 @@ func (vm *Instance) compileLocalBinAssign(dest local, bin ast.BinOp) (instructio
 				return func(fbr *fiber) (Value, exception) {
 					s := fbr.stack[fbr.base:]
 					a, b := s[li], s[ri]
+					if a.pointer == f64Type && b.pointer == f64Type {
+						s[di] = BoxNumber(math.Float64frombits(a.scalar) + math.Float64frombits(b.scalar))
+						return Value{}, nil
+					}
 					if result, ok := a.add(b); ok {
 						s[di] = result
 						return Value{}, nil
@@ -2074,6 +2290,10 @@ func (vm *Instance) compileLocalBinAssign(dest local, bin ast.BinOp) (instructio
 				return func(fbr *fiber) (Value, exception) {
 					s := fbr.stack[fbr.base:]
 					a, b := s[li], s[ri]
+					if a.pointer == f64Type && b.pointer == f64Type {
+						s[di] = modNumbers(math.Float64frombits(a.scalar), math.Float64frombits(b.scalar))
+						return Value{}, nil
+					}
 					if result, ok := a.mod(b); ok {
 						s[di] = result
 						return Value{}, nil
@@ -2088,6 +2308,10 @@ func (vm *Instance) compileLocalBinAssign(dest local, bin ast.BinOp) (instructio
 				return func(fbr *fiber) (Value, exception) {
 					s := fbr.stack[fbr.base:]
 					a := s[li]
+					if a.pointer == f64Type && r.pointer == f64Type {
+						s[di] = BoxNumber(math.Float64frombits(a.scalar) + math.Float64frombits(r.scalar))
+						return Value{}, nil
+					}
 					if result, ok := a.add(r); ok {
 						s[di] = result
 						return Value{}, nil
@@ -2128,6 +2352,10 @@ func (vm *Instance) compileLocalBinAssign(dest local, bin ast.BinOp) (instructio
 				return func(fbr *fiber) (Value, exception) {
 					s := fbr.stack[fbr.base:]
 					a := s[li]
+					if a.pointer == f64Type && r.pointer == f64Type {
+						s[di] = modNumbers(math.Float64frombits(a.scalar), math.Float64frombits(r.scalar))
+						return Value{}, nil
+					}
 					if result, ok := a.mod(r); ok {
 						s[di] = result
 						return Value{}, nil
@@ -2145,6 +2373,10 @@ func (vm *Instance) compileLocalBinAssign(dest local, bin ast.BinOp) (instructio
 				return func(fbr *fiber) (Value, exception) {
 					s := fbr.stack[fbr.base:]
 					b := s[ri]
+					if l.pointer == f64Type && b.pointer == f64Type {
+						s[di] = BoxNumber(math.Float64frombits(l.scalar) + math.Float64frombits(b.scalar))
+						return Value{}, nil
+					}
 					if result, ok := l.add(b); ok {
 						s[di] = result
 						return Value{}, nil
@@ -2185,6 +2417,10 @@ func (vm *Instance) compileLocalBinAssign(dest local, bin ast.BinOp) (instructio
 				return func(fbr *fiber) (Value, exception) {
 					s := fbr.stack[fbr.base:]
 					b := s[ri]
+					if l.pointer == f64Type && b.pointer == f64Type {
+						s[di] = modNumbers(math.Float64frombits(l.scalar), math.Float64frombits(b.scalar))
+						return Value{}, nil
+					}
 					if result, ok := l.mod(b); ok {
 						s[di] = result
 						return Value{}, nil
@@ -2206,6 +2442,10 @@ func (vm *Instance) compileLocalBinAssign(dest local, bin ast.BinOp) (instructio
 				}
 				s := fbr.stack[fbr.base:]
 				b := s[ri]
+				if a.pointer == f64Type && b.pointer == f64Type {
+					s[di] = BoxNumber(math.Float64frombits(a.scalar) + math.Float64frombits(b.scalar))
+					return Value{}, nil
+				}
 				if result, ok := a.add(b); ok {
 					s[di] = result
 					return Value{}, nil
@@ -2266,6 +2506,10 @@ func (vm *Instance) compileLocalBinAssign(dest local, bin ast.BinOp) (instructio
 				}
 				s := fbr.stack[fbr.base:]
 				b := s[ri]
+				if a.pointer == f64Type && b.pointer == f64Type {
+					s[di] = modNumbers(math.Float64frombits(a.scalar), math.Float64frombits(b.scalar))
+					return Value{}, nil
+				}
 				if result, ok := a.mod(b); ok {
 					s[di] = result
 					return Value{}, nil
@@ -2282,6 +2526,10 @@ func (vm *Instance) compileLocalBinAssign(dest local, bin ast.BinOp) (instructio
 				a, exc := left(fbr)
 				if exc != nil {
 					return a, exc
+				}
+				if a.pointer == f64Type && r.pointer == f64Type {
+					fbr.stack[fbr.base+di] = BoxNumber(math.Float64frombits(a.scalar) + math.Float64frombits(r.scalar))
+					return Value{}, nil
 				}
 				if result, ok := a.add(r); ok {
 					fbr.stack[fbr.base+di] = result
@@ -2335,6 +2583,10 @@ func (vm *Instance) compileLocalBinAssign(dest local, bin ast.BinOp) (instructio
 				if exc != nil {
 					return a, exc
 				}
+				if a.pointer == f64Type && r.pointer == f64Type {
+					fbr.stack[fbr.base+di] = modNumbers(math.Float64frombits(a.scalar), math.Float64frombits(r.scalar))
+					return Value{}, nil
+				}
 				if result, ok := a.mod(r); ok {
 					fbr.stack[fbr.base+di] = result
 					return Value{}, nil
@@ -2361,12 +2613,18 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 					case ast.EqOp:
 						return func(fbr *fiber) (bool, exception) {
 							a := fbr.stack[fbr.base+li]
-							return a.Equals(b), nil
+							if a.pointer == f64Type {
+								return math.Float64frombits(a.scalar) == bn, nil
+							}
+							return a.equalsSlow(b), nil
 						}, true
 					case ast.NotEqOp:
 						return func(fbr *fiber) (bool, exception) {
 							a := fbr.stack[fbr.base+li]
-							return !a.Equals(b), nil
+							if a.pointer == f64Type {
+								return math.Float64frombits(a.scalar) != bn, nil
+							}
+							return !a.equalsSlow(b), nil
 						}, true
 					case ast.LtOp:
 						return func(fbr *fiber) (bool, exception) {
@@ -2422,12 +2680,18 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 				case ast.EqOp:
 					return func(fbr *fiber) (bool, exception) {
 						a := *fbr.get(l)
-						return a.Equals(b), nil
+						if a.pointer == f64Type {
+							return math.Float64frombits(a.scalar) == bn, nil
+						}
+						return a.equalsSlow(b), nil
 					}, true
 				case ast.NotEqOp:
 					return func(fbr *fiber) (bool, exception) {
 						a := *fbr.get(l)
-						return !a.Equals(b), nil
+						if a.pointer == f64Type {
+							return math.Float64frombits(a.scalar) != bn, nil
+						}
+						return !a.equalsSlow(b), nil
 					}, true
 				case ast.LtOp:
 					return func(fbr *fiber) (bool, exception) {
@@ -2497,13 +2761,19 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 					return func(fbr *fiber) (bool, exception) {
 						s := fbr.stack[fbr.base:]
 						a, b := s[li], s[ri]
-						return a.Equals(b), nil
+						if a.pointer == f64Type && b.pointer == f64Type {
+							return math.Float64frombits(a.scalar) == math.Float64frombits(b.scalar), nil
+						}
+						return a.equalsSlow(b), nil
 					}, true
 				case ast.NotEqOp:
 					return func(fbr *fiber) (bool, exception) {
 						s := fbr.stack[fbr.base:]
 						a, b := s[li], s[ri]
-						return !a.Equals(b), nil
+						if a.pointer == f64Type && b.pointer == f64Type {
+							return math.Float64frombits(a.scalar) != math.Float64frombits(b.scalar), nil
+						}
+						return !a.equalsSlow(b), nil
 					}, true
 				case ast.LtOp:
 					return func(fbr *fiber) (bool, exception) {
@@ -2563,12 +2833,18 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 			case ast.EqOp:
 				return func(fbr *fiber) (bool, exception) {
 					a, b := *fbr.get(l), *fbr.get(r)
-					return a.Equals(b), nil
+					if a.pointer == f64Type && b.pointer == f64Type {
+						return math.Float64frombits(a.scalar) == math.Float64frombits(b.scalar), nil
+					}
+					return a.equalsSlow(b), nil
 				}, true
 			case ast.NotEqOp:
 				return func(fbr *fiber) (bool, exception) {
 					a, b := *fbr.get(l), *fbr.get(r)
-					return !a.Equals(b), nil
+					if a.pointer == f64Type && b.pointer == f64Type {
+						return math.Float64frombits(a.scalar) != math.Float64frombits(b.scalar), nil
+					}
+					return !a.equalsSlow(b), nil
 				}, true
 			case ast.LtOp:
 				return func(fbr *fiber) (bool, exception) {
@@ -2638,7 +2914,10 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 					if exc != nil {
 						return false, exc
 					}
-					return a.Equals(b), nil
+					if a.pointer == f64Type {
+						return math.Float64frombits(a.scalar) == bn, nil
+					}
+					return a.equalsSlow(b), nil
 				}, true
 			case ast.NotEqOp:
 				left := vm.compile(bin.Lhs)
@@ -2647,7 +2926,10 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 					if exc != nil {
 						return false, exc
 					}
-					return !a.Equals(b), nil
+					if a.pointer == f64Type {
+						return math.Float64frombits(a.scalar) != bn, nil
+					}
+					return !a.equalsSlow(b), nil
 				}, true
 			case ast.LtOp:
 				left := vm.compile(bin.Lhs)
@@ -2745,7 +3027,10 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 					return false, exc
 				}
 				b := *fbr.get(r)
-				return a.Equals(b), nil
+				if a.pointer == f64Type && b.pointer == f64Type {
+					return math.Float64frombits(a.scalar) == math.Float64frombits(b.scalar), nil
+				}
+				return a.equalsSlow(b), nil
 			}, true
 		case ast.NotEqOp:
 			left := vm.compile(bin.Lhs)
@@ -2755,7 +3040,10 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 					return false, exc
 				}
 				b := *fbr.get(r)
-				return !a.Equals(b), nil
+				if a.pointer == f64Type && b.pointer == f64Type {
+					return math.Float64frombits(a.scalar) != math.Float64frombits(b.scalar), nil
+				}
+				return !a.equalsSlow(b), nil
 			}, true
 		case ast.LtOp:
 			left := vm.compile(bin.Lhs)

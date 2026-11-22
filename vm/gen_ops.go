@@ -5,10 +5,12 @@
 //
 // An operator applied to two locals, to a local and a constant, or to a
 // constant and a local is the hottest code the interpreter runs, and Go only
-// inlines Value.add and its siblings when they are called directly from the
+// inlines Value.sub and its siblings when they are called directly from the
 // closure. Calling them through a table costs 10% to 40% on numeric loops, so
 // the closures are spelled out, one per operator and shape; this program
-// spells them out so that nobody has to maintain 900 lines of copies by hand.
+// spells them out so that nobody has to maintain the copies by hand. Value.add,
+// Value.mod and Value.Equals are too big to inline at all, so for +, %, == and
+// != the closures compare numbers themselves before calling the method.
 //
 //	go generate ./vm
 package main
@@ -55,25 +57,57 @@ func (o op) comparison() bool {
 // instruction's result
 func (o op) result(a, b string) string {
 	switch o.Kind {
-	case "eq":
-		return fmt.Sprintf("return BoxBool(%s.Equals(%s)), nil", a, b)
-	case "noteq":
-		return fmt.Sprintf("return BoxBool(!%s.Equals(%s)), nil", a, b)
+	case "eq", "noteq":
+		cmp, not := "==", ""
+		if o.Kind == "noteq" {
+			cmp, not = "!=", "!"
+		}
+		return fmt.Sprintf(`if %[1]s.pointer == f64Type && %[2]s.pointer == f64Type {
+		return BoxBool(math.Float64frombits(%[1]s.scalar) %[3]s math.Float64frombits(%[2]s.scalar)), nil
+	}
+	return BoxBool(%[4]s%[1]s.equalsSlow(%[2]s)), nil`, a, b, cmp, not)
 	case "or":
 		return fmt.Sprintf("return BoxBool(%s.IsTruthy() || %s.IsTruthy()), nil", a, b)
 	case "and":
 		return fmt.Sprintf("return BoxBool(%s.IsTruthy() && %s.IsTruthy()), nil", a, b)
 	}
-	return fmt.Sprintf(`if result, ok := %[1]s.%[3]s(%[2]s); ok {
+	return o.numeric(a, b, func(v string) string { return "return " + v + ", nil" }) + fmt.Sprintf(`if result, ok := %[1]s.%[3]s(%[2]s); ok {
 		return result, nil
 	}
 	return Value{}, operatorError(site, %[4]q, %[1]s, %[2]s)`, a, b, o.Method, o.Symbol)
 }
 
+// numeric is the number fast path of + and %, whose methods are too big for Go
+// to inline: when a and b are both numbers it does done with the result. The
+// other arithmetic methods inline, so they need none.
+func (o op) numeric(a, b string, done func(v string) string) string {
+	fa, fb := "math.Float64frombits("+a+".scalar)", "math.Float64frombits("+b+".scalar)"
+	var v string
+	switch o.Method {
+	case "add":
+		v = "BoxNumber(" + fa + " + " + fb + ")"
+	case "mod":
+		v = "modNumbers(" + fa + ", " + fb + ")"
+	default:
+		return ""
+	}
+	return fmt.Sprintf("if %s.pointer == f64Type && %s.pointer == f64Type {\n\t\t%s\n\t}\n\t", a, b, done(v))
+}
+
+// store is the body that applies an arithmetic operator to a and b and writes
+// the result to dst
+func (o op) store(a, b, dst string) string {
+	return o.numeric(a, b, func(v string) string { return dst + " = " + v + "\n\t\treturn Value{}, nil" }) + fmt.Sprintf(`if result, ok := %[1]s.%[3]s(%[2]s); ok {
+		%[5]s = result
+		return Value{}, nil
+	}
+	return Value{}, operatorError(site, %[4]q, %[1]s, %[2]s)`, a, b, o.Method, o.Symbol, dst)
+}
+
 // update is the body that applies the operator to *cell and the operand named
 // b in place
 func (o op) update(b string) string {
-	return fmt.Sprintf(`if result, ok := cell.%[2]s(%[1]s); ok {
+	return o.numeric("cell", b, func(v string) string { return "*cell = " + v + "\n\t\treturn Value{}, nil" }) + fmt.Sprintf(`if result, ok := cell.%[2]s(%[1]s); ok {
 		*cell = result
 		return Value{}, nil
 	}
@@ -85,9 +119,9 @@ func (o op) update(b string) string {
 func (o op) condition(numbers string, bn string) string {
 	switch o.Kind {
 	case "eq":
-		return "return a.Equals(b), nil"
+		return fmt.Sprintf("if %s {\n\t\treturn math.Float64frombits(a.scalar) == %s, nil\n\t}\n\treturn a.equalsSlow(b), nil", numbers, bn)
 	case "noteq":
-		return "return !a.Equals(b), nil"
+		return fmt.Sprintf("if %s {\n\t\treturn math.Float64frombits(a.scalar) != %s, nil\n\t}\n\treturn !a.equalsSlow(b), nil", numbers, bn)
 	}
 	return fmt.Sprintf(`if %s {
 		return math.Float64frombits(a.scalar) %s %s, nil
@@ -114,8 +148,8 @@ import (
 )
 
 // emitBinOp compiles a binary operator. Operands that are locals or constants
-// are read without evaluating an instruction, and the operator's method is
-// called directly from the closure so that it inlines.
+// are read without evaluating an instruction, and numbers are handled in the
+// closure itself or by a method small enough to inline.
 func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 	site := vm.at(node)
 	if val, ok := vm.evaluate(node).(Value); ok {
@@ -437,13 +471,9 @@ func (vm *Instance) compileLocalBinAssign(dest local, bin ast.BinOp) (instructio
 	return func(fbr *fiber) (Value, exception) {
 		s := fbr.stack[fbr.base:]
 		a, b := s[li], s[ri]
-		if result, ok := a.%s(b); ok {
-			s[di] = result
-			return Value{}, nil
-		}
-		return Value{}, operatorError(site, %q, a, b)
+		%s
 	}, true
-`, o.Name, o.Method, o.Symbol)
+`, o.Name, o.store("a", "b", "s[di]"))
 	}
 	p(`			}
 		}
@@ -458,13 +488,9 @@ func (vm *Instance) compileLocalBinAssign(dest local, bin ast.BinOp) (instructio
 	return func(fbr *fiber) (Value, exception) {
 		s := fbr.stack[fbr.base:]
 		a := s[li]
-		if result, ok := a.%s(r); ok {
-			s[di] = result
-			return Value{}, nil
-		}
-		return Value{}, operatorError(site, %q, a, r)
+		%s
 	}, true
-`, o.Name, o.Method, o.Symbol)
+`, o.Name, o.store("a", "r", "s[di]"))
 	}
 	p(`			}
 		}
@@ -482,13 +508,9 @@ func (vm *Instance) compileLocalBinAssign(dest local, bin ast.BinOp) (instructio
 	return func(fbr *fiber) (Value, exception) {
 		s := fbr.stack[fbr.base:]
 		b := s[ri]
-		if result, ok := l.%s(b); ok {
-			s[di] = result
-			return Value{}, nil
-		}
-		return Value{}, operatorError(site, %q, l, b)
+		%s
 	}, true
-`, o.Name, o.Method, o.Symbol)
+`, o.Name, o.store("l", "b", "s[di]"))
 	}
 	p(`			}
 		}
@@ -510,13 +532,9 @@ func (vm *Instance) compileLocalBinAssign(dest local, bin ast.BinOp) (instructio
 		}
 		s := fbr.stack[fbr.base:]
 		b := s[ri]
-		if result, ok := a.%s(b); ok {
-			s[di] = result
-			return Value{}, nil
-		}
-		return Value{}, operatorError(site, %q, a, b)
+		%s
 	}, true
-`, o.Name, o.Method, o.Symbol)
+`, o.Name, o.store("a", "b", "s[di]"))
 	}
 	p(`		}
 	}
@@ -534,13 +552,9 @@ func (vm *Instance) compileLocalBinAssign(dest local, bin ast.BinOp) (instructio
 		if exc != nil {
 			return a, exc
 		}
-		if result, ok := a.%s(r); ok {
-			fbr.stack[fbr.base+di] = result
-			return Value{}, nil
-		}
-		return Value{}, operatorError(site, %q, a, r)
+		%s
 	}, true
-`, o.Name, o.Method, o.Symbol)
+`, o.Name, o.store("a", "r", "fbr.stack[fbr.base+di]"))
 	}
 	p(`		}
 	}

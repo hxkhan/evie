@@ -3,7 +3,7 @@ package lexer
 import (
 	"unicode/utf8"
 
-	"github.com/hxkhan/evie/token"
+	"github.com/hxkhan/evie/internal/token"
 )
 
 const iEOS rune = -1 // out-of-band End of Source sentinel

@@ -2,9 +2,8 @@ package ast
 
 import (
 	"fmt"
+	"github.com/hxkhan/evie/diag"
 	"slices"
-
-	"github.com/hxkhan/evie/token"
 )
 
 type Operator int
@@ -63,8 +62,8 @@ const (
 )
 
 type BinOp struct {
-	token.Pos // [required]
-	Operator  // [required]
+	diag.Pos // [required]
+	Operator // [required]
 
 	Lhs Node // [required]
 	Rhs Node // [required]
@@ -110,8 +109,8 @@ func (bop BinOp) IsLike(ops ...Operator) bool {
 }
 
 type MutableBinOp struct {
-	token.Pos // [required]
-	Operator  // [required]
+	diag.Pos // [required]
+	Operator // [required]
 
 	Lhs Node // [required] can be e.g. Ident
 	Rhs Node // [required] can be e.g. Input[float64]
@@ -135,18 +134,18 @@ func (node MutableBinOp) String() string {
 }
 
 type Plus struct {
-	token.Pos      // [required]
-	Value     Node // [required]
+	diag.Pos      // [required]
+	Value    Node // [required]
 }
 
 type Neg struct {
-	token.Pos      // [required]
-	Value     Node // [required]
+	diag.Pos      // [required]
+	Value    Node // [required]
 }
 
 type Not struct {
-	token.Pos      // [required]
-	Value     Node // [required]
+	diag.Pos      // [required]
+	Value    Node // [required]
 }
 
 func (node Not) String() string {

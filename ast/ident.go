@@ -2,24 +2,23 @@ package ast
 
 import (
 	"fmt"
-
-	"github.com/hxkhan/evie/token"
+	"github.com/hxkhan/evie/diag"
 )
 
 type Decl struct {
-	token.Pos
+	diag.Pos
 	Name     string
 	Value    Node
 	IsStatic bool
 }
 
 type Ident struct {
-	token.Pos
+	diag.Pos
 	Name string
 }
 
 type Assign struct {
-	token.Pos
+	diag.Pos
 	Lhs   Node
 	Value Node
 }

@@ -2,13 +2,12 @@ package ast
 
 import (
 	"fmt"
+	"github.com/hxkhan/evie/diag"
 	"strings"
-
-	"github.com/hxkhan/evie/token"
 )
 
 type Fn struct {
-	token.Pos
+	diag.Pos
 	Name       string
 	Args       []string
 	IsVariadic bool
@@ -17,43 +16,43 @@ type Fn struct {
 }
 
 type Go struct {
-	token.Pos
+	diag.Pos
 	Fn Node
 }
 
 type Call struct {
-	token.Pos
+	diag.Pos
 	Fn   Node
 	Args []Node
 }
 
 type Return struct {
-	token.Pos
+	diag.Pos
 	Value Node
 }
 
 type Await struct {
-	token.Pos
+	diag.Pos
 	Task Node
 }
 
 type AwaitAll struct {
-	token.Pos
+	diag.Pos
 	Tasks []Node
 }
 
 type AwaitAny struct {
-	token.Pos
+	diag.Pos
 	Tasks []Node
 }
 
 type AwaitRace struct {
-	token.Pos
+	diag.Pos
 	Tasks []Node
 }
 
 type AwaitTimeout struct {
-	token.Pos
+	diag.Pos
 	Task    Node
 	Timeout Node
 }

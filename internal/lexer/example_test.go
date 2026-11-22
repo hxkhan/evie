@@ -3,7 +3,7 @@ package lexer_test
 import (
 	"fmt"
 
-	"github.com/hxkhan/evie/lexer"
+	"github.com/hxkhan/evie/internal/lexer"
 )
 
 func ExampleNew() {

@@ -15,7 +15,6 @@ import (
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/parser"
-	"github.com/hxkhan/evie/token"
 )
 
 // Bundle is a parsed, import-resolved Evie program ready to be loaded or run
@@ -37,7 +36,7 @@ type parsedUnit struct {
 
 type importSite struct {
 	src        *diag.Source
-	pos        token.Pos
+	pos        diag.Pos
 	importPath string
 }
 

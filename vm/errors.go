@@ -7,7 +7,6 @@ import (
 
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/diag"
-	"github.com/hxkhan/evie/token"
 	"github.com/hxkhan/evie/internal/fields"
 )
 
@@ -49,7 +48,7 @@ func (e *Error) isSignal() bool {
 // the path where nothing fails.
 type site struct {
 	src *diag.Source
-	pos token.Pos
+	pos diag.Pos
 	fn  string
 }
 
@@ -240,7 +239,7 @@ func (vm *Instance) compileErrorAt(node ast.Node, format string, a ...any) *Comp
 }
 
 // compileErrorAtPos reports a compile error at a position in the source being compiled
-func (vm *Instance) compileErrorAtPos(pos token.Pos, format string, a ...any) *CompileError {
+func (vm *Instance) compileErrorAtPos(pos diag.Pos, format string, a ...any) *CompileError {
 	e := compileErrorf(format, a...)
 	e.Source, e.Pos = vm.cp.src, pos
 	return e

@@ -12,7 +12,6 @@ import (
 	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/internal/ds"
 	"github.com/hxkhan/evie/internal/fields"
-	"github.com/hxkhan/evie/token"
 )
 
 type instruction func(fbr *fiber) (Value, exception)
@@ -659,7 +658,7 @@ func (vm *Instance) bindImport(this *Package, u unit, spec ast.ImportSpec, bound
 // importFailed stops compiling because an import could not be loaded. An error
 // from inside the imported package keeps its own report, which gains a note
 // pointing at the import; any other error is reported at the import.
-func (vm *Instance) importFailed(u unit, path string, pos token.Pos, err error) {
+func (vm *Instance) importFailed(u unit, path string, pos diag.Pos, err error) {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		panic(err)
 	}

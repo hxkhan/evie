@@ -2,18 +2,17 @@ package ast
 
 import (
 	"fmt"
-
-	"github.com/hxkhan/evie/token"
+	"github.com/hxkhan/evie/diag"
 )
 
 type IsInstanceOf struct {
-	token.Pos
+	diag.Pos
 	Lhs Node
 	Rhs Node
 }
 
 type ClassDefinition struct {
-	token.Pos
+	diag.Pos
 	Name   string
 	Parent string
 	Args   []string
@@ -25,7 +24,7 @@ func (node ClassDefinition) String() string {
 }
 
 type FieldAccess struct {
-	token.Pos
+	diag.Pos
 	Lhs Node
 	Rhs string
 }

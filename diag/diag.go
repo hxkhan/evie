@@ -17,8 +17,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-
-	"github.com/hxkhan/evie/token"
 )
 
 // Source is a script's text and the name it is reported under
@@ -52,7 +50,7 @@ func (s *Source) Line(n int) ([]byte, bool) {
 // Note is a secondary place worth showing, such as where a function was defined
 type Note struct {
 	Source *Source
-	Pos    token.Pos
+	Pos    Pos
 	Text   string
 }
 
@@ -60,15 +58,15 @@ type Note struct {
 type Frame struct {
 	Function string
 	Source   *Source
-	Pos      token.Pos
+	Pos      Pos
 }
 
 // Report is everything known about one error
 type Report struct {
 	Message string
 	Source  *Source
-	Pos     token.Pos // the primary span; zero when unknown
-	Label   string    // shown under the primary span
+	Pos     Pos    // the primary span; zero when unknown
+	Label   string // shown under the primary span
 	Notes   []Note
 	Hint    string
 	Trace   []Frame // innermost first
@@ -132,7 +130,7 @@ func (r *Report) Render(p Palette) string {
 		fmt.Fprintf(&b, "%s%s %s\n", pad, gutter("-->"), loc)
 	}
 
-	excerpt := func(src *Source, pos token.Pos, label string, caret string) bool {
+	excerpt := func(src *Source, pos Pos, label string, caret string) bool {
 		line, ok := src.Line(pos.Line)
 		if !ok {
 			return false

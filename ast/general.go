@@ -2,26 +2,25 @@ package ast
 
 import (
 	"fmt"
+	"github.com/hxkhan/evie/diag"
 	"strconv"
 	"strings"
-
-	"github.com/hxkhan/evie/token"
 )
 
 // Node is any piece of syntax; Where reports its span in the source
 type Node interface {
-	Where() token.Pos
+	Where() diag.Pos
 }
 
 // ImportSpec is one entry in `imports("path")` or `imports("path" as alias)`.
 type ImportSpec struct {
-	token.Pos
+	diag.Pos
 	Path  string
 	Alias string // empty when not explicitly aliased
 }
 
 type Package struct {
-	token.Pos
+	diag.Pos
 	Name    string
 	Imports []ImportSpec
 	Code    []Node
@@ -32,7 +31,7 @@ type Literal interface {
 }
 
 type Input[T Literal] struct {
-	token.Pos
+	diag.Pos
 	Value T
 }
 
@@ -48,7 +47,7 @@ func (node Input[T]) String() string {
 }
 
 type StringTemplate struct {
-	token.Pos
+	diag.Pos
 	Format string // e.g. 'Hello %s, how are you!'
 	Args   []Node
 }
@@ -63,12 +62,12 @@ func (node StringTemplate) String() string {
 }
 
 type Block struct {
-	token.Pos
+	diag.Pos
 	Code []Node
 }
 
 type Echo struct {
-	token.Pos
+	diag.Pos
 	Value Node
 }
 

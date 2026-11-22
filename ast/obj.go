@@ -2,9 +2,8 @@ package ast
 
 import (
 	"fmt"
+	"github.com/hxkhan/evie/diag"
 	"strings"
-
-	"github.com/hxkhan/evie/token"
 )
 
 type ObjectField struct {
@@ -17,7 +16,7 @@ func (node ObjectField) String() string {
 }
 
 type Object struct {
-	token.Pos
+	diag.Pos
 	Fields []ObjectField
 }
 
@@ -38,7 +37,7 @@ func (node Object) String() string {
 }
 
 type Exists struct {
-	token.Pos
+	diag.Pos
 	Value Node
 }
 
@@ -47,7 +46,7 @@ func (node Exists) String() string {
 }
 
 type Subscript struct {
-	token.Pos
+	diag.Pos
 	Lhs Node
 	Key Node
 }
@@ -57,7 +56,7 @@ func (node Subscript) String() string {
 }
 
 type Slice struct {
-	token.Pos
+	diag.Pos
 	Lhs   Node
 	Start Node
 	End   Node
@@ -75,7 +74,7 @@ func (node Slice) String() string {
 }
 
 type ArrayLiteral struct {
-	token.Pos
+	diag.Pos
 	Elements []Node
 }
 

@@ -10,8 +10,8 @@ import (
 
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/diag"
-	"github.com/hxkhan/evie/lexer"
-	"github.com/hxkhan/evie/token"
+	"github.com/hxkhan/evie/internal/lexer"
+	"github.com/hxkhan/evie/internal/token"
 )
 
 const maxParseDepth = 256
@@ -142,12 +142,12 @@ func ParseSource(src *diag.Source) (node ast.Node, err error) {
 }
 
 // report builds a syntax error at a position
-func (ps *parser) report(pos token.Pos, msg string, notes ...diag.Note) *Error {
+func (ps *parser) report(pos diag.Pos, msg string, notes ...diag.Note) *Error {
 	return &Error{Report: diag.Report{Message: msg, Source: ps.src, Pos: pos, Notes: notes}}
 }
 
 // fail stops parsing with an error at a position
-func (ps *parser) fail(pos token.Pos, msg string, notes ...diag.Note) {
+func (ps *parser) fail(pos diag.Pos, msg string, notes ...diag.Note) {
 	panic(ps.report(pos, msg, notes...))
 }
 

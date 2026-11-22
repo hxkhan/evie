@@ -1,10 +1,11 @@
 package lexer
 
 import (
+	"github.com/hxkhan/evie/diag"
 	"unicode"
 	"unsafe"
 
-	"github.com/hxkhan/evie/token"
+	"github.com/hxkhan/evie/internal/token"
 )
 
 // NextToken returns next token and advances the lexer
@@ -44,7 +45,7 @@ func (lex *Lexer) newline() {
 
 // at builds a token spanning the bytes from start to the cursor on the current line
 func (lex *Lexer) at(typ token.Type, lit string, start int) token.Token {
-	return token.Token{Type: typ, Literal: lit, Pos: token.Pos{Line: lex.line, Column: start - lex.lineStart + 1, Length: lex.cursor - start}}
+	return token.Token{Type: typ, Literal: lit, Pos: diag.Pos{Line: lex.line, Column: start - lex.lineStart + 1, Length: lex.cursor - start}}
 }
 
 // atSpan builds a token whose span started at (line, col), clamping length to the opening line if multiline
@@ -53,11 +54,11 @@ func (lex *Lexer) atSpan(typ token.Type, lit string, start, startLine, startCol,
 	if firstNL >= 0 {
 		length = max(firstNL-start, 1)
 	}
-	return token.Token{Type: typ, Literal: lit, Pos: token.Pos{Line: startLine, Column: startCol, Length: length}}
+	return token.Token{Type: typ, Literal: lit, Pos: diag.Pos{Line: startLine, Column: startCol, Length: length}}
 }
 
 func (lex *Lexer) eos() token.Token {
-	return token.Token{Type: token.EOS, Literal: "end of source", Pos: token.Pos{Line: lex.line, Column: lex.cursor - lex.lineStart + 1, Length: 1}}
+	return token.Token{Type: token.EOS, Literal: "end of source", Pos: diag.Pos{Line: lex.line, Column: lex.cursor - lex.lineStart + 1, Length: 1}}
 }
 
 // composeInto lexes the next token (or all tokens of a template literal) into dst
@@ -131,7 +132,7 @@ START:
 					lex.newline()
 				}
 			}
-			*dst = append(*dst, token.Token{Type: token.Invalid, Literal: "/*", Pos: token.Pos{Line: startLine, Column: startCol, Length: 2}})
+			*dst = append(*dst, token.Token{Type: token.Invalid, Literal: "/*", Pos: diag.Pos{Line: startLine, Column: startCol, Length: 2}})
 			return
 		}
 		*dst = append(*dst, lex.simple(lex.option('=', "/=", "/"), start))
@@ -315,7 +316,7 @@ func (lex *Lexer) lexTemplateInto(tickStart, tickLine, tickCol int, dst *[]token
 	defer func() { lex.depth-- }()
 	if lex.depth > maxTemplateDepth {
 		// give up on the rest of the source; the parser fails on the nesting before it gets here
-		*dst = append(*dst, token.Token{Type: token.Invalid, Literal: "`", Pos: token.Pos{Line: tickLine, Column: tickCol, Length: 1}})
+		*dst = append(*dst, token.Token{Type: token.Invalid, Literal: "`", Pos: diag.Pos{Line: tickLine, Column: tickCol, Length: 1}})
 		lex.cursor = len(lex.src)
 		return
 	}
@@ -326,7 +327,7 @@ func (lex *Lexer) lexTemplateInto(tickStart, tickLine, tickCol int, dst *[]token
 	partFirstNL := -1
 
 	// add opening backtick
-	*dst = append(*dst, token.Token{Type: token.Simple, Literal: "`", Pos: token.Pos{Line: tickLine, Column: tickCol, Length: 1}})
+	*dst = append(*dst, token.Token{Type: token.Simple, Literal: "`", Pos: diag.Pos{Line: tickLine, Column: tickCol, Length: 1}})
 
 	part := func() {
 		// extract the string part lexed so far, if any

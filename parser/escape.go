@@ -1,17 +1,16 @@
 package parser
 
 import (
+	"github.com/hxkhan/evie/diag"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/hxkhan/evie/token"
 )
 
 // unescape decodes the escape sequences of a string literal's text. extra
 // lists the characters that may also be escaped in this kind of literal, such
 // as the backtick and braces in a template. at is the position of the text's
 // first character, used to point at a bad escape.
-func (ps *parser) unescape(text string, at token.Pos, extra string) string {
+func (ps *parser) unescape(text string, at diag.Pos, extra string) string {
 	if !strings.ContainsRune(text, '\\') {
 		return text
 	}
@@ -52,7 +51,7 @@ func (ps *parser) unescape(text string, at token.Pos, extra string) string {
 }
 
 // badEscape stops parsing at the escape that starts at byte offset i of text
-func (ps *parser) badEscape(text string, i, length int, at token.Pos, extra, msg string) {
+func (ps *parser) badEscape(text string, i, length int, at diag.Pos, extra, msg string) {
 	pos := at
 	before := text[:i]
 	if nl := strings.LastIndexByte(before, '\n'); nl >= 0 {

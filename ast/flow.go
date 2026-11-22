@@ -2,25 +2,24 @@ package ast
 
 import (
 	"fmt"
-
-	"github.com/hxkhan/evie/token"
+	"github.com/hxkhan/evie/diag"
 )
 
 type Conditional struct {
-	token.Pos
+	diag.Pos
 	Condition Node // [required]
 	Action    Node // [required]
 	Otherwise Node // [optional]
 }
 
 type While struct {
-	token.Pos
+	diag.Pos
 	Condition Node // [required]
 	Action    Node // [required]
 }
 
 type For struct {
-	token.Pos
+	diag.Pos
 	IndexVar   string // optional, "" if none
 	ItemVar    string // [required]
 	Collection Node   // [required]
@@ -28,31 +27,31 @@ type For struct {
 }
 
 type Catch struct {
-	token.Pos
+	diag.Pos
 	Action Node // [required]
 }
 
 type Continue struct {
-	token.Pos
+	diag.Pos
 }
 
 type Break struct {
-	token.Pos
+	diag.Pos
 }
 
 type Throw struct {
-	token.Pos
+	diag.Pos
 	Value Node
 }
 
 type SwitchCase struct {
-	token.Pos
+	diag.Pos
 	Values []Node // multiple case expressions e.g. case 1, 2, 3:
 	Action Node   // body of the case (ast.Block)
 }
 
 type Switch struct {
-	token.Pos
+	diag.Pos
 	Value   Node         // [optional] value to match against; nil for tagless switch
 	Cases   []SwitchCase // list of case branches
 	Default Node         // [optional] default action (ast.Block), nil if none

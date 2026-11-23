@@ -1,0 +1,37 @@
+package main imports("io", "math")
+
+class Shape(name) {
+    fn area() => 0
+
+    fn describe() {
+        area := math.round(this.area() * 100) / 100
+        return `{this.name} covers {area} square units`
+    }
+}
+
+class Circle(name, radius) : Shape {
+    fn area() => math.pi * this.radius * this.radius
+}
+
+class Rect(name, width, height) : Shape {
+    fn area() => this.width * this.height
+}
+
+// a ring is a circle with a hole: its area is the circle's, less the hole's
+class Ring(name, radius, hole) : Circle {
+    fn area() => super.area() - math.pi * this.hole * this.hole
+}
+
+fn main() {
+    shapes := [Circle("wheel", 2), Rect("door", 1, 2), Ring("washer", 2, 1)]
+
+    var total := 0
+    for shape in shapes {
+        io.println(shape.describe())
+        total += shape.area()
+    }
+    io.println("together:", math.round(total))
+
+    // a ring is a Circle too
+    io.println(shapes.filter(fn(s) => s is Circle).map(fn(s) => s.name))
+}

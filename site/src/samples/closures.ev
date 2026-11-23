@@ -1,0 +1,40 @@
+package main imports("io")
+
+// counter returns a function that remembers its own count
+fn counter() {
+    var n := 0
+    return fn() {
+        n += 1
+        return n
+    }
+}
+
+// memoize wraps f so that each answer is worked out only once
+fn memoize(f) {
+    cache := {}
+    return fn(n) {
+        key := string(n)
+        if !cache[key]? {
+            cache[key] = f(n)
+        }
+        return cache[key]
+    }
+}
+
+fn main() {
+    a := counter()
+    b := counter()
+    a()
+    a()
+    io.println("a counted", a(), "and b counted", b())
+
+    // without the cache, fib(70) would take longer than you would wait
+    var fib := nil
+    fib = memoize(fn(n) {
+        if n < 2 {
+            return n
+        }
+        return fib(n - 1) + fib(n - 2)
+    })
+    io.println("fib(70) =", fib(70))
+}

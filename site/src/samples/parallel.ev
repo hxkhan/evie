@@ -1,0 +1,31 @@
+package main imports("io", "time", "math")
+
+// fetch stands in for a request to a slow service
+fn fetch(service, ms) {
+    time.wait(ms)
+    if service == "ads" {
+        throw error("ads is down")
+    }
+    return `{service} answered after {ms} ms`
+}
+
+fn main() {
+    // three requests at once take as long as the slowest, not the sum
+    start := time.clock()
+    results := await.all(go fetch("users", 300), go fetch("orders", 200), go fetch("stock", 100))
+    for r in results {
+        io.println(r)
+    }
+    io.println(`all three in about {math.round(time.clock() - start)} ms`)
+
+    // the first of two mirrors to answer wins
+    io.println(await.race(go fetch("mirror A", 150), go fetch("mirror B", 50)))
+
+    // a failed task's error is caught like any other
+    failed := catch(await go fetch("ads", 50))
+    io.println("caught:", failed.message)
+
+    // give up on a request that takes too long
+    slow := catch(await.timeout(go fetch("search", 1000), 250))
+    io.println("caught:", slow.message)
+}

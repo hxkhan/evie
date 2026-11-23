@@ -85,6 +85,8 @@ async function shot(name) {
 let r = await runExample("#example=hero", "Hello, Linus!");
 check("loads Evie and runs the hero example", r.ready && r.ok, JSON.stringify(r));
 await shot("play-run");
+r = await runExample("#example=temperatures", "98.6F is 37C");
+check("an example that reads input comes with it", r.ready && r.ok, JSON.stringify(r));
 r = await runExample("#code=" + Buffer.from('package main imports("io")\nfn main() {\n    io.println("about to fail")\n    return lenght([1, 2])\n}\nfn length(a) => a.len()').toString("base64url"), "error");
 await shot("play-error");
 

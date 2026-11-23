@@ -1,0 +1,15 @@
+package main imports("io", "time", "math")
+
+// The classic benchmark: the naive recursive Fibonacci, about 2.7 million calls
+fn fib(n) {
+    if n < 2 {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+fn main() {
+    start := time.clock()
+    io.println("fib(30) =", fib(30))
+    io.println(`took {math.round(time.clock() - start)} ms`)
+}

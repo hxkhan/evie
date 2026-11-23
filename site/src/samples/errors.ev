@@ -1,0 +1,30 @@
+package main imports("io")
+
+const orders := `apples, 3, 0.50
+pears, two, 0.75
+plums, 4
+figs, 10, 0.20`
+
+// parse turns a line into an order, or throws an error saying what is wrong
+fn parse(line) {
+    parts := line.split(",").map(fn(p) => p.trim())
+    if parts.len() != 3 {
+        throw error(`expected item, quantity and price, got {parts.len()} fields`)
+    }
+    // number throws too, for text that is not a number
+    return {item: parts[0], qty: number(parts[1]), price: number(parts[2])}
+}
+
+fn main() {
+    var total := 0
+    for i, line in orders.lines() {
+        order := catch(parse(line))
+        if order is error {
+            io.println(`line {i + 1} skipped: {order.message}`)
+            continue
+        }
+        io.println(`{order.qty} {order.item} at {order.price}`)
+        total += order.qty * order.price
+    }
+    io.println("total:", total)
+}

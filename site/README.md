@@ -5,7 +5,8 @@ generated from the repository, so the site never drifts from the code:
 
 - the guide comes from [`docs/syntax.md`](../docs/syntax.md), one page per
   `##` section, and Getting Started from the README's setup section;
-- the playground's examples are the tracked files in [`examples/`](../examples);
+- the playground's examples are the programs in [`src/samples/`](src/samples),
+  listed with their titles in [`scripts/build-content.mjs`](scripts/build-content.mjs);
 - the playground runs Evie compiled to WebAssembly ([`wasm/main.go`](wasm/main.go))
   inside a Web Worker, so a busy program never freezes the page and Stop can
   end any program.
@@ -24,7 +25,7 @@ npm test          # run programs through evie.wasm under Node
 ```
 
 `npm run dev` regenerates the pages once; after editing `docs/syntax.md`,
-`examples/` or `src/pages`, run `npm run content` again.
+`src/samples/` or `src/pages`, run `npm run content` again.
 
 With the site built and `npx vite preview --port 4173` running,
 `node scripts/test-browser.mjs` drives headless Chrome through the playground:

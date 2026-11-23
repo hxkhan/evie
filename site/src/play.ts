@@ -9,7 +9,7 @@ import { tags } from "@lezer/highlight";
 import { startState, token } from "./evie-syntax.js";
 import examples from "./generated/examples.json";
 
-type Example = { id: string; title: string; code: string };
+type Example = { id: string; title: string; code: string; stdin?: string };
 const list = examples as Example[];
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -112,6 +112,8 @@ picker.addEventListener("change", () => {
   const ex = list.find((e) => e.id === picker.value);
   if (ex) {
     setCode(ex.code);
+    stdin.value = ex.stdin ?? "";
+    save();
     history.replaceState(null, "", `#example=${ex.id}`);
     view.focus();
   }
@@ -158,6 +160,7 @@ async function initialCode(): Promise<string> {
   const ex = list.find((e) => e.id === params.get("example"));
   if (ex) {
     picker.value = ex.id;
+    stdin.value = ex.stdin ?? "";
     return ex.code;
   }
   try {

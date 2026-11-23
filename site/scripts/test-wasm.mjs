@@ -41,6 +41,28 @@ const cases = [
   { name: "fs", code: 'fs.readText("hello.txt").trim()', check: (r) => (r.result ?? "").includes("Hello from") },
 ];
 
+// every example of the playground runs, with its input, and says what it should
+const expected = {
+  hero: "Hello, Linus!",
+  words: "times  ## 2",
+  shapes: '["wheel", "washer"]',
+  closures: "fib(70) = 190392490709135",
+  errors: "total: 3.5",
+  parallel: "caught: await.timeout",
+  shared: "5 of 5 went through, leaving -50",
+  temperatures: "98.6F is 37C",
+  fib: "fib(30) = 832040",
+};
+const examples = JSON.parse(await readFile(join(here, "..", "src", "generated", "examples.json"), "utf8"));
+for (const ex of examples) {
+  cases.push({
+    name: `example ${ex.id}`,
+    code: ex.code,
+    stdin: ex.stdin,
+    check: (r) => !r.error && expected[ex.id] !== undefined && r.out.includes(expected[ex.id]),
+  });
+}
+
 let failed = 0;
 for (const c of cases) {
   const r = await run(c.code, c.stdin);

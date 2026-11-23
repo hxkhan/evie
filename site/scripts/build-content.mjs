@@ -1,11 +1,10 @@
 // Generates the site's pages from the repository: the guide from
 // docs/syntax.md, Getting Started from the README, the playground's examples
-// from examples/*.ev, and the home and playground pages from src/pages, each
+// from src/samples, and the home and playground pages from src/pages, each
 // with the shared header and footer. Run it before vite; it writes
 // index.html, play/, docs/ and src/generated/, which are not committed.
 //
 //	node scripts/build-content.mjs        (SITE_BASE=/evie/ for a project page)
-import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -207,20 +206,20 @@ sections.forEach((s, i) => {
 
 // ---------------------------------------------------------------- examples
 
-let exampleFiles;
-try {
-  exampleFiles = execFileSync("git", ["ls-files", "examples/*.ev"], { cwd: repo }).toString().trim().split("\n").filter(Boolean);
-} catch {
-  exampleFiles = [];
-}
-const titleOf = (file) => {
-  const name = file.replace(/^examples\//, "").replace(/\.ev$/, "");
-  return name.charAt(0).toUpperCase() + name.slice(1).replace(/_/g, " ");
-};
-const examples = [
-  { id: "hero", title: "Greeting tasks", code: readFileSync(join(site, "src/samples/hero.ev"), "utf8").replaceAll("\r\n", "\n") },
-  ...exampleFiles.map((f) => ({ id: f.replace(/^examples\//, "").replace(/\.ev$/, ""), title: titleOf(f), code: read(f) })),
+// the playground's examples, in the order the picker lists them; each is
+// src/samples/<id>.ev, and stdin, when given, fills the Input tab
+const samples = [
+  { id: "hero", title: "Greeting tasks" },
+  { id: "words", title: "Word count" },
+  { id: "shapes", title: "Shapes and inheritance" },
+  { id: "closures", title: "Closures" },
+  { id: "errors", title: "Handling errors" },
+  { id: "parallel", title: "Waiting in parallel" },
+  { id: "shared", title: "Shared state without locks" },
+  { id: "temperatures", title: "Reading input", stdin: "21C\n70F\n-40C\n98.6F\nwarm\n" },
+  { id: "fib", title: "Fibonacci" },
 ];
+const examples = samples.map((s) => ({ ...s, code: readFileSync(join(site, "src/samples", `${s.id}.ev`), "utf8").replaceAll("\r\n", "\n") }));
 write("src/generated/examples.json", JSON.stringify(examples, null, 2));
 
 // ---------------------------------------------------------------- pages

@@ -1,0 +1,23 @@
+package main imports("io")
+
+const text := `It was the best of times, it was the worst of times,
+it was the age of wisdom, it was the age of foolishness`
+
+fn main() {
+    // count each word, in the order words first appear
+    counts := {}
+    for word in text.toLower().replace(",", "").fields() {
+        if counts[word]? {
+            counts[word] += 1
+        } else {
+            counts[word] = 1
+        }
+    }
+
+    // a bar for every word used more than once
+    for word, n in counts {
+        if n > 1 {
+            io.println(word.padEnd(6, " "), "#".repeat(n), n)
+        }
+    }
+}

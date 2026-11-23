@@ -1,0 +1,37 @@
+package main imports("io", "time")
+
+var balance := 100
+
+// withdraw checks and updates the balance without waiting in between, so no
+// other task can run in between: no lock needed
+fn withdraw(amount) {
+    if balance >= amount {
+        balance -= amount
+        return true
+    }
+    return false
+}
+
+// withdrawSlowly waits between the check and the update. Waiting lets the
+// other tasks run, and they all see the balance from before.
+fn withdrawSlowly(amount) {
+    if balance >= amount {
+        time.wait(10)
+        balance -= amount
+        return true
+    }
+    return false
+}
+
+// attempt starts five withdrawals of 30 at once, from a balance of 100
+fn attempt(withdrawal) {
+    balance = 100
+    results := await.all([1, 2, 3, 4, 5].map(fn(_) => go withdrawal(30)))
+    done := results.filter(fn(ok) => ok).len()
+    io.println(`{done} of 5 went through, leaving {balance}`)
+}
+
+fn main() {
+    attempt(withdraw)       // 3 of 5, leaving 10
+    attempt(withdrawSlowly) // 5 of 5, leaving -50
+}

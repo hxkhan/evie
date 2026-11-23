@@ -242,6 +242,9 @@ go build ./evie
 ./evie --version
 ```
 
+### Editor Support
+The VS Code extension in [extensions/vscode](./extensions/vscode) shows errors as you type, and offers go to definition, find all references, hover, completion and an outline. Its analysis is Evie's own compiler, compiled to WebAssembly, so it needs nothing else installed. Build it with `npm install && npm run package` in that folder, then install the `.vsix`. Other tools can use the [analysis](./analysis) package directly.
+
 ### Run Tests
 ```bash
 go test ./...

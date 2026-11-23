@@ -1,0 +1,69 @@
+name: VS Code extension
+
+# Builds the VS Code extension (its language server is Evie's analysis compiled
+# to WebAssembly), tests the server over the protocol, and keeps the .vsix as
+# an artifact to install by hand.
+
+on:
+  push:
+    branches: [main]
+    paths: ["extensions/vscode/**", "**/*.go", "go.mod", "docs/syntax.md", ".github/workflows/vscode.yml"]
+  pull_request:
+    paths: ["extensions/vscode/**", "**/*.go", "go.mod", "docs/syntax.md", ".github/workflows/vscode.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vscode-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extensions/vscode
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: extensions/vscode/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Test the analysis
+        run: go test ./analysis
+        working-directory: .
+
+      - name: Vet the WebAssembly entry point
+        run: GOOS=js GOARCH=wasm go vet ./extensions/vscode/lsp
+        working-directory: .
+
+      - name: Build
+        run: npm run build
+
+      - name: Test the language server
+        run: npm test
+
+      - name: Test the extension inside VS Code
+        run: xvfb-run -a npm run test:vscode
+
+      - name: Package
+        run: npx vsce package --no-dependencies -o evie.vsix
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evie-vscode
+          path: extensions/vscode/evie.vsix

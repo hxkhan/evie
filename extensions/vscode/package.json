@@ -1,15 +1,24 @@
 {
   "name": "evie",
   "displayName": "Evie",
-  "description": "Syntax highlighting for the Evie programming language",
+  "description": "Evie language support: errors as you type, quick fixes, go to definition, references, rename, hover, signature help, completion, outline and a Run button",
   "publisher": "hxkhan",
   "license": "Apache-2.0",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hxkhan/evie"
+  },
   "engines": {
     "vscode": "^1.94.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Linters"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:evie"
   ],
   "contributes": {
     "languages": [
@@ -32,6 +41,83 @@
         "scopeName": "source.ev",
         "path": "./syntaxes/evie.tmLanguage.json"
       }
+    ],
+    "configuration": {
+      "title": "Evie",
+      "properties": {
+        "evie.path": {
+          "type": "string",
+          "default": "evie",
+          "description": "The evie program that runs files, as a name on PATH or a full path."
+        },
+        "evie.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Log the messages between VS Code and Evie's language server, for debugging it."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "evie.run",
+        "title": "Run",
+        "category": "Evie",
+        "icon": "$(play)"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "evie.run",
+          "when": "resourceLangId == evie",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "evie.run",
+          "when": "editorLangId == evie"
+        }
+      ]
+    },
+    "taskDefinitions": [
+      {
+        "type": "evie",
+        "required": [
+          "target"
+        ],
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "The file or project folder to run."
+          }
+        }
+      }
     ]
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node scripts/test-server.mjs",
+    "test:vscode": "node scripts/test-vscode.mjs",
+    "package": "npm run build && vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^11.0.1",
+    "vscode-languageserver": "^11.0.1",
+    "vscode-languageserver-textdocument": "^1.0.16",
+    "vscode-uri": "^3.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/vscode": "~1.94.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.1.1",
+    "esbuild": "^0.28.2",
+    "typescript": "~5.9.3"
   }
 }

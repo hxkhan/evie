@@ -57,6 +57,7 @@ type Switch struct {
 	Value   Node         // [optional] value to match against; nil for tagless switch
 	Cases   []SwitchCase // list of case branches
 	Default Node         // [optional] default action (ast.Block), nil if none
+	End     diag.Pos     // the closing '}'
 }
 
 func (node Conditional) String() string {

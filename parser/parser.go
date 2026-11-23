@@ -810,6 +810,7 @@ func (ps *parser) parseSwitch(main token.Token) ast.Node {
 			ps.expected("'case', 'default' or '}'", open, "this '{' opens the switch")
 		}
 	}
+	sw.End = ps.last.Pos
 
 	return sw
 }
@@ -944,6 +945,7 @@ func (ps *parser) parseObject(main token.Token) ast.Node {
 		obj.Fields = append(obj.Fields, ast.ObjectField{Key: key.Literal, KeyPos: key.Pos, Value: ps.parse(0, true)})
 	})
 	obj.Pos = main.Pos.To(ps.last.Pos)
+	obj.End = ps.last.Pos
 	return obj
 }
 
@@ -953,6 +955,7 @@ func (ps *parser) parseArrayLiteral(main token.Token) ast.Node {
 		arr.Elements = append(arr.Elements, ps.parse(0, true))
 	})
 	arr.Pos = main.Pos.To(ps.last.Pos)
+	arr.End = ps.last.Pos
 	return arr
 }
 

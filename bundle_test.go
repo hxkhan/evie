@@ -368,3 +368,26 @@ func TestCanonicalModuleIdentityAndImportAliases(t *testing.T) {
 	_, err = evie.ParseFile(badAliasFS, "main.ev")
 	expectError(t, err, "keyword")
 }
+
+// a directory's files make one package, which a tool can parse on its own
+func TestParsePackage(t *testing.T) {
+	fsys := fstest.MapFS{
+		"lib/a.ev": &fstest.MapFile{Data: []byte("package lib\nfn twice(n) => half(n) * 4")},
+		"lib/b.ev": &fstest.MapFile{Data: []byte("package lib\nfn half(n) => n / 2")},
+	}
+	b, err := evie.ParsePackage(fsys, "lib")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(b.Files(), " "); got != "lib/a.ev lib/b.ev" {
+		t.Fatalf("files: %q", got)
+	}
+	if err := evie.Check(b); err != nil {
+		t.Fatalf("the package should check cleanly: %v", err)
+	}
+
+	fsys["lib/c.ev"] = &fstest.MapFile{Data: []byte("package other\nfn x() => 1")}
+	if _, err := evie.ParsePackage(fsys, "lib"); err == nil || !strings.Contains(err.Error(), "declares package 'other'") {
+		t.Fatalf("want an error naming the odd file out, got %v", err)
+	}
+}

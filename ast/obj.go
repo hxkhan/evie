@@ -19,6 +19,7 @@ func (node ObjectField) String() string {
 type Object struct {
 	diag.Pos
 	Fields []ObjectField
+	End    diag.Pos // the closing '}'
 }
 
 func (node Object) String() string {
@@ -77,6 +78,7 @@ func (node Slice) String() string {
 type ArrayLiteral struct {
 	diag.Pos
 	Elements []Node
+	End      diag.Pos // the closing ']'
 }
 
 func (node ArrayLiteral) String() string {

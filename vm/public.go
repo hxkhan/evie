@@ -79,6 +79,12 @@ func (pkg *Package) Name() string {
 	return pkg.name
 }
 
+// Compiled reports whether the package was compiled from Evie source, rather
+// than made by a host in Go
+func (pkg *Package) Compiled() bool {
+	return pkg.compiled
+}
+
 func (pkg *Package) setName(name string) {
 	pkg.name = name
 	if pkg.id == "" {

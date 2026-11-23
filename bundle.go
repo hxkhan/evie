@@ -100,6 +100,17 @@ func ParseProject(fsys iofs.FS, dirPath string) (*Bundle, error) {
 	return parseProject(virtualSourceFS{fsys: fsys}, dirPath, fsys)
 }
 
+// ParsePackage parses the package a directory holds, made of every .ev file in
+// it, and every package it imports by path, without running any code. Every
+// file must declare the same package. It is how a tool reads a package that a
+// program imports by its directory, to check it on its own.
+func ParsePackage(fsys iofs.FS, dirPath string) (*Bundle, error) {
+	if fsys == nil {
+		return parsePackage(osSourceFS{}, dirPath, nil)
+	}
+	return parsePackage(virtualSourceFS{fsys: fsys}, dirPath, fsys)
+}
+
 // ParseSource parses a program given as source text, and every package it
 // imports by path, without running any code. name is what errors call the
 // source; path imports resolve against the working directory.
@@ -440,6 +451,55 @@ func parseProject(sfs sourceFS, dirPath string, fsys iofs.FS) (*Bundle, error) {
 	}
 	if len(units) == 0 {
 		return nil, fmt.Errorf("no file in %s declares package main", sfs.display(absDir))
+	}
+
+	loader := newGraphLoader(sfs, absDir)
+	dirKey := sfs.canonical(absDir)
+	fileKeys := make([]string, len(units))
+	for i, u := range units {
+		fileKeys[i] = sfs.canonical(u.path)
+		loader.loading[fileKeys[i]] = true
+	}
+	defer func() {
+		for _, fk := range fileKeys {
+			delete(loader.loading, fk)
+		}
+	}()
+
+	if _, err := loader.loadUnits(dirKey, absDir, absDir, units, true, nil); err != nil {
+		return nil, err
+	}
+	return &Bundle{
+		packages: loader.order,
+		root:     absDir,
+		fsys:     fsys,
+	}, nil
+}
+
+func parsePackage(sfs sourceFS, dirPath string, fsys iofs.FS) (*Bundle, error) {
+	absDir, err := sfs.abs(dirPath)
+	if err != nil {
+		return nil, err
+	}
+	files, err := sfs.evFiles(absDir)
+	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no .ev files in %s", sfs.display(absDir))
+	}
+
+	units := make([]parsedUnit, len(files))
+	for i, file := range files {
+		src, err := sfs.readSource(file)
+		if err != nil {
+			return nil, err
+		}
+		node, err := parser.ParseSource(src)
+		if err != nil {
+			return nil, err
+		}
+		units[i] = parsedUnit{path: file, src: src, node: node}
 	}
 
 	loader := newGraphLoader(sfs, absDir)

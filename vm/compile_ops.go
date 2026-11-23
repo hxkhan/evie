@@ -20,7 +20,7 @@ func (vm *Instance) assignee(node ast.Node) binding {
 	if !ok {
 		panic(vm.compileErrorAt(node, "cannot assign to '%v'", node))
 	}
-	variable, err := vm.cp.reach(ident.Name)
+	variable, err := vm.cp.reach(ident.Name, ident.Pos)
 	if err != nil {
 		panic(vm.locate(err, ident))
 	}

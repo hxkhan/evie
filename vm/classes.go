@@ -22,6 +22,7 @@ type userClass struct {
 	Methods      map[fields.ID]*userFn
 	declClosure  *closure // non-nil only for local classes with a runtime-resolved parent
 	declIndex    int
+	decls        map[fields.ID]nameDecl // field or method -> where it is declared, when names are recorded
 }
 
 func (uc *userClass) hasParent() bool {

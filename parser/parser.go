@@ -26,11 +26,208 @@ func (e *Error) Error() string {
 	return "syntax error: " + e.Report.Error()
 }
 
+// ErrorList is what parsing returns when a source has more than one syntax
+// error, in the order they appear. errors.As finds each *Error in it.
+type ErrorList []*Error
+
+func (l ErrorList) Error() string {
+	if len(l) == 1 {
+		return l[0].Error()
+	}
+	return fmt.Sprintf("%s (and %d more)", l[0].Error(), len(l)-1)
+}
+
+func (l ErrorList) Unwrap() []error {
+	errs := make([]error, len(l))
+	for i, e := range l {
+		errs[i] = e
+	}
+	return errs
+}
+
+// Diagnostics returns the report of every error, for tools that show them all
+func (l ErrorList) Diagnostics() []*diag.Report {
+	reports := make([]*diag.Report, len(l))
+	for i, e := range l {
+		reports[i] = &e.Report
+	}
+	return reports
+}
+
+// maxErrors is how many syntax errors one source reports before parsing stops
+const maxErrors = 10
+
+// stopParsing is raised when maxErrors is reached
+type stopParsing struct{}
+
 type parser struct {
 	*lexer.Lexer
 	src   *diag.Source
 	last  token.Token
 	depth int
+	errs  []*Error
+	text  []byte // the parser's private copy of the source
+}
+
+// openBefore returns the brackets ( [ { and template backticks still open
+// before pos, innermost last. Parsing does not keep track of them, so that
+// correct code pays nothing; after an error the source is lexed again up to
+// where the parser stopped.
+func (ps *parser) openBefore(pos diag.Pos) []token.Token {
+	var open []token.Token
+	lex := lexer.New(ps.text)
+	for {
+		tok := lex.NextToken()
+		if tok.IsEOS() || tok.Pos.Line > pos.Line || tok.Pos.Line == pos.Line && tok.Pos.Column >= pos.Column {
+			return open
+		}
+		open = track(open, tok)
+	}
+}
+
+// track updates a stack of open brackets with the next token
+func track(open []token.Token, tok token.Token) []token.Token {
+	if tok.Type != token.Simple {
+		return open
+	}
+	top := ""
+	if len(open) > 0 {
+		top = open[len(open)-1].Literal
+	}
+	switch tok.Literal {
+	case "(", "[", "{":
+		return append(open, tok)
+	case ")", "]", "}":
+		if opener(tok.Literal) == top {
+			return open[:len(open)-1]
+		}
+	case "`":
+		// a backtick closes the template it is in, or opens one
+		if top == "`" {
+			return open[:len(open)-1]
+		}
+		return append(open, tok)
+	}
+	return open
+}
+
+// opener is the bracket a closing one pairs with, or "" for any other token
+func opener(closer string) string {
+	switch closer {
+	case ")":
+		return "("
+	case "]":
+		return "["
+	case "}":
+		return "{"
+	}
+	return ""
+}
+
+// opens reports whether a closing bracket matches one of the open ones
+func opens(open []token.Token, closer token.Token) bool {
+	return slices.ContainsFunc(open, func(t token.Token) bool { return t.Literal == opener(closer.Literal) })
+}
+
+// isClosing reports whether tok is ) ] or }
+func isClosing(tok token.Token) bool {
+	return tok.Type == token.Simple && opener(tok.Literal) != ""
+}
+
+// startsStatement holds the words that begin a statement and cannot appear
+// inside parentheses or brackets
+var startsStatement = []string{"var", "const", "class", "if", "while", "for", "return", "switch", "break", "continue", "echo"}
+
+// statement parses one statement. A syntax error in it does not end parsing:
+// the error is recorded, the rest of the statement is skipped, and parsing
+// goes on, so one mistake does not hide the others. inBlock says a '}' ends
+// the enclosing block, so skipping stops there.
+func (ps *parser) statement(inBlock bool, parse func()) {
+	start := ps.PeekToken().Pos
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		e, ok := r.(*Error)
+		if !ok {
+			panic(r)
+		}
+		ps.record(e)
+		// the brackets the broken statement opened and did not close
+		var open []token.Token
+		if before, now := ps.openBefore(start), ps.openBefore(ps.PeekToken().Pos); len(now) > len(before) {
+			open = now[len(before):]
+		}
+		ps.skip(inBlock, open, e.Pos)
+		// a statement that failed at its first token without taking it must not
+		// be tried again from the same place
+		if next := ps.PeekToken(); next.Pos == start && !next.IsEOS() && !(inBlock && next.IsSimple("}")) {
+			ps.NextToken()
+			ps.skip(inBlock, nil, diag.Pos{})
+		}
+	}()
+	parse()
+}
+
+// record keeps a syntax error, once, and stops parsing when there are too many
+func (ps *parser) record(e *Error) {
+	if n := len(ps.errs); n > 0 && ps.errs[n-1].Pos == e.Pos {
+		return // the same place again adds nothing
+	}
+	ps.errs = append(ps.errs, e)
+	if len(ps.errs) >= maxErrors {
+		panic(stopParsing{})
+	}
+}
+
+// skip passes over the rest of a broken statement whose open brackets are
+// still open: up to a ';' or a new line once they are closed, or up to the '}'
+// of the enclosing block. Some signs say a '(' or '[' was never closed, and
+// skipping stops there too: the error is at the start of a new line, a new
+// statement starts a line, or a bracket closes that the statement never opened.
+func (ps *parser) skip(inBlock bool, open []token.Token, at diag.Pos) {
+	for first := true; ; first = false {
+		next := ps.PeekToken()
+		if next.IsEOS() {
+			return
+		}
+		if isClosing(next) && !opens(open, next) {
+			open = nil // it closes something outside this statement
+		}
+		unclosed := false
+		if n := len(open); n > 0 {
+			top := open[n-1].Literal
+			unclosed = (top == "(" || top == "[") && next.NewlineBefore &&
+				(first && next.Pos == at || next.Type == token.Word && slices.Contains(startsStatement, next.Literal))
+		}
+		if unclosed {
+			return
+		}
+		if len(open) == 0 {
+			switch {
+			case next.IsSimple(";"):
+				ps.NextToken()
+				return
+			case next.IsSimple("}") && inBlock, next.NewlineBefore:
+				return
+			}
+		}
+		ps.NextToken()
+		open = track(open, next)
+	}
+}
+
+// failed is the error to return once parsing is over: nil, the one error, or
+// all of them
+func (ps *parser) failed() error {
+	switch len(ps.errs) {
+	case 0:
+		return nil
+	case 1:
+		return ps.errs[0]
+	}
+	return ErrorList(ps.errs)
 }
 
 var keywords = []string{
@@ -89,26 +286,37 @@ func Parse(input []byte) (ast.Node, error) {
 	return ParseSource(diag.NewSource("", input))
 }
 
-// ParseSource parses a script; errors name the source and show its text
+// ParseSource parses a script; errors name the source and show its text.
+// Parsing goes on after a syntax error, so a source with several mistakes
+// reports them all (up to ten) as an ErrorList; a single one is an *Error.
+// With errors, the returned node holds the statements that did parse.
 func ParseSource(src *diag.Source) (node ast.Node, err error) {
 	// the lexer hands out strings that share memory with its input, and they end up
 	// in the AST and in compiled constants; lex a private copy, so a caller reusing
 	// its buffer cannot change names or strings of the parsed program
-	ps := parser{Lexer: lexer.New(bytes.Clone(src.Text)), src: src}
+	text := bytes.Clone(src.Text)
+	ps := parser{Lexer: lexer.New(text), src: src, text: text}
 
 	defer func() {
 		if r := recover(); r != nil {
 			switch e := r.(type) {
+			case stopParsing:
+				// too many errors; report the ones found
 			case *Error:
-				err = e
+				ps.errs = append(ps.errs, e)
 			case runtime.Error:
 				// a bug in the parser or lexer; report it instead of taking the host down
 				err = fmt.Errorf("internal parser error: %v", e)
+				return
 			case error:
 				err = fmt.Errorf("ParseError: %s", e.Error())
+				return
 			default:
-				err = ps.report(ps.last.Pos, fmt.Sprint(r))
+				ps.errs = append(ps.errs, ps.report(ps.last.Pos, fmt.Sprint(r)))
 			}
+		}
+		if failed := ps.failed(); failed != nil {
+			err = failed
 		}
 	}()
 
@@ -118,15 +326,19 @@ func ParseSource(src *diag.Source) (node ast.Node, err error) {
 		return nil, ps.report(ps.PeekToken().Pos, "the source is empty")
 	}
 
-	if ps.consume("package") {
-		pack := ps.parsePackage()
+	if ps.PeekToken().IsWord("package") {
+		pack := &ast.Package{}
+		ps.statement(false, func() {
+			ps.consume("package")
+			*pack = ps.parsePackage()
+		})
 		for {
 			for ps.consume(";") {
 			}
 			if ps.PeekToken().IsEOS() {
-				return pack, nil
+				return *pack, nil
 			}
-			pack.Code = append(pack.Code, ps.parse(0, false))
+			ps.statement(false, func() { pack.Code = append(pack.Code, ps.parse(0, false)) })
 		}
 	}
 
@@ -137,7 +349,7 @@ func ParseSource(src *diag.Source) (node ast.Node, err error) {
 		if ps.PeekToken().IsEOS() {
 			return cb, nil
 		}
-		cb.Code = append(cb.Code, ps.parse(0, false))
+		ps.statement(false, func() { cb.Code = append(cb.Code, ps.parse(0, false)) })
 	}
 }
 
@@ -198,7 +410,7 @@ func (ps *parser) name(purpose string) token.Token {
 func (ps *parser) parsePackage() ast.Package {
 	keyword := ps.last
 	name := ps.name("the package name")
-	pack := ast.Package{Pos: keyword.Pos.To(name.Pos), Name: name.Literal}
+	pack := ast.Package{Pos: keyword.Pos.To(name.Pos), Name: name.Literal, NamePos: name.Pos}
 	if ps.consume("imports") {
 		imports := ps.last
 		if !ps.consume("(") {
@@ -230,6 +442,7 @@ func (ps *parser) parseImportList(open token.Token) []ast.ImportSpec {
 		if ps.consume("as") {
 			alias := ps.name("an alias name after 'as'")
 			spec.Alias = alias.Literal
+			spec.AliasPos = alias.Pos
 			spec.Pos = next.Pos.To(alias.Pos)
 		}
 		imports = append(imports, spec)
@@ -498,11 +711,13 @@ func (ps *parser) parseFor(main token.Token) ast.Node {
 	first := ps.name("the loop variable")
 
 	var indexVar, itemVar string
+	var indexPos, itemPos diag.Pos
 	if ps.consume(",") {
-		indexVar = first.Literal
-		itemVar = ps.name("the item variable after ','").Literal
+		indexVar, indexPos = first.Literal, first.Pos
+		item := ps.name("the item variable after ','")
+		itemVar, itemPos = item.Literal, item.Pos
 	} else {
-		itemVar = first.Literal
+		itemVar, itemPos = first.Literal, first.Pos
 	}
 
 	varsClosedParen := false
@@ -529,7 +744,9 @@ func (ps *parser) parseFor(main token.Token) ast.Node {
 	return ast.For{
 		Pos:        main.Pos,
 		IndexVar:   indexVar,
+		IndexPos:   indexPos,
 		ItemVar:    itemVar,
+		ItemPos:    itemPos,
 		Collection: col,
 		Action:     body,
 	}
@@ -559,7 +776,7 @@ func (ps *parser) parseSwitch(main token.Token) ast.Node {
 			if next.IsEOS() {
 				ps.expected("'}'", open, "this '{' opens the switch")
 			}
-			block.Code = append(block.Code, ps.parseNode(0, false))
+			ps.statement(true, func() { block.Code = append(block.Code, ps.parseNode(0, false)) })
 			ps.consume(";")
 		}
 		return block
@@ -604,12 +821,13 @@ func (ps *parser) parseBlock(open token.Token) ast.Node {
 		for ps.consume(";") {
 		}
 		if ps.consume("}") {
+			block.End = ps.last.Pos
 			break
 		}
 		if ps.PeekToken().IsEOS() {
 			ps.expected("'}'", open, "this '{' is never closed")
 		}
-		block.Code = append(block.Code, ps.parseNode(0, false))
+		ps.statement(true, func() { block.Code = append(block.Code, ps.parseNode(0, false)) })
 	}
 	return block
 }
@@ -620,9 +838,10 @@ func (ps *parser) parseFn(main token.Token, asExpr bool, precedenceLevel int) as
 	if ps.PeekToken().Type == token.Word {
 		name := ps.name("the function name")
 		fn.Name = name.Literal
+		fn.NamePos = name.Pos
 		fn.Pos = main.Pos.To(name.Pos)
 	}
-	fn.Args, fn.IsVariadic = ps.parseNamesList(main, "the parameter list")
+	fn.Args, fn.ArgPos, fn.IsVariadic = ps.parseNamesList(main, "the parameter list")
 
 	if ps.consume("{") {
 		fn.Action = ps.parseBlock(ps.last)
@@ -646,16 +865,18 @@ func (ps *parser) parseClass(main token.Token) ast.Node {
 	if ps.PeekToken().Type == token.Word {
 		name := ps.name("the class name")
 		cls.Name = name.Literal
+		cls.NamePos = name.Pos
 		cls.Pos = main.Pos.To(name.Pos)
 	}
 	var isVariadic bool
-	cls.Args, isVariadic = ps.parseNamesList(main, "the field list")
+	cls.Args, cls.ArgPos, isVariadic = ps.parseNamesList(main, "the field list")
 	if isVariadic {
 		ps.fail(ps.last.Pos, "class fields cannot be variadic")
 	}
 
 	if ps.consume(":") {
-		cls.Parent = ps.name("the parent class after ':'").Literal
+		parent := ps.name("the parent class after ':'")
+		cls.Parent, cls.ParentPos = parent.Literal, parent.Pos
 	}
 
 	if !ps.consume("{") {
@@ -667,26 +888,29 @@ func (ps *parser) parseClass(main token.Token) ast.Node {
 }
 
 // helper to parse names surrounded by parentheses
-func (ps *parser) parseNamesList(main token.Token, what string) ([]string, bool) {
+func (ps *parser) parseNamesList(main token.Token, what string) ([]string, []diag.Pos, bool) {
 	if !ps.consume("(") {
 		ps.expected("'(' to open "+what, main, "")
 	}
 	open := ps.last
 
 	var args []string
+	var positions []diag.Pos
 	isVariadic := false
 	ps.list(open, ")", what, func() {
 		if ps.consume("...") {
 			isVariadic = true
-			args = append(args, ps.name("a parameter name after '...'").Literal)
+			name := ps.name("a parameter name after '...'")
+			args, positions = append(args, name.Literal), append(positions, name.Pos)
 			if !ps.PeekToken().IsSimple(")") {
 				ps.expected("')' after the variadic parameter", open, "this '(' opens "+what)
 			}
 			return
 		}
-		args = append(args, ps.name("a name").Literal)
+		name := ps.name("a name")
+		args, positions = append(args, name.Literal), append(positions, name.Pos)
 	})
-	return args, isVariadic
+	return args, positions, isVariadic
 }
 
 func (ps *parser) parseArgsList() []ast.Node {
@@ -717,7 +941,7 @@ func (ps *parser) parseObject(main token.Token) ast.Node {
 		if !ps.consume(":") {
 			ps.expected(fmt.Sprintf("':' after the field name '%s'", key.Literal), main, "in this object")
 		}
-		obj.Fields = append(obj.Fields, ast.ObjectField{Key: key.Literal, Value: ps.parse(0, true)})
+		obj.Fields = append(obj.Fields, ast.ObjectField{Key: key.Literal, KeyPos: key.Pos, Value: ps.parse(0, true)})
 	})
 	obj.Pos = main.Pos.To(ps.last.Pos)
 	return obj
@@ -862,6 +1086,18 @@ func (ps *parser) parseNode(precedenceLevel int, asExpr bool) (node ast.Node) {
 		ps.fail(main.Pos, fmt.Sprintf("invalid token '%s'", main.Literal))
 	default:
 		if main.IsSimple(")") || main.IsSimple("]") || main.IsSimple("}") {
+			if open := ps.openBefore(main.Pos); len(open) > 0 {
+				// closing what is open, as in `f(1, )` or `{1 +}`, leaves out a value
+				top := open[len(open)-1]
+				if top.Literal == opener(main.Literal) {
+					ps.fail(main.Pos, fmt.Sprintf("expected a value, found '%s'", main.Literal))
+				}
+				// closing something further out leaves the innermost one open
+				if opens(open, main) {
+					ps.fail(main.Pos, fmt.Sprintf("unexpected '%s'", main.Literal),
+						diag.Note{Source: ps.src, Pos: top.Pos, Text: fmt.Sprintf("this '%s' is never closed", top.Literal)})
+				}
+			}
 			ps.fail(main.Pos, fmt.Sprintf("unexpected '%s': nothing is open here", main.Literal))
 		}
 		ps.fail(main.Pos, fmt.Sprintf("unexpected '%s'", main.Literal))
@@ -888,7 +1124,7 @@ func (ps *parser) parseInfixExpression(left ast.Node, precedenceLevel int) ast.N
 				ps.expected("a member name after '.'", token.Token{}, "")
 			}
 			name := ps.NextToken()
-			left = ast.FieldAccess{Pos: left.Where().To(name.Pos), Lhs: left, Rhs: name.Literal}
+			left = ast.FieldAccess{Pos: left.Where().To(name.Pos), Lhs: left, Rhs: name.Literal, RhsPos: name.Pos}
 			continue
 		}
 

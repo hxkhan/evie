@@ -32,7 +32,7 @@ func (vm *Instance) evaluate(node ast.Node) operand {
 		if node.Name == "super" {
 			return nil
 		}
-		variable, err := vm.cp.reach(node.Name)
+		variable, err := vm.cp.reach(node.Name, node.Pos)
 		if err != nil {
 			panic(vm.locate(err, node))
 		}
@@ -48,6 +48,9 @@ func (vm *Instance) evaluate(node ast.Node) operand {
 			// only fold member reads on packages (public constants) and builtin types;
 			// never freeze fields of mutable containers like objects or struct instances
 			if pkg, ok := lhs.AsPackage(); ok {
+				if vm.cp.onName != nil {
+					vm.notePackageMember(pkg, node)
+				}
 				if global, exists := pkg.globals[fields.Get(node.Rhs)]; !exists || !global.IsPublic || !global.IsConstant {
 					return nil
 				}

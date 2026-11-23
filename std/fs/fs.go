@@ -139,6 +139,21 @@ func build(files files) *vm.Package {
 	pkg.Native("base", vm.Func1(func(name string) string { return filepath.Base(filepath.FromSlash(name)) }))
 	pkg.Native("dir", vm.Func1(func(name string) string { return filepath.ToSlash(filepath.Dir(filepath.FromSlash(name))) }))
 	pkg.Native("ext", vm.Func1(func(name string) string { return filepath.Ext(filepath.FromSlash(name)) }))
+	// what tools such as editors show for each member
+	pkg.Document("readFile", "readFile(path)", "The file's contents as a buffer.")
+	pkg.Document("readText", "readText(path)", "The file's contents as a string.")
+	pkg.Document("writeFile", "writeFile(path, content)", "Writes a string or buffer to the file, replacing it.")
+	pkg.Document("appendFile", "appendFile(path, content)", "Adds a string or buffer to the end of the file.")
+	pkg.Document("exists", "exists(path)", "Whether the path exists.")
+	pkg.Document("isDir", "isDir(path)", "Whether the path is a directory.")
+	pkg.Document("list", "list(dir)", "The sorted names in a directory.")
+	pkg.Document("mkdir", "mkdir(dir)", "Creates a directory and its parents.")
+	pkg.Document("remove", "remove(path)", "Removes a file, or a directory and everything in it.")
+	pkg.Document("rename", "rename(from, to)", "Moves a file or directory.")
+	pkg.Document("join", "join(...parts)", "Joins path parts with '/'; does not touch the disk.")
+	pkg.Document("base", "base(path)", "The last element of a path; does not touch the disk.")
+	pkg.Document("dir", "dir(path)", "A path without its last element; does not touch the disk.")
+	pkg.Document("ext", "ext(path)", "A path's extension, such as \".ev\"; does not touch the disk.")
 	return pkg
 }
 

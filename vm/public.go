@@ -2,6 +2,8 @@ package vm
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"unsafe"
 
 	"github.com/hxkhan/evie/internal/fields"
@@ -14,12 +16,14 @@ type Package struct {
 	name    string                  // declared package name
 	globals map[fields.ID]pkgGlobal // all global symbols
 
-	origin     string               // the file it was compiled from, for errors
-	compiled   bool                 // true for Evie packages compiled from source
-	inits      []*funcInfoStatic    // package init functions recorded when Options.DebugInfo is set
-	imports    []string             // formatted import bindings for Dump (e.g. "math", "./math as mymath")
-	importedAs map[string][2]string // path/declared name -> (import path, bound name) where they differ
-	memberHint string               // shown when a script asks for a member it lacks
+	origin     string                 // the file it was compiled from, for errors
+	compiled   bool                   // true for Evie packages compiled from source
+	inits      []*funcInfoStatic      // package init functions recorded when Options.DebugInfo is set
+	imports    []string               // formatted import bindings for Dump (e.g. "math", "./math as mymath")
+	importedAs map[string][2]string   // path/declared name -> (import path, bound name) where they differ
+	memberHint string                 // shown when a script asks for a member it lacks
+	docs       map[string][2]string   // member name -> signature and description, for tools
+	decls      map[fields.ID]nameDecl // global -> where it is declared, when names are recorded
 }
 
 // SetMemberHint sets the help shown when a script asks the package for a
@@ -54,6 +58,7 @@ func (pkg *Package) Clone() *Package {
 		cp.globals[id] = g
 	}
 	cp.memberHint = pkg.memberHint
+	cp.docs = maps.Clone(pkg.docs)
 	return cp
 }
 
@@ -138,6 +143,62 @@ func (pkg *Package) Has(name string) bool {
 	}
 	_, exists := pkg.globals[id]
 	return exists
+}
+
+// Member describes a public member of a package for tools such as editors
+type Member struct {
+	Name string
+	// Signature shows how to call it, as in "readFile(path)"; for anything that
+	// is not a function it is the name
+	Signature string
+	Doc       string // what it does, when documented
+	// Yields reports that calling it waits on the outside world, such as a file
+	// or a timer, and lets the instance's other tasks run in the meantime
+	Yields bool
+	Value  Value
+}
+
+// Document describes a member, for tools; it does not change what the member
+// does. signature shows how to call it, as in "readFile(path)".
+func (pkg *Package) Document(name, signature, doc string) *Package {
+	if pkg.docs == nil {
+		pkg.docs = map[string][2]string{}
+	}
+	pkg.docs[name] = [2]string{signature, doc}
+	return pkg
+}
+
+// Members returns the names of the package's public members, sorted
+func (pkg *Package) Members() []string {
+	var names []string
+	for id, g := range pkg.globals {
+		if g.IsPublic {
+			names = append(names, fields.Lookup(id))
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
+// Describe tells tools about a public member: how to call it, what it does
+// and whether calling it yields
+func (pkg *Package) Describe(name string) (Member, bool) {
+	id, known := fields.Find(name)
+	if !known {
+		return Member{}, false
+	}
+	g, exists := pkg.globals[id]
+	if !exists || !g.IsPublic || g.Value == nil {
+		return Member{}, false
+	}
+	m := Member{Name: name, Signature: name, Value: *g.Value}
+	if fn, ok := m.Value.AsGoFunc(); ok {
+		m.Yields = fn.Blocking
+	}
+	if doc, ok := pkg.docs[name]; ok {
+		m.Signature, m.Doc = doc[0], doc[1]
+	}
+	return m, true
 }
 
 // Field reads a field of an object or of a class instance by name

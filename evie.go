@@ -19,6 +19,7 @@ import (
 	goio "io"
 	iofs "io/fs"
 	"path/filepath"
+	"strings"
 
 	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/std/fs"
@@ -51,6 +52,11 @@ type Options struct {
 	Args     []string                               // arguments passed to main when it accepts parameters
 	Stdin    goio.Reader                            // standard input for the io package; defaults to os.Stdin
 	Stdout   goio.Writer                            // standard output for the io package and echo; defaults to os.Stdout
+
+	// OnName, when set, receives every name the compiler declares or resolves,
+	// with where it is declared, for tools such as editors; see vm.NameEvent.
+	// Use it with Check to learn about a program without running it.
+	OnName func(vm.NameEvent)
 
 	Debug Debug // switches for working on Evie itself
 }
@@ -114,6 +120,7 @@ func New(opts ...Options) *Engine {
 		Stdout:          opt.Stdout,
 		DebugInfo:       opt.Debug.DebugInfo,
 		DisableInlining: opt.Debug.NoFastPaths || testWithoutFastPaths,
+		OnName:          opt.OnName,
 	})
 	return e
 }
@@ -131,13 +138,23 @@ func Format(err error, colors bool) string {
 	if err == nil {
 		return ""
 	}
-	var reporter interface{ Diagnostic() *diag.Report }
-	if !errors.As(err, &reporter) {
-		return "error: " + err.Error() + "\n"
-	}
 	palette := diag.Palette{}
 	if colors {
 		palette = diag.Colors
+	}
+	// several syntax errors of one source render one after another
+	var list interface{ Diagnostics() []*diag.Report }
+	if errors.As(err, &list) {
+		reports := list.Diagnostics()
+		parts := make([]string, len(reports))
+		for i, r := range reports {
+			parts[i] = r.Render(palette)
+		}
+		return strings.Join(parts, "\n")
+	}
+	var reporter interface{ Diagnostic() *diag.Report }
+	if !errors.As(err, &reporter) {
+		return "error: " + err.Error() + "\n"
 	}
 	return reporter.Diagnostic().Render(palette)
 }
@@ -145,6 +162,13 @@ func Format(err error, colors bool) string {
 // RunFile executes a script file in a fresh engine and runs its main function
 func RunFile(path string) (vm.Value, error) {
 	return New().RunFile(path)
+}
+
+// Check compiles a parsed program in a fresh engine without running any of
+// it, and returns the compile errors a run would stop with, or nil. Parse with
+// ParseFile or ParseProject first; their errors are the syntax errors.
+func Check(b *Bundle) error {
+	return New().Check(b)
 }
 
 // ErrRanAlready is returned when an engine is asked to run a second program

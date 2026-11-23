@@ -9,7 +9,9 @@ import (
 type Fn struct {
 	diag.Pos
 	Name       string
+	NamePos    diag.Pos // where the name is written; unknown for an unnamed fn
 	Args       []string
+	ArgPos     []diag.Pos // where each of Args is written
 	IsVariadic bool
 	Action     Node
 	UsedAsExpr bool // if true then create and return, else declare

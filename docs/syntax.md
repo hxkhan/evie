@@ -863,7 +863,9 @@ The pieces, from most to least convenient:
 | :-- | :-- |
 | expose a Go function | `vm.Func0`..`Func3` and the `E` variants for `(R, error)`; `vm.Reflect` for any other signature |
 | full control of arguments and errors | `pkg.Func(name, arity, func(c vm.Call) (vm.Value, error))`; mark it `Blocking` if it sleeps or waits on I/O, and watch `c.Context()` so it wakes when the script is stopped |
-| a group of functions scripts import by name | `vm.NewPackage("name")` passed in `evie.Options.Packages` |
+| a group of functions scripts import by name | `vm.NewPackage("name")` passed in `evie.Options.Packages`; `pkg.Document(name, "f(x)", "what it does")` describes a member for editors, which `pkg.Describe(name)` reads back |
+| check a program without running it | `eng.Check(b)` or `evie.Check(b)` compile a bundle and its imports and report their compile errors, up to ten per package; nothing runs |
+| learn what every name refers to, for an editor | `evie.Options.OnName` receives a `vm.NameEvent` for each name the compiler declares or resolves: its kind and where it is declared, across files |
 | sandbox stdlib, filesystem imports, or I/O per engine | `evie.Options.FS` (`embed.FS` / `io/fs.FS`; confines imports, and `fs` reads only from it and cannot write), `Options.Stdlib` (allowlist), `Options.NoStdlib`, `Options.Stdin`, `Options.Stdout` |
 | parse a multi-file program once and run in many engines | `evie.ParseFile(fsys, path)`, `ParseProject(fsys, dir)` (a nil `fsys` is the OS) or `ParseSource(name, src)` → `*evie.Bundle`, then `eng.RunBundle(ctx, b)` or `eng.LoadBundle(ctx, b)` |
 | symbols visible without an import | `eng.SetStatic` or `evie.Options.Prelude` |

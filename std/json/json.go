@@ -27,5 +27,8 @@ func Construct() *vm.Package {
 		}
 		return vm.BoxString(string(data)), nil
 	})
+	// what tools such as editors show for each member
+	pkg.Document("encode", "encode(value)", "The value as JSON text; rejects NaN, infinities, functions, tasks, errors and cycles.")
+	pkg.Document("decode", "decode(text)", "The value that JSON text describes.")
 	return pkg
 }

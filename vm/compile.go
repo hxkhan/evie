@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +18,9 @@ import (
 type instruction func(fbr *fiber) (Value, exception)
 
 func (vm *Instance) compile(node ast.Node) instruction {
+	if vm.cp.onName != nil {
+		vm.noteMembers(node)
+	}
 	switch node := node.(type) {
 	case ast.Package:
 		panic("cannot compile package here")
@@ -286,15 +290,17 @@ type sourced struct {
 	node ast.Node
 }
 
-// runPackage compiles a package from all of its files at once and runs its
-// initializers. Declarations are hoisted across the files, so any file can use
-// what another declares, and imports belong to the whole package.
-func (vm *Instance) runPackage(moduleID string, units []unit) (Value, exception) {
-	prevPkg, prevSrc := vm.cp.pkg, vm.cp.src
+// runPackage compiles a package from all of its files at once and, when run
+// is set, runs its initializers. Declarations are hoisted across the files, so
+// any file can use what another declares, and imports belong to the whole
+// package. Without run nothing of the package executes, but it compiles all the
+// same, so it reports the same compile errors.
+func (vm *Instance) runPackage(moduleID string, units []unit, run bool) (Value, exception) {
+	prevPkg, prevSrc, prevErrs := vm.cp.pkg, vm.cp.src, vm.cp.errs
 	prevClosures := vm.cp.closures.Len()
 
 	defer func() {
-		vm.cp.pkg, vm.cp.src = prevPkg, prevSrc
+		vm.cp.pkg, vm.cp.src, vm.cp.errs = prevPkg, prevSrc, prevErrs
 		for vm.cp.closures.Len() > prevClosures {
 			vm.cp.closures.Pop()
 		}
@@ -384,6 +390,11 @@ func (vm *Instance) runPackage(moduleID string, units []unit) (Value, exception)
 
 		Each step covers every file of the package before the next one starts.
 	*/
+	// from here on a compile error is recorded and compiling goes on, so that
+	// one mistake does not hide the others; nothing runs if there are any
+	var errs []*CompileError
+	vm.cp.errs = &errs
+
 	// the statements of every file, each with the file it comes from
 	var code []sourced
 	for _, u := range units {
@@ -409,12 +420,15 @@ func (vm *Instance) runPackage(moduleID string, units []unit) (Value, exception)
 		vm.cp.src = it.src
 		node := it.node
 		if iDec, isIdentDec := node.(ast.Decl); isIdentDec {
-			index := fields.Get(iDec.Name)
-			if _, exists := this.globals[index]; exists {
-				panic(vm.compileErrorAt(iDec, "'%s' is declared twice in this package", iDec.Name))
-			}
-			this.globals[index] = pkgGlobal{Value: new(Value), IsPublic: true, IsStatic: iDec.IsStatic}
-			deferred[iDec.Name] = true
+			vm.tolerate(func() {
+				index := fields.Get(iDec.Name)
+				if _, exists := this.globals[index]; exists {
+					panic(vm.compileErrorAt(iDec, "'%s' is declared twice in this package", iDec.Name))
+				}
+				this.globals[index] = pkgGlobal{Value: new(Value), IsPublic: true, IsStatic: iDec.IsStatic}
+				vm.cp.declareGlobal(this, iDec.Name, NameGlobal, iDec.Pos, iDec.IsStatic, nil)
+				deferred[iDec.Name] = true
+			})
 		}
 	}
 	// constants are resolved by folding even with the fast paths off: which
@@ -431,7 +445,7 @@ func (vm *Instance) runPackage(moduleID string, units []unit) (Value, exception)
 				if !isIdentDec || !iDec.IsStatic || !deferred[iDec.Name] {
 					continue
 				}
-				value, ok := vm.evaluate(iDec.Value).(Value)
+				value, ok := vm.foldConstant(iDec.Value)
 				if !ok {
 					continue
 				}
@@ -449,11 +463,34 @@ func (vm *Instance) runPackage(moduleID string, units []unit) (Value, exception)
 	// 3. compile functions and classes
 	vm.compileHoisted(this, code)
 
-	// 4. run the remaining initializers and statements in source order
-	for _, u := range units {
+	// 4. compile the remaining initializers and statements of every file, and
+	// only when all of it compiled, run them in source order
+	inits := make([]*userFn, len(units))
+	for i, u := range units {
 		vm.cp.src = u.src
-		init := vm.compileInit(this, u.node.Code, deferred)
-		if init == nil {
+		inits[i] = vm.compileInit(this, u.node.Code, deferred)
+	}
+	// report them in the order they appear, file by file
+	fileOrder := make(map[*diag.Source]int, len(units))
+	for i, u := range units {
+		fileOrder[u.src] = i
+	}
+	slices.SortStableFunc(errs, func(a, b *CompileError) int {
+		if c := cmp.Compare(fileOrder[a.Source], fileOrder[b.Source]); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(a.Pos.Line, b.Pos.Line); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Pos.Column, b.Pos.Column)
+	})
+	if err := vm.cp.failed(); err != nil {
+		panic(err)
+	}
+	vm.cp.errs = prevErrs
+	for i, u := range units {
+		init := inits[i]
+		if init == nil || !run {
 			continue
 		}
 		if vm.cp.debugInfo {
@@ -476,6 +513,22 @@ func (vm *Instance) runPackage(moduleID string, units []unit) (Value, exception)
 	return Value{}, nil
 }
 
+// foldConstant gives the value of a constant's initializer while compiling.
+// An initializer that does not compile is not a constant here; its error is
+// reported once, where the initializer itself is compiled.
+func (vm *Instance) foldConstant(node ast.Node) (value Value, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			if _, isCompileError := r.(*CompileError); !isCompileError {
+				panic(r)
+			}
+			value, ok = Value{}, false
+		}
+	}()
+	value, ok = vm.evaluate(node).(Value)
+	return value, ok
+}
+
 // hoistDeclarations creates the functions and classes that code declares at
 // its top level before any body is compiled, so they can be used before their
 // declaration. declare claims a name for one and panics on a duplicate;
@@ -483,28 +536,32 @@ func (vm *Instance) runPackage(moduleID string, units []unit) (Value, exception)
 func (vm *Instance) hoistDeclarations(pkg *Package, code []sourced, declare func(n ast.Node, name string) fields.ID, constant bool) {
 	for _, it := range code {
 		vm.cp.src = it.src
-		switch node := it.node.(type) {
-		case ast.Fn:
-			if node.UsedAsExpr {
-				continue
-			}
-			if node.Name == "" {
-				panic(vm.compileErrorAt(node, "cannot declare an fn statement with no name"))
-			}
-			index := declare(node, node.Name)
-			info := vm.newFuncInfo(node.Name, node.Args, node.IsVariadic, false)
-			info.def = vm.at(node)
-			boxed := boxUserFn(userFn{funcInfoStatic: info})
-			pkg.globals[index] = pkgGlobal{Value: &boxed, IsPublic: true, IsStatic: true, IsConstant: constant}
+		vm.tolerate(func() {
+			switch node := it.node.(type) {
+			case ast.Fn:
+				if node.UsedAsExpr {
+					return
+				}
+				if node.Name == "" {
+					panic(vm.compileErrorAt(node, "cannot declare an fn statement with no name"))
+				}
+				index := declare(node, node.Name)
+				vm.cp.declareGlobal(pkg, node.Name, NameFunction, node.NamePos, true, nil)
+				info := vm.newFuncInfo(node.Name, node.Args, node.IsVariadic, false)
+				info.def = vm.at(node)
+				boxed := boxUserFn(userFn{funcInfoStatic: info})
+				pkg.globals[index] = pkgGlobal{Value: &boxed, IsPublic: true, IsStatic: true, IsConstant: constant}
 
-		case ast.ClassDefinition:
-			if node.Name == "" {
-				panic(vm.compileErrorAt(node, "cannot declare a class with no name"))
+			case ast.ClassDefinition:
+				if node.Name == "" {
+					panic(vm.compileErrorAt(node, "cannot declare a class with no name"))
+				}
+				index := declare(node, node.Name)
+				vm.cp.declareGlobal(pkg, node.Name, NameClass, node.NamePos, true, nil)
+				boxed := boxUserClass(newUserClass(node.Name, vm.at(node), node.Args))
+				pkg.globals[index] = pkgGlobal{Value: &boxed, IsPublic: true, IsStatic: true, IsConstant: constant}
 			}
-			index := declare(node, node.Name)
-			boxed := boxUserClass(newUserClass(node.Name, vm.at(node), node.Args))
-			pkg.globals[index] = pkgGlobal{Value: &boxed, IsPublic: true, IsStatic: true, IsConstant: constant}
-		}
+		})
 	}
 }
 
@@ -516,9 +573,14 @@ func (vm *Instance) compileHoisted(pkg *Package, code []sourced) {
 	for _, it := range code {
 		vm.cp.src = it.src
 		if fn, isFn := it.node.(ast.Fn); isFn && !fn.UsedAsExpr {
-			global := pkg.globals[fields.Get(fn.Name)]
-			ufn := (*userFn)(global.pointer)
-			vm.compileFunction(ufn.funcInfoStatic, fn.Args, fn.Action, nil)
+			global, declared := pkg.globals[fields.Get(fn.Name)]
+			ufn, isFn := global.Value.asUserFn()
+			if !declared || !isFn || ufn.funcInfoStatic.def.src != it.src || ufn.def.pos != fn.Where() {
+				continue // its declaration failed, such as a second one of the name
+			}
+			vm.tolerate(func() {
+				vm.compileFunction(ufn.funcInfoStatic, fn.Args, fn.ArgPos, fn.Action, nil)
+			})
 		}
 	}
 
@@ -534,13 +596,20 @@ func (vm *Instance) compileHoisted(pkg *Package, code []sourced) {
 		if !isClass {
 			continue
 		}
-		global := pkg.globals[fields.Get(cls.Name)]
-		uclass := (*userClass)(global.pointer)
-		if cls.Parent != "" {
+		global, declared := pkg.globals[fields.Get(cls.Name)]
+		uclass, isClass := global.Value.asUserClass()
+		if !declared || !isClass || uclass.def.src != it.src || uclass.def.pos != cls.Where() {
+			continue // its declaration failed, such as a second one of the name
+		}
+		linked := vm.tolerate(func() {
+			if cls.Parent == "" {
+				return
+			}
 			parentGlobal, exists := pkg.globals[fields.Get(cls.Parent)]
 			if !exists {
 				panic(vm.compileErrorAt(cls, "cannot find the parent class '%v'", cls.Parent))
 			}
+			vm.cp.usedGlobal(pkg, fields.Get(cls.Parent), cls.Parent, cls.ParentPos, parentGlobal)
 			parentClass, ok := parentGlobal.Value.asUserClass()
 			if !ok {
 				panic(vm.compileErrorAt(cls, "'%v' is %s, not a class", cls.Parent, article(*parentGlobal.Value)))
@@ -551,6 +620,9 @@ func (vm *Instance) compileHoisted(pkg *Package, code []sourced) {
 				}
 			}
 			uclass.Parent = parentClass
+		})
+		if !linked {
+			continue // its body would only report the same problem again
 		}
 		classByPtr[uclass] = classWork{src: it.src, cls: cls}
 		classOrder = append(classOrder, uclass)
@@ -568,7 +640,7 @@ func (vm *Instance) compileHoisted(pkg *Package, code []sourced) {
 		ensureCompiled(uc.Parent)
 		compiled[uc] = true
 		vm.cp.src = work.src
-		vm.compileClassBody(uc, work.cls)
+		vm.tolerate(func() { vm.compileClassBody(uc, work.cls) })
 	}
 	for _, uc := range classOrder {
 		ensureCompiled(uc)
@@ -634,6 +706,11 @@ func (vm *Instance) bindImport(this *Package, u unit, spec ast.ImportSpec, bound
 
 	v := pkg.Box()
 	this.globals[fields.Get(bindName)] = pkgGlobal{Value: &v, IsPublic: false, IsStatic: true, IsConstant: true}
+	declPos := spec.Pos
+	if spec.Alias != "" {
+		declPos = spec.AliasPos
+	}
+	vm.cp.declareGlobal(this, bindName, NameImport, declPos, true, pkg)
 	if spec.Alias != "" {
 		this.imports = append(this.imports, fmt.Sprintf("%s as %s", path, spec.Alias))
 	} else {
@@ -716,17 +793,19 @@ func (vm *Instance) compileInit(pkg *Package, code []ast.Node, deferred map[stri
 				continue
 			}
 			target := pkg.globals[fields.Get(stmt.Name)].Value
-			value := vm.compile(stmt.Value)
-			steps = append(steps, func(fbr *fiber) (Value, exception) {
-				v, exc := value(fbr)
-				if exc != nil {
-					return v, exc
-				}
-				*target = v
-				return Value{}, nil
+			vm.tolerate(func() {
+				value := vm.compile(stmt.Value)
+				steps = append(steps, func(fbr *fiber) (Value, exception) {
+					v, exc := value(fbr)
+					if exc != nil {
+						return v, exc
+					}
+					*target = v
+					return Value{}, nil
+				})
 			})
 		default:
-			steps = append(steps, vm.compile(stmt))
+			vm.tolerate(func() { steps = append(steps, vm.compile(stmt)) })
 		}
 	}
 
@@ -784,6 +863,11 @@ func (vm *Instance) compileClassBody(uclass *userClass, cls ast.ClassDefinition)
 	var bodyDecls []ast.Decl
 	var methodNodes []ast.Fn
 
+	for i, field := range cls.Args {
+		if i < len(cls.ArgPos) {
+			vm.cp.declareField(uclass, field, cls.ArgPos[i], false)
+		}
+	}
 	if block, ok := cls.Action.(ast.Block); ok {
 		for _, stmt := range block.Code {
 			switch s := stmt.(type) {
@@ -792,6 +876,7 @@ func (vm *Instance) compileClassBody(uclass *userClass, cls ast.ClassDefinition)
 				if _, exists := uclass.FieldOffsets[fid]; exists {
 					panic(vm.compileErrorAt(s, "field '%s' is declared twice on %s", s.Name, cls.Name))
 				}
+				vm.cp.declareField(uclass, s.Name, s.Pos, s.IsStatic)
 				slot := len(uclass.Fields)
 				uclass.Fields = append(uclass.Fields, fid)
 				uclass.StaticFields = append(uclass.StaticFields, s.IsStatic)
@@ -801,6 +886,7 @@ func (vm *Instance) compileClassBody(uclass *userClass, cls ast.ClassDefinition)
 				if s.Name == "" {
 					panic(vm.compileErrorAt(s, "a class method needs a name"))
 				}
+				vm.cp.declareField(uclass, s.Name, s.NamePos, true)
 				methodNodes = append(methodNodes, s)
 			default:
 				panic(vm.compileErrorAt(stmt, "only methods ('fn') and field declarations are allowed inside a class body"))
@@ -914,6 +1000,7 @@ func (vm *Instance) emitClass(cls ast.ClassDefinition) instruction {
 	if !ok {
 		panic(vm.compileErrorAt(cls, "double declaration of %s", cls.Name))
 	}
+	vm.cp.declareLocal(index, cls.Name, NameClass, cls.NamePos, true)
 
 	uclass := newUserClass(cls.Name, vm.at(cls), cls.Args)
 	if vm.cp.debugInfo {
@@ -925,7 +1012,7 @@ func (vm *Instance) emitClass(cls ast.ClassDefinition) instruction {
 		if cls.Parent == cls.Name {
 			panic(vm.compileErrorAt(cls, "'%v' and '%v' inherit from each other", cls.Name, cls.Parent))
 		}
-		parentBinding, err := vm.cp.reach(cls.Parent)
+		parentBinding, err := vm.cp.reach(cls.Parent, cls.ParentPos)
 		if err != nil {
 			panic(vm.compileErrorAt(cls, "cannot find the parent class '%v'", cls.Parent))
 		}

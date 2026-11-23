@@ -18,7 +18,7 @@ func (vm *Instance) emitReturn(node ast.Return) instruction {
 
 		// optimise: returning locals variable
 		if iGet, isIdentGet := node.Value.(ast.Ident); isIdentGet {
-			variable, err := vm.cp.reach(iGet.Name)
+			variable, err := vm.cp.reach(iGet.Name, iGet.Pos)
 			if err != nil {
 				panic(vm.locate(err, iGet))
 			}
@@ -606,6 +606,7 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 		if !ok {
 			panic(vm.compileErrorAt(node, "double declaration of %s in for loop", node.IndexVar))
 		}
+		vm.cp.declareLocal(idx, node.IndexVar, NameVariable, node.IndexPos, false)
 		idxIndex = idx
 	}
 
@@ -613,6 +614,7 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 	if !ok {
 		panic(vm.compileErrorAt(node, "double declaration of %s in for loop", node.ItemVar))
 	}
+	vm.cp.declareLocal(itemIndex, node.ItemVar, NameVariable, node.ItemPos, false)
 
 	cl.loops++
 	bodyInst := vm.compile(node.Action)

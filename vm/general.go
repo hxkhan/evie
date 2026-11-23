@@ -32,6 +32,7 @@ type closure struct {
 	uclass        *userClass
 	loops         int
 	switches      int
+	decls         map[int]nameDecl // slot -> where it is declared, when names are recorded
 }
 
 // mayEscape reports whether a local binding with name may be captured by a
@@ -54,6 +55,8 @@ type compiler struct {
 	closures ds.Slice[*closure] // currently open closures
 
 	resolver PackageResolver
+	onName   func(NameEvent)  // receives declared and resolved names; nil unless a tool asks
+	errs     *[]*CompileError // the compile errors of the package being compiled, which tolerate collects
 }
 
 type runtime struct {
@@ -84,6 +87,11 @@ type Options struct {
 
 	DebugInfo       bool // record slot names, local classes and nested closures during compilation for Dump
 	DisableInlining bool // compile without the fast paths for constants, locals and known callees; for debugging the compiler
+
+	// OnName, when set, receives every name the compiler declares or resolves,
+	// with where it is declared, for tools such as editors. It is called while
+	// code compiles, under the instance's runner.
+	OnName func(NameEvent)
 }
 
 func New(opts Options) (vm *Instance) {
@@ -106,6 +114,7 @@ func New(opts Options) (vm *Instance) {
 			inline:    !opts.DisableInlining,
 			debugInfo: opts.DebugInfo,
 			closures:  make(ds.Slice[*closure], 0, 6),
+			onName:    opts.OnName,
 		},
 		rt: runtime{
 			packages: make(map[string]*Package),
@@ -177,7 +186,7 @@ func (vm *Instance) evalNode(src *diag.Source, node ast.Node, s *stopper) (resul
 	}()
 
 	if pkg, isPackage := node.(ast.Package); isPackage {
-		v, exc := vm.runPackage("", []unit{{src: src, node: pkg}})
+		v, exc := vm.runPackage("", []unit{{src: src, node: pkg}}, true)
 		if exc != nil {
 			return v, exc
 		}
@@ -287,6 +296,20 @@ func (vm *Instance) CompileUnit(pu ParsedUnit) (err error) {
 // package's declared name is used. When ctx is done, the initializers stop with
 // an error whose cause is ctx's cause, and so do those of the packages it imports.
 func (vm *Instance) LoadPackage(ctx context.Context, moduleID string, parsed []ParsedUnit) (*Package, error) {
+	return vm.loadPackage(ctx, moduleID, parsed, true)
+}
+
+// CheckPackage compiles a package from its parsed files the way LoadPackage
+// does, and reports the same compile errors, but runs none of its
+// initializers: nothing in the package executes. It is for tools, such as
+// editors, that check code without running it. The package counts as loaded,
+// with its variables unset, so an instance used for checking is not one to run
+// code in.
+func (vm *Instance) CheckPackage(moduleID string, parsed []ParsedUnit) (*Package, error) {
+	return vm.loadPackage(context.Background(), moduleID, parsed, false)
+}
+
+func (vm *Instance) loadPackage(ctx context.Context, moduleID string, parsed []ParsedUnit, run bool) (*Package, error) {
 	if len(parsed) == 0 {
 		return nil, errors.New("LoadPackage needs at least one unit")
 	}
@@ -300,7 +323,7 @@ func (vm *Instance) LoadPackage(ctx context.Context, moduleID string, parsed []P
 	}
 	s := vm.rt.scope(ctx)
 	defer s.drop()
-	if err := vm.evalPackageUnits(moduleID, units, s); err != nil {
+	if err := vm.evalPackageUnits(moduleID, units, s, run); err != nil {
 		return nil, err
 	}
 	id := moduleID
@@ -311,7 +334,7 @@ func (vm *Instance) LoadPackage(ctx context.Context, moduleID string, parsed []P
 }
 
 // evalPackageUnits runs runPackage under the runner, turning panics into errors
-func (vm *Instance) evalPackageUnits(moduleID string, units []unit, s *stopper) (err error) {
+func (vm *Instance) evalPackageUnits(moduleID string, units []unit, s *stopper, run bool) (err error) {
 	vm.rt.acquire()
 	defer vm.rt.release()
 	defer vm.rt.loadingUnder(s)()
@@ -322,7 +345,7 @@ func (vm *Instance) evalPackageUnits(moduleID string, units []unit, s *stopper) 
 		}
 	}()
 
-	if _, exc := vm.runPackage(moduleID, units); exc != nil {
+	if _, exc := vm.runPackage(moduleID, units, run); exc != nil {
 		return exc
 	}
 	return nil
@@ -393,12 +416,45 @@ func (local) operand()     {}
 func (local) binding()     {}
 func (pkgGlobal) binding() {}
 
-// reach searches for a symbol across all scopes
-func (cp *compiler) reach(name string) (binding, error) {
+// packageNamed returns the package that name refers to when it names one
+// bound in the package being compiled or in the prelude, such as an import,
+// rather than a local. Unlike reach it has no effects: it captures nothing and
+// reports nothing.
+func (cp *compiler) packageNamed(name string) *Package {
+	for scroll := range cp.closures.Len() {
+		if _, local := cp.closures.Last(scroll).scope.Reach(name); local {
+			return nil
+		}
+	}
+	id, known := fields.Find(name)
+	if !known {
+		return nil
+	}
+	var g pkgGlobal
+	var exists bool
+	if cp.pkg != nil {
+		g, exists = cp.pkg.globals[id]
+	}
+	if !exists {
+		cp.registry.RLock()
+		g, exists = cp.prelude.globals[id]
+		cp.registry.RUnlock()
+	}
+	if !exists || !g.IsConstant || g.Value == nil {
+		return nil
+	}
+	pkg, _ := g.Value.AsPackage()
+	return pkg
+}
+
+// reach searches for a symbol across all scopes; pos is where the name is
+// written, for Options.OnName, and may be unknown
+func (cp *compiler) reach(name string, pos diag.Pos) (binding, error) {
 	// 1. check stack
 	for scroll := range cp.closures.Len() {
 		closure := cp.closures.Last(scroll)
 		if binding, success := closure.scope.Reach(name); success {
+			cp.usedLocal(scroll, binding.Index, name, pos, binding.IsStatic)
 			// check if it is a local
 			if scroll == 0 {
 				return local{index: int16(binding.Index), isCaptured: false, isBoxed: closure.mayEscape(name), isStatic: binding.IsStatic}, nil
@@ -418,6 +474,7 @@ func (cp *compiler) reach(name string) (binding, error) {
 	if id, known := fields.Find(name); known {
 		if cp.pkg != nil {
 			if ref, exists := cp.pkg.globals[id]; exists {
+				cp.usedGlobal(cp.pkg, id, name, pos, ref)
 				return ref, nil
 			}
 		}
@@ -425,6 +482,7 @@ func (cp *compiler) reach(name string) (binding, error) {
 		ref, exists := cp.prelude.globals[id]
 		cp.registry.RUnlock()
 		if exists {
+			cp.usedGlobal(nil, id, name, pos, ref)
 			return ref, nil
 		}
 	}

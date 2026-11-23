@@ -1,11 +1,14 @@
 package parser_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/hxkhan/evie/ast"
+	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/parser"
 )
 
@@ -93,6 +96,150 @@ func TestParseErrors(t *testing.T) {
 			t.Errorf("%q: got %q, want it to mention %q", src, err, want)
 		}
 	}
+}
+
+// a syntax error does not end parsing: each statement's mistake is reported,
+// and the skipping in between does not invent errors of its own
+func TestParseReportsEveryError(t *testing.T) {
+	cases := []struct {
+		src  string
+		want []string // each error's message, in order
+	}{
+		{"package main\nfn main() {\n    y := (2\n    z := [1, 2 3]\n    return z\n}",
+			[]string{"expected ')', found 'z'", "expected ',' or ']', found number 3"}},
+		// a missing comma inside a multi-line object is one error, not one per line
+		{"package main\nfn main() {\n    o := {\n        a: 1\n        b: 2\n    }\n    q := )\n}",
+			[]string{"expected ',' or '}', found 'b'", "unexpected ')'"}},
+		{"package main\nfn main() {\n    f(1, 2\n    var n := 0\n    n := := 1\n}",
+			[]string{"expected ',' or ')', found 'var'", "unexpected ':='"}},
+		// a broken method does not take the rest of the class with it
+		{"package main\nclass C(a) {\n    fn get( => a\n    fn ok() => 1\n}\nfn main() { return 1 + }",
+			[]string{"expected a name, found '=>'", "expected a value, found '}'"}},
+		{"package main\nfn main() {\n    switch 1 {\n    case 1: x := )\n    case 2: y := 2\n    default: z := (\n    }\n}",
+			[]string{"unexpected ')'", "unexpected '}'"}},
+		{"package main\nfn main() {\n    s := `a {1 +} b\n    c`\n    t := )\n}",
+			[]string{"expected a value, found '}'", "unexpected ')'"}},
+		{"x := 1 +; y := ); z := 3", []string{"unexpected ';'", "unexpected ')'"}},
+		// a block that is never closed is one error at the end
+		{"package main\nfn main() {\n    if true {\n        x := 1\n}\nfn other() {}",
+			[]string{"source ends here"}},
+		// the package header can be broken too
+		{"package\nfn main() { x := ) }", []string{"the package name", "unexpected ')'"}},
+	}
+	for _, c := range cases {
+		_, err := parser.Parse([]byte(c.src))
+		var got []string
+		var list parser.ErrorList
+		var one *parser.Error
+		switch {
+		case errors.As(err, &list):
+			for _, e := range list {
+				got = append(got, e.Message)
+			}
+		case errors.As(err, &one):
+			got = []string{one.Message}
+		default:
+			t.Errorf("%q: got %v, want syntax errors", c.src, err)
+			continue
+		}
+		if len(got) != len(c.want) {
+			t.Errorf("%q: got %d errors %q, want %d", c.src, len(got), got, len(c.want))
+			continue
+		}
+		for i := range got {
+			if !strings.Contains(got[i], c.want[i]) {
+				t.Errorf("%q: error %d is %q, want it to mention %q", c.src, i+1, got[i], c.want[i])
+			}
+		}
+	}
+}
+
+// the statements around a mistake still parse, and there is a limit to how
+// many errors one source reports
+func TestParseRecovery(t *testing.T) {
+	node, err := parser.Parse([]byte("package main\nfn a() => 1\nfn b() { x := ) }\nfn c() => 3"))
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	pack, ok := node.(ast.Package)
+	if !ok || len(pack.Code) != 3 {
+		t.Fatalf("want all three functions of the package, the broken one without its bad statement, got %#v", node)
+	}
+
+	_, err = parser.Parse([]byte(strings.Repeat("x := )\n", 50)))
+	var list parser.ErrorList
+	if !errors.As(err, &list) || len(list) != 10 {
+		t.Fatalf("want 10 errors, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "(and 9 more)") {
+		t.Errorf("the one-line form should count the others: %q", err)
+	}
+}
+
+// names that declare or name something keep where they are written, and a
+// block knows where it ends, for tools such as editors
+func TestParsePositions(t *testing.T) {
+	src := `package demo imports("io" as out)
+class Point(x, y) : Base {
+    fn norm(scale, ...rest) {
+        for i, v in [x, y] { out.println(i) }
+        return {len: scale}.len
+    }
+}`
+	node, err := parser.Parse([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(src, "\n")
+	// at reports the text a position covers
+	at := func(p diag.Pos) string {
+		if !p.Known() {
+			return "<unknown>"
+		}
+		line := lines[p.Line-1]
+		return line[p.Column-1 : p.Column-1+max(p.Length, 1)]
+	}
+	check := func(what string, p diag.Pos, want string) {
+		t.Helper()
+		if got := at(p); got != want {
+			t.Errorf("%s: position covers %q, want %q", what, got, want)
+		}
+	}
+
+	pack := node.(ast.Package)
+	check("package name", pack.NamePos, "demo")
+	check("import alias", pack.Imports[0].AliasPos, "out")
+
+	cls := pack.Code[0].(ast.ClassDefinition)
+	check("class name", cls.NamePos, "Point")
+	check("parent", cls.ParentPos, "Base")
+	check("field x", cls.ArgPos[0], "x")
+	check("field y", cls.ArgPos[1], "y")
+	body := cls.Action.(ast.Block)
+	check("class body end", body.End, "}")
+	if body.End.Line != 7 {
+		t.Errorf("the class body ends on line %d, want 7", body.End.Line)
+	}
+
+	fn := body.Code[0].(ast.Fn)
+	check("method name", fn.NamePos, "norm")
+	check("parameter", fn.ArgPos[0], "scale")
+	check("variadic parameter", fn.ArgPos[1], "rest")
+	fnBody := fn.Action.(ast.Block)
+	if fnBody.End.Line != 6 {
+		t.Errorf("the method body ends on line %d, want 6", fnBody.End.Line)
+	}
+
+	loop := fnBody.Code[0].(ast.For)
+	check("index variable", loop.IndexPos, "i")
+	check("item variable", loop.ItemPos, "v")
+	call := loop.Action.(ast.Block).Code[0].(ast.Call)
+	check("member name", call.Fn.(ast.FieldAccess).RhsPos, "println")
+
+	ret := fnBody.Code[1].(ast.Return)
+	access := ret.Value.(ast.FieldAccess)
+	check("member after an object", access.RhsPos, "len")
+	check("object key", access.Lhs.(ast.Object).Fields[0].KeyPos, "len")
 }
 
 func TestParseExamples(t *testing.T) {

@@ -13,10 +13,13 @@ type IsInstanceOf struct {
 
 type ClassDefinition struct {
 	diag.Pos
-	Name   string
-	Parent string
-	Args   []string
-	Action Node
+	Name      string
+	NamePos   diag.Pos // where the name is written; unknown for an unnamed class
+	Parent    string
+	ParentPos diag.Pos // where the parent's name is written, when there is one
+	Args      []string
+	ArgPos    []diag.Pos // where each of Args is written
+	Action    Node
 }
 
 func (node ClassDefinition) String() string {
@@ -25,8 +28,9 @@ func (node ClassDefinition) String() string {
 
 type FieldAccess struct {
 	diag.Pos
-	Lhs Node
-	Rhs string
+	Lhs    Node
+	Rhs    string
+	RhsPos diag.Pos // where the member's name is written
 }
 
 func (fa FieldAccess) String() string {

@@ -191,5 +191,10 @@ func ConstructWith(in goio.Reader, out goio.Writer) *vm.Package {
 		}
 		return vm.BoxString(input), nil
 	}).Blocking = true
+	// what tools such as editors show for each member
+	pkg.Document("print", "print(...values)", "Writes the values separated by spaces.")
+	pkg.Document("println", "println(...values)", "Writes the values separated by spaces, then a new line.")
+	pkg.Document("prompt", "prompt(message)", "Prints the message and reads a line; nil at the end of input.")
+	pkg.Document("readln", "readln()", "Reads a line; nil at the end of input.")
 	return pkg
 }

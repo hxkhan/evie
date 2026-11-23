@@ -15,13 +15,15 @@ type Node interface {
 // ImportSpec is one entry in `imports("path")` or `imports("path" as alias)`.
 type ImportSpec struct {
 	diag.Pos
-	Path  string
-	Alias string // empty when not explicitly aliased
+	Path     string
+	Alias    string   // empty when not explicitly aliased
+	AliasPos diag.Pos // where the alias is written, when there is one
 }
 
 type Package struct {
 	diag.Pos
 	Name    string
+	NamePos diag.Pos // where the package name is written
 	Imports []ImportSpec
 	Code    []Node
 }
@@ -62,9 +64,11 @@ func (node StringTemplate) String() string {
 	return b.String()
 }
 
+// Block is code between braces; Pos is its '{' and End its '}'
 type Block struct {
 	diag.Pos
 	Code []Node
+	End  diag.Pos
 }
 
 type Echo struct {

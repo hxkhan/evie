@@ -235,6 +235,9 @@ go build ./evie
 # Inspect compiled packages, globals, classes, slots, escapes and closure captures without running main
 ./evie -dump ./examples/captures.ev
 
+# Report syntax and compile errors without running anything; exit status 1 when there are any
+./evie -check ./examples/fib.ev
+
 # Print the version (also -v), or the commit the binary was built from
 ./evie --version
 ```

@@ -10,7 +10,7 @@ import (
 
 // compileFunction compiles a function body in a scope of its own and fills in
 // the static information the frame protocol needs
-func (vm *Instance) compileFunction(info *funcInfoStatic, params []string, body ast.Node, uclass *userClass) *closure {
+func (vm *Instance) compileFunction(info *funcInfoStatic, params []string, paramPos []diag.Pos, body ast.Node, uclass *userClass) *closure {
 	cl := &closure{freeVars: ds.Set[int]{}, info: info, uclass: uclass, capturedNames: findCapturedNames(body)}
 	cl.scope.TrackSlots = vm.cp.debugInfo
 	vm.cp.closures.Push(cl)
@@ -19,7 +19,11 @@ func (vm *Instance) compileFunction(info *funcInfoStatic, params []string, body 
 
 	// declare the parameters and only then compile the code; a receiver is a constant
 	for i, param := range params {
-		scope.Declare(param, info.isMethod && i == 0)
+		static := info.isMethod && i == 0
+		index, _ := scope.Declare(param, static)
+		if i < len(paramPos) {
+			vm.cp.declareLocal(index, param, NameParameter, paramPos[i], static)
+		}
 	}
 
 	info.code = vm.compile(body)
@@ -67,7 +71,7 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 			parent := vm.cp.closures.Last(0).info
 			parent.ensureDebug().children = append(parent.ensureDebug().children, info)
 		}
-		closure := vm.compileFunction(info, node.Args, node.Action, nil)
+		closure := vm.compileFunction(info, node.Args, node.ArgPos, node.Action, nil)
 		captures := closure.captures
 		return func(fbr *fiber) (Value, exception) {
 			captured := make([]*Value, len(captures))
@@ -91,11 +95,12 @@ func (vm *Instance) emitFn(node ast.Fn) instruction {
 	if !ok {
 		panic(vm.compileErrorAt(node, "double declaration of %s", node.Name))
 	}
+	vm.cp.declareLocal(index, node.Name, NameFunction, node.NamePos, true)
 	if vm.cp.debugInfo {
 		enclosing.info.ensureDebug().children = append(enclosing.info.ensureDebug().children, info)
 	}
 
-	closure := vm.compileFunction(info, node.Args, node.Action, nil)
+	closure := vm.compileFunction(info, node.Args, node.ArgPos, node.Action, nil)
 	captures := closure.captures
 	escapes := enclosing.mayEscape(node.Name)
 
@@ -136,7 +141,7 @@ func (vm *Instance) compileClassMethod(uclass *userClass, node ast.Fn) *userFn {
 
 	info := vm.newFuncInfo(node.Name, methodArgs, node.IsVariadic, true)
 	info.def = vm.at(node)
-	vm.compileFunction(info, methodArgs, node.Action, uclass)
+	vm.compileFunction(info, methodArgs, append([]diag.Pos{{}}, node.ArgPos...), node.Action, uclass)
 
 	return &userFn{funcInfoStatic: info}
 }
@@ -156,6 +161,9 @@ func (vm *Instance) arity(exc exception, node ast.Call, def site) {
 }
 
 func (vm *Instance) emitCall(node ast.Call) instruction {
+	if fa, ok := node.Fn.(ast.FieldAccess); ok {
+		vm.checkPackageMember(fa)
+	}
 	site := vm.at(node)
 	// compile arguments
 	arguments := make([]instruction, len(node.Args))

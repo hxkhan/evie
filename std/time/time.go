@@ -102,6 +102,19 @@ func Construct() *vm.Package {
 	pkg.Set("minute", vm.BoxNumber(60*1000))
 	pkg.Set("hour", vm.BoxNumber(60*60*1000))
 	pkg.Set("day", vm.BoxNumber(24*60*60*1000))
+	// what tools such as editors show for each member
+	pkg.Document("now", "now()", "The current time, in milliseconds since the Unix epoch.")
+	pkg.Document("since", "since(t)", "Milliseconds elapsed since the time t.")
+	pkg.Document("clock", "clock()", "A monotonic clock in milliseconds, for measuring.")
+	pkg.Document("wait", "wait(ms)", "Pauses the current task for ms milliseconds.")
+	pkg.Document("sleep", "sleep(ms)", "Pauses the current task for ms milliseconds; the same as wait.")
+	pkg.Document("timer", "timer(ms)", "Pauses the current task for ms milliseconds; the same as wait.")
+	pkg.Document("format", "format(t, layout?)", "The time t as UTC RFC 3339 text, or in a Go layout such as \"2006-01-02\".")
+	pkg.Document("parse", "parse(text, layout?)", "Milliseconds since the Unix epoch for an RFC 3339 time, or one in a Go layout.")
+	pkg.Document("second", "second", "One second, in milliseconds.")
+	pkg.Document("minute", "minute", "One minute, in milliseconds.")
+	pkg.Document("hour", "hour", "One hour, in milliseconds.")
+	pkg.Document("day", "day", "One day, in milliseconds.")
 	return pkg
 }
 

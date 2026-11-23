@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	"github.com/hxkhan/evie/ast"
+	"github.com/hxkhan/evie/diag"
 	"github.com/hxkhan/evie/internal/fields"
 )
 
@@ -16,6 +17,7 @@ func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
 	if !success {
 		panic(vm.compileErrorAt(node, "double declaration of %s", node.Name))
 	}
+	vm.cp.declareLocal(index, node.Name, NameVariable, node.Pos, node.IsStatic)
 	escapes := cl.mayEscape(node.Name)
 
 	// The initializer sees the bindings from before this declaration, so `x := x + 1`
@@ -100,7 +102,7 @@ func (vm *Instance) emitIdentDec(node ast.Decl) instruction {
 }
 
 func (vm *Instance) emitIdentGet(node ast.Ident) instruction {
-	variable, err := vm.cp.reach(node.Name)
+	variable, err := vm.cp.reach(node.Name, node.Pos)
 	if err != nil {
 		panic(vm.locate(err, node))
 	}
@@ -180,7 +182,7 @@ func (vm *Instance) emitAssign(node ast.Assign) instruction {
 }
 
 func (vm *Instance) emitIdentAssign(lhs ast.Ident, rhs ast.Node) instruction {
-	variable, err := vm.cp.reach(lhs.Name)
+	variable, err := vm.cp.reach(lhs.Name, lhs.Pos)
 	if err != nil {
 		panic(vm.locate(err, lhs))
 	}
@@ -238,6 +240,7 @@ func (vm *Instance) emitIdentAssign(lhs ast.Ident, rhs ast.Node) instruction {
 }
 
 func (vm *Instance) emitFieldAssign(node ast.Assign, fa ast.FieldAccess) instruction {
+	vm.checkPackageMember(fa)
 	site := vm.at(node)
 	if ident, ok := fa.Lhs.(ast.Ident); ok && ident.Name == "super" {
 		panic(vm.compileErrorAt(node, "cannot assign to 'super.%s'", fa.Rhs))
@@ -558,7 +561,7 @@ func (vm *Instance) resolveSuper(node ast.Node) (uclass *userClass, classLocal l
 	if !uclass.hasParent() {
 		panic(vm.compileErrorAt(node, "class '%s' has no parent class", uclass.Name))
 	}
-	thisBinding, err := vm.cp.reach("this")
+	thisBinding, err := vm.cp.reach("this", diag.Pos{})
 	if err != nil {
 		panic(vm.compileErrorAt(node, "'super' can only be used inside a class method"))
 	}
@@ -579,6 +582,7 @@ func (vm *Instance) resolveSuper(node ast.Node) (uclass *userClass, classLocal l
 }
 
 func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
+	vm.checkPackageMember(node)
 	site := vm.at(node)
 	key := fieldKeyOf(node.Rhs)
 	keyData := unsafe.StringData(key.name)
@@ -1277,6 +1281,7 @@ func (vm *Instance) compoundOperator(node ast.MutableBinOp) func(fbr *fiber, cur
 
 // emitCompoundFieldAssign compiles `x.field op= value`, evaluating `x` exactly once
 func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldAccess) instruction {
+	vm.checkPackageMember(fa)
 	site := vm.at(node)
 	apply := vm.compoundOperator(node)
 	op := node.Operator

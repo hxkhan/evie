@@ -43,6 +43,19 @@ func (sc *Scope) CloseBlock() {
 	sc.blocks = sc.blocks[:len(sc.blocks)-1]
 }
 
+// Depth is how many blocks are open
+func (sc *Scope) Depth() int {
+	return len(sc.blocks)
+}
+
+// CloseTo closes blocks until depth are open, as after compiling a statement
+// failed halfway
+func (sc *Scope) CloseTo(depth int) {
+	if depth < len(sc.blocks) {
+		sc.blocks = sc.blocks[:depth]
+	}
+}
+
 // Names lists every binding visible in the scope
 func (sc *Scope) Names() []string {
 	var names []string

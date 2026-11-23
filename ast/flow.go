@@ -20,10 +20,12 @@ type While struct {
 
 type For struct {
 	diag.Pos
-	IndexVar   string // optional, "" if none
-	ItemVar    string // [required]
-	Collection Node   // [required]
-	Action     Node   // [required]
+	IndexVar   string   // optional, "" if none
+	IndexPos   diag.Pos // where IndexVar is written, when there is one
+	ItemVar    string   // [required]
+	ItemPos    diag.Pos // where ItemVar is written
+	Collection Node     // [required]
+	Action     Node     // [required]
 }
 
 type Catch struct {

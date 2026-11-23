@@ -7,8 +7,9 @@ import (
 )
 
 type ObjectField struct {
-	Key   string
-	Value Node
+	Key    string
+	KeyPos diag.Pos // where the key is written
+	Value  Node
 }
 
 func (node ObjectField) String() string {

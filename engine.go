@@ -38,6 +38,7 @@ type Engine struct {
 	packages     map[string]*vm.Package // host packages by name (cloned per engine)
 	bundleLoaded map[string]*vm.Package // canonical key -> compiled package for path-imported modules
 	curBundlePkg *parsedPackage         // package currently being compiled during LoadBundle
+	checking     bool                   // packages are compiled without running them (Check)
 	ran          bool
 	closed       atomic.Bool
 	loading      sync.Mutex // held by a load or evaluation, so they take turns over the compiler
@@ -288,7 +289,13 @@ func (e *Engine) compileParsedPackage(ctx context.Context, p *parsedPackage) err
 
 	prevPkg := e.curBundlePkg
 	e.curBundlePkg = p
-	pkg, err := e.vm.LoadPackage(ctx, p.key, vmUnits)
+	var pkg *vm.Package
+	var err error
+	if e.checking {
+		pkg, err = e.vm.CheckPackage(p.key, vmUnits)
+	} else {
+		pkg, err = e.vm.LoadPackage(ctx, p.key, vmUnits)
+	}
 	e.curBundlePkg = prevPkg
 	if err != nil {
 		if p.importedBy != nil {
@@ -337,6 +344,32 @@ func (e *Engine) LoadBundle(ctx context.Context, b *Bundle) error {
 	}
 	for _, p := range b.packages {
 		if err := e.compileParsedPackage(ctx, p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Check compiles a pre-parsed Bundle, and every package it imports, without
+// running any of it: no package initializer, no main, nothing a script does at
+// its top level. It returns the compile errors a run would stop with before
+// starting (a vm.CompileErrors when a package has several), or nil. Like a
+// run, it uses the engine's host packages and
+// options. The checked packages count as loaded but never ran, so use an
+// engine for checking only.
+func (e *Engine) Check(b *Bundle) error {
+	e.loading.Lock()
+	defer e.loading.Unlock()
+	if err := e.adopt(b); err != nil {
+		return err
+	}
+	if b.script != nil {
+		// compiling a script does not run it
+		return e.vm.CompileUnit(vm.ParsedUnit{Source: b.script.src, Node: b.script.node})
+	}
+	e.checking = true
+	for _, p := range b.packages {
+		if err := e.compileParsedPackage(context.Background(), p); err != nil {
 			return err
 		}
 	}

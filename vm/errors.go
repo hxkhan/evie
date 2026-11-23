@@ -292,10 +292,125 @@ func (vm *Instance) memberCompileError(node ast.Node, name string, v Value) *Com
 	return ce
 }
 
+// checkPackageMember stops compiling when fa names a member that an imported
+// package does not have. A package is a constant, so this is known while
+// compiling, whether the member is read, called or assigned and whether or not
+// the fast paths are on.
+func (vm *Instance) checkPackageMember(fa ast.FieldAccess) {
+	ident, ok := fa.Lhs.(ast.Ident)
+	if !ok {
+		return
+	}
+	pkg := vm.cp.packageNamed(ident.Name)
+	if pkg == nil {
+		return
+	}
+	if id, known := fields.Find(fa.Rhs); known {
+		if g, exists := pkg.globals[id]; exists && g.IsPublic {
+			return
+		}
+	}
+	panic(vm.memberCompileError(fa, fa.Rhs, pkg.Box()))
+}
+
 // locate gives a compile error that was raised without a position the node it concerns
 func (vm *Instance) locate(err error, node ast.Node) error {
 	if ce, ok := err.(*CompileError); ok && !ce.Pos.Known() {
 		ce.Source, ce.Pos = vm.cp.src, node.Where()
 	}
 	return err
+}
+
+// CompileErrors is what compiling a package returns when it finds more than
+// one compile error, in the order it found them. errors.As finds each
+// *CompileError in it.
+type CompileErrors []*CompileError
+
+func (l CompileErrors) Error() string {
+	if len(l) == 1 {
+		return l[0].Error()
+	}
+	return fmt.Sprintf("%s (and %d more)", l[0].Error(), len(l)-1)
+}
+
+func (l CompileErrors) Unwrap() []error {
+	errs := make([]error, len(l))
+	for i, e := range l {
+		errs[i] = e
+	}
+	return errs
+}
+
+// Diagnostics returns the report of every error, for tools that show them all
+func (l CompileErrors) Diagnostics() []*diag.Report {
+	reports := make([]*diag.Report, len(l))
+	for i, e := range l {
+		reports[i] = &e.Report
+	}
+	return reports
+}
+
+// maxCompileErrors is how many compile errors one package reports before
+// compiling it stops
+const maxCompileErrors = 10
+
+// tolerate runs compile, a part of a package that compiles on its own such as
+// a function body. A compile error in it is recorded rather than ending the
+// package, so one mistake does not hide the others; the compiler's state is
+// put back as it was before. Anything else compile stops with passes on, and
+// outside a package being compiled every error does. It reports whether
+// compile finished.
+func (vm *Instance) tolerate(compile func()) (ok bool) {
+	cp := &vm.cp
+	if cp.errs == nil {
+		compile()
+		return true
+	}
+	closures, src := cp.closures.Len(), cp.src
+	var cl *closure
+	var depth, loops, switches int
+	if closures > 0 {
+		cl = cp.closures.Last(0)
+		depth, loops, switches = cl.scope.Depth(), cl.loops, cl.switches
+	}
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		ce, isCompileError := r.(*CompileError)
+		if !isCompileError {
+			panic(r)
+		}
+		for cp.closures.Len() > closures {
+			cp.closures.Pop()
+		}
+		if cl != nil {
+			cl.scope.CloseTo(depth)
+			cl.loops, cl.switches = loops, switches
+		}
+		cp.src = src
+		*cp.errs = append(*cp.errs, ce)
+		if len(*cp.errs) >= maxCompileErrors {
+			panic(cp.failed())
+		}
+		ok = false
+	}()
+	compile()
+	return true
+}
+
+// failed is the error the compile errors recorded so far make, or nil
+func (cp *compiler) failed() error {
+	if cp.errs == nil {
+		return nil
+	}
+	switch errs := *cp.errs; len(errs) {
+	case 0:
+		return nil
+	case 1:
+		return errs[0]
+	default:
+		return CompileErrors(slices.Clone(errs))
+	}
 }

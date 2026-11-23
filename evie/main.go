@@ -31,6 +31,7 @@ const usage = `Usage:
   evie [flags]                         start an interactive REPL
   evie [flags] <file.ev | directory> [args...]
   evie [flags] -e <code> [args...]
+  evie -check <file.ev | directory>    report errors without running anything
 
 Flags:
 `
@@ -42,6 +43,7 @@ func main() {
 	timing := flag.Bool("t", false, "print the execution time")
 	inline := flag.Bool("inline", true, "let the compiler use its fast paths; false is for debugging the compiler")
 	dump := flag.Bool("dump", false, "compile and print packages, globals, classes, slots, escapes and captures without running main")
+	check := flag.Bool("check", false, "compile without running anything, report the errors, and exit with status 1 if there are any")
 	flag.Usage = func() {
 		fmt.Fprint(flag.CommandLine.Output(), usage)
 		flag.PrintDefaults()
@@ -59,6 +61,24 @@ func main() {
 			hasCode = true
 		}
 	})
+
+	if *check {
+		if !hasCode && flag.NArg() == 0 {
+			fmt.Fprintln(os.Stderr, "error: -check requires a file, directory, or -e code")
+			os.Exit(2)
+		}
+		eng := evie.New(evie.Options{Debug: evie.Debug{NoFastPaths: !*inline}})
+		var err error
+		if hasCode {
+			err = checkInline(eng, *code)
+		} else {
+			err = checkTarget(eng, flag.Arg(0))
+		}
+		if err != nil {
+			report(err)
+		}
+		return
+	}
 
 	var scriptArgs []string
 	switch {
@@ -157,17 +177,40 @@ func dumpInline(eng *evie.Engine, code string) error {
 
 // dumpTarget compiles a file or project directory without running main
 func dumpTarget(eng *evie.Engine, target string) error {
-	var b *evie.Bundle
-	var err error
-	if info, statErr := os.Stat(target); statErr == nil && info.IsDir() {
-		b, err = evie.ParseProject(nil, target)
-	} else {
-		b, err = evie.ParseFile(nil, target)
-	}
+	b, err := parseTarget(target)
 	if err != nil {
 		return err
 	}
 	return eng.LoadBundle(context.Background(), b)
+}
+
+// checkTarget compiles a file or project directory without running any of it
+func checkTarget(eng *evie.Engine, target string) error {
+	b, err := parseTarget(target)
+	if err != nil {
+		return err
+	}
+	return eng.Check(b)
+}
+
+// checkInline compiles code from the command line without running it
+func checkInline(eng *evie.Engine, code string) error {
+	if !hasPackageHeader(code) {
+		return eng.NewSession().Compile(code)
+	}
+	b, err := evie.ParseSource("-e", []byte(code))
+	if err != nil {
+		return err
+	}
+	return eng.Check(b)
+}
+
+// parseTarget parses a file, or a directory as a project
+func parseTarget(target string) (*evie.Bundle, error) {
+	if info, err := os.Stat(target); err == nil && info.IsDir() {
+		return evie.ParseProject(nil, target)
+	}
+	return evie.ParseFile(nil, target)
 }
 
 // hasPackageHeader reports whether code starts with a `package <name>` header,

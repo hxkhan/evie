@@ -1163,13 +1163,10 @@ func (vm *Instance) emitObject(node ast.Object) instruction {
 		values[i] = vm.compile(f.Value)
 	}
 	keys = slices.Clip(keys)
-	var index map[string]int
-	if len(keys) > maxLinearKeys {
-		index = indexOf(keys)
-	}
+	big := indexOf(keys)
 
 	return func(fbr *fiber) (Value, exception) {
-		obj := newShaped(keys, index)
+		obj := newShaped(keys, big)
 		for i, value := range values {
 			v, err := value(fbr)
 			if err != nil {

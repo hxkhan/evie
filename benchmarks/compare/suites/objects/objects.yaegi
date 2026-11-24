@@ -1,0 +1,29 @@
+package main
+
+import (
+	"fmt"
+	"strconv"
+)
+
+func main() {
+	keys := make([]string, 500)
+	for i := range keys {
+		keys[i] = "k" + strconv.Itoa(i)
+	}
+
+	total := 0
+	for r := 0; r < 400; r++ {
+		m := map[string]int{}
+		for j := 0; j < 500; j++ {
+			m[keys[j]] = j + r
+		}
+		for j := 0; j < 500; j++ {
+			k := keys[j]
+			m[k] = m[k] + j%5
+		}
+		for j := 0; j < 500; j++ {
+			total += m[keys[j]]
+		}
+	}
+	fmt.Println(total)
+}

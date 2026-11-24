@@ -1,10 +1,10 @@
 # Cross-Language Benchmarks
 
-Compares Evie against other dynamically typed scripting interpreters on a shared suite of 8 workloads. Every implementation must print the exact checksum in `suites/<name>/expect.txt`, so a broken port fails instead of reporting a misleading time.
+Compares Evie against other dynamically typed scripting interpreters, and against every widely used language a Go program can embed, on a shared suite of 8 workloads. Every implementation must print the exact checksum in `suites/<name>/expect.txt`, so a broken port fails instead of reporting a misleading time.
 
 ## Runtimes
 
-The runner builds a fresh `evie` binary from this repository and automatically picks up whichever of the following runtimes are installed on `PATH`:
+The runner builds a fresh `evie` binary from this repository, builds the other Go-embeddable languages from the [`runners`](./runners) module, and picks up whichever of the remaining runtimes are installed on `PATH`:
 
 | Name | Binary | Notes |
 |---|---|---|
@@ -15,6 +15,10 @@ The runner builds a fresh `evie` binary from this repository and automatically p
 | `python` | `python` or `python3` | CPython 3 |
 | `wren` | `wren` | Wren VM |
 | `tengo` | `tengo` | Pure Go interpreter |
+| `goja` | built from `runners/goja` | JavaScript in Go, embedded with `console.log` writing to stdout |
+| `gopher-lua` | built from `runners` (`glua`) | Lua 5.1 in Go; runs the `.lua` programs |
+| `starlark` | built from `runners/starlark` | starlark-go, with `while` and recursion allowed |
+| `yaegi` | built from `runners` (`yaegi`) | Interpreted Go; the programs are `.yaegi` files |
 | `node-jit` | `node` | Opt-in via `-jit` or `-langs` (V8 TurboFan JIT) |
 
 ## Usage

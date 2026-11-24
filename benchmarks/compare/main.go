@@ -33,6 +33,7 @@ type Runtime struct {
 	Name     string   // display name in tables
 	Ext      string   // file extension in suites/<bench>/<bench>.<ext>
 	Bins     []string // executable candidates on PATH (empty for built evie)
+	Build    string   // a package of the runners module to build instead of looking on PATH
 	Args     []string // extra flags before the script path
 	OptIn    bool     // skipped unless -jit or explicitly requested via -langs
 	Resolved string   // resolved binary path
@@ -69,6 +70,11 @@ var defaultRuntimes = []Runtime{
 	{Name: "python", Ext: "py", Bins: []string{"python", "python3"}},
 	{Name: "wren", Ext: "wren", Bins: []string{"wren"}},
 	{Name: "tengo", Ext: "tengo", Bins: []string{"tengo"}},
+	// the other languages a Go program can embed, built from the runners module
+	{Name: "goja", Ext: "js", Build: "./goja"},
+	{Name: "gopher-lua", Ext: "lua", Build: "github.com/yuin/gopher-lua/cmd/glua"},
+	{Name: "starlark", Ext: "star", Build: "./starlark"},
+	{Name: "yaegi", Ext: "yaegi", Build: "github.com/traefik/yaegi/cmd/yaegi"},
 	{Name: "node-jit", Ext: "js", Bins: []string{"node"}, OptIn: true},
 }
 
@@ -117,7 +123,7 @@ func main() {
 	atExit(cleanup)
 	defer cleanup()
 
-	active := selectRuntimes(evieBin, *langs, *includeJIT)
+	active := selectRuntimes(evieBin, root, *langs, *includeJIT)
 	if len(active) == 0 {
 		fatal(fmt.Errorf("no requested runtimes are available on PATH"))
 	}
@@ -192,7 +198,7 @@ func main() {
 	}
 }
 
-func selectRuntimes(evieBin, filterCSV string, includeJIT bool) []Runtime {
+func selectRuntimes(evieBin, compareRoot, filterCSV string, includeJIT bool) []Runtime {
 	var requested map[string]bool
 	if filterCSV != "" {
 		requested = map[string]bool{}
@@ -216,6 +222,17 @@ func selectRuntimes(evieBin, filterCSV string, includeJIT bool) []Runtime {
 
 		if rt.Name == "evie" {
 			rt.Resolved = evieBin
+			out = append(out, rt)
+			continue
+		}
+
+		if rt.Build != "" {
+			bin, err := buildRunner(compareRoot, filepath.Dir(evieBin), rt)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not build %s, skipping: %v\n", rt.Name, err)
+				continue
+			}
+			rt.Resolved = bin
 			out = append(out, rt)
 			continue
 		}
@@ -489,6 +506,23 @@ func buildEvie(repoRoot, compareRoot string) (string, func(), error) {
 	// Pre-launch once so first-run OS binary scans (e.g. Windows Defender) don't skew -warmup 0 runs.
 	_ = exec.Command(binPath, "--version").Run()
 	return binPath, func() { os.RemoveAll(tmpDir) }, nil
+}
+
+// buildRunner builds a runtime from the runners module, which keeps the
+// embeddable Go interpreters and their versions out of Evie's own go.mod,
+// into dir next to the evie binary
+func buildRunner(compareRoot, dir string, rt Runtime) (string, error) {
+	bin := filepath.Join(dir, rt.Name)
+	if goruntime.GOOS == "windows" {
+		bin += ".exe"
+	}
+	cmd := exec.Command("go", "build", "-o", bin, rt.Build)
+	cmd.Dir = filepath.Join(compareRoot, "runners")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("%v\n%s", err, strings.TrimSpace(string(out)))
+	}
+	_ = exec.Command(bin, "-h").Run() // a first launch is scanned by some antivirus; keep it out of the timings
+	return bin, nil
 }
 
 func discoverSuites(suitesDir string, re *regexp.Regexp) ([]string, error) {

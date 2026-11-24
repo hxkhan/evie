@@ -202,11 +202,11 @@ kbd { padding: 1px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 
 .bench { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 56px; align-items: center; padding-block: 64px; }
 .bench__text p { color: var(--ink-soft); }
-.bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; --max: 248.8; }
+.bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; --max: 587.4; }
 .bar { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); align-items: center; gap: 14px; font-size: 0.92rem; }
 .bar__name { color: var(--ink-soft); font-weight: 500; }
 .bar__value {
-  position: relative; display: block; width: calc(var(--v) / var(--max) * 100%); min-width: 4.5em;
+  position: relative; display: block; width: calc(var(--v) / var(--max) * 100%); min-width: 7.2em;
   padding: 5px 10px; border-radius: 6px; background: var(--paper-sunk); border: 1px solid var(--line);
   font: 500 0.8rem var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;
 }

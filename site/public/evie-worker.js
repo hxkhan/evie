@@ -1,7 +1,9 @@
 // The playground's interpreter: Evie compiled to WebAssembly, running in this
 // worker so a busy program never freezes the page. The page posts
-// {type: "run", code, stdin}; Evie posts back "ready", "out" chunks and a
-// "done" message. To stop a program the page terminates the worker.
+// {type: "run", code}; Evie posts back "ready", "out" chunks, a "read" when
+// the program waits for a line, and a "done" message. The page answers a read
+// with {type: "input", line} or {type: "eof"}. To stop a program the page
+// terminates the worker.
 importScripts("wasm_exec.js");
 
 const go = new Go();
@@ -23,5 +25,15 @@ load()
 
 onmessage = (event) => {
   const msg = event.data;
-  if (msg.type === "run") self.evieRun(msg.code, msg.stdin ?? "");
+  switch (msg.type) {
+    case "run":
+      self.evieRun(msg.code);
+      break;
+    case "input":
+      self.evieInput(msg.line);
+      break;
+    case "eof":
+      self.evieEOF();
+      break;
+  }
 };

@@ -11,7 +11,7 @@
       <p class="install"><span class="install__label">Install the CLI</span><code>go install github.com/hxkhan/evie/evie@latest</code></p>
     </div>
     <figure class="hero__code code-card">
-      <figcaption><span>greet.ev</span><a href="{{base}}play/#example=hero">Run it</a></figcaption>
+      <figcaption><span>account.ev</span><a href="{{base}}play/#example=hero">Run it</a></figcaption>
       <pre class="code" data-sample="hero.ev"></pre>
     </figure>
   </section>
@@ -49,7 +49,7 @@
   <section class="bench" aria-labelledby="bench-title">
     <div class="bench__text">
       <h2 id="bench-title" class="section-title">How fast</h2>
-      <p>Geometric mean of eight checksum-verified workloads, from recursion and closures to strings and matrix math, process start included. Lower is better.</p>
+      <p>Geometric mean of eight workloads, from recursion and closures to strings and matrix math, process start included. Lower is better.</p>
       <p class="small"><a href="{{repo}}/tree/main/benchmarks/compare">The suite and how it was measured</a></p>
     </div>
     <ol class="bars" aria-label="Geomean time per runtime, in milliseconds">
@@ -66,7 +66,7 @@
   <section class="embed" aria-labelledby="embed-title">
     <div class="embed__text">
       <h2 id="embed-title" class="section-title">A few lines of Go</h2>
-      <p>Hand scripts a package of Go functions, load a program, and call into it. Arguments and results convert on the way in and out.</p>
+      <p>Create an engine, load a script, and call its functions from Go. Arguments and results convert on the way in and out.</p>
       <a class="button" href="{{base}}docs/go-host-embedding/">Embedding guide</a>
     </div>
     <figure class="code-card">

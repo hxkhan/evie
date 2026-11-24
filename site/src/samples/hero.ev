@@ -1,16 +1,23 @@
-package main imports("io", "time")
+package main imports("io")
 
-class Greeter(name) {
-    fn greet() {
-        time.sleep(10)
-        return `Hello, {this.name}!`
+class Account(owner) {
+    var balance := 0
+
+    fn deposit(amount) {
+        this.balance += amount
+    }
+
+    fn withdraw(amount) {
+        if amount > this.balance {
+            throw error("not enough money")
+        }
+        this.balance -= amount
     }
 }
 
 fn main() {
-    names := ["Ada", "Grace", "Linus"]
-    tasks := names.map(fn(n) => go Greeter(n).greet())
-    for t in tasks {
-        io.println(await t)
-    }
+    account := Account("Ada")
+    account.deposit(100)
+    account.withdraw(30)
+    io.println(`{account.owner} has {account.balance} left`)
 }

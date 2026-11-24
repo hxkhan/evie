@@ -1,7 +1,6 @@
 package main imports("io", "math")
 
-// Reads temperatures from the Input tab, such as 21C or 70F, and converts
-// each to the other scale. Edit the input and run again.
+// convert turns a temperature such as 21C or 70F into the other scale
 fn convert(text) {
     unit := text.slice(-1).toUpper()
     if unit != "C" && unit != "F" {
@@ -18,17 +17,16 @@ fn convert(text) {
 }
 
 fn main() {
-    var line := io.readln()
-    while line != nil {
-        line = line.trim()
-        if line != "" {
-            result := catch(convert(line))
-            if result is error {
-                io.println(result.message)
-            } else {
-                io.println(result)
-            }
+    io.println("Type a temperature such as 21C or 70F, or nothing to stop.")
+    var line := io.prompt("> ")
+    while line != nil && line.trim() != "" {
+        result := catch(convert(line.trim()))
+        if result is error {
+            io.println(result.message)
+        } else {
+            io.println(result)
         }
-        line = io.readln()
+        line = io.prompt("> ")
     }
+    io.println("Bye!")
 }

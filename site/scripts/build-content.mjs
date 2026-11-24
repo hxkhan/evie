@@ -207,16 +207,16 @@ sections.forEach((s, i) => {
 // ---------------------------------------------------------------- examples
 
 // the playground's examples, in the order the picker lists them; each is
-// src/samples/<id>.ev, and stdin, when given, fills the Input tab
+// src/samples/<id>.ev
 const samples = [
-  { id: "hero", title: "Greeting tasks" },
+  { id: "hero", title: "Bank account" },
   { id: "words", title: "Word count" },
   { id: "shapes", title: "Shapes and inheritance" },
   { id: "closures", title: "Closures" },
   { id: "errors", title: "Handling errors" },
   { id: "parallel", title: "Waiting in parallel" },
   { id: "shared", title: "Shared state without locks" },
-  { id: "temperatures", title: "Reading input", stdin: "21C\n70F\n-40C\n98.6F\nwarm\n" },
+  { id: "temperatures", title: "Reading input" },
   { id: "fib", title: "Fibonacci" },
 ];
 const examples = samples.map((s) => ({ ...s, code: readFileSync(join(site, "src/samples", `${s.id}.ev`), "utf8").replaceAll("\r\n", "\n") }));

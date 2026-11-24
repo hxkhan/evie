@@ -105,6 +105,8 @@ kbd { padding: 1px 5px; border: 1px solid var(--line-strong); border-bottom-widt
   padding-left: var(--gutter-l); padding-right: var(--gutter-r);
   display: flex; align-items: center; gap: 28px;
 }
+/* the playground uses the whole window, and its header lines up with it */
+.page--play .site-header__inner { max-width: none; }
 .brand { display: inline-flex; align-items: center; gap: 9px; color: var(--ink); text-decoration: none; font-family: var(--font-display); font-size: 1.45rem; font-weight: 600; letter-spacing: -0.02em; }
 .brand:hover { color: var(--ink); }
 .mark { width: 28px; height: 28px; flex: none; }
@@ -260,6 +262,8 @@ kbd { padding: 1px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .prose th, .prose td { padding: 9px 14px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 .prose th { background: var(--paper-sunk); font-weight: 600; color: var(--ink); }
 .prose tr:last-child td { border-bottom: 0; }
+/* anywhere would let a column shrink until a word such as `function` breaks */
+.prose td code { overflow-wrap: break-word; }
 
 .code-block { position: relative; margin: 20px 0; }
 .code-block .code { padding-right: 72px; }
@@ -307,10 +311,36 @@ kbd { padding: 1px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 html:has(.page--play) { height: 100%; }
 .play { display: flex; flex-direction: column; height: calc(100dvh - var(--header-h) - 1px); padding: 14px var(--gutter-r) 16px var(--gutter-l); gap: 12px; }
 .play__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.select select {
-  appearance: none; padding: 9px 36px 9px 14px; border: 1px solid var(--line-strong); border-radius: 999px;
-  background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='%23888' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 12px center / 12px;
-  color: var(--ink); font: 500 0.95rem var(--font-body); cursor: pointer; max-width: 60vw;
+/* the example picker: a button that opens a listbox */
+.picker { position: relative; }
+.picker__button {
+  display: inline-flex; align-items: center; gap: 12px; max-width: 60vw; padding: 9px 14px 9px 16px;
+  border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface);
+  color: var(--ink); font: 500 0.95rem var(--font-body); cursor: pointer;
+}
+.picker__button:hover { border-color: var(--muted); }
+/* focused or open, the border itself turns orange: 2px, drawn inside the edge */
+.picker__button:focus-visible, .picker__button[aria-expanded="true"] { outline: none; border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.picker__button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker__button svg { width: 12px; height: 12px; flex: none; fill: none; stroke: var(--muted); stroke-width: 1.5; transition: transform 0.15s; }
+.picker__button[aria-expanded="true"] svg { transform: rotate(180deg); }
+.picker__menu {
+  position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; min-width: 250px; max-height: min(440px, 65vh); overflow-y: auto;
+  margin: 0; padding: 6px; list-style: none; border: 1px solid var(--line); border-radius: calc(var(--radius) + 2px);
+  background: var(--surface); box-shadow: var(--shadow);
+}
+.picker__menu:focus { outline: none; }
+.picker__heading { padding: 6px 10px 6px; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.picker__menu [role="option"] {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 10px;
+  border-radius: var(--radius-small); color: var(--ink-soft); font: 0.93rem var(--font-body); cursor: pointer;
+}
+.picker__menu [role="option"].is-active { background: var(--paper-sunk); color: var(--ink); }
+.picker__menu [role="option"][aria-selected="true"] { color: var(--accent); font-weight: 500; }
+.picker__menu [role="option"][aria-selected="true"]::after {
+  content: ""; width: 14px; height: 14px; flex: none; background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5l3 3 7-7' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5l3 3 7-7' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 .status { margin-left: auto; font-size: 0.85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .status.is-error { color: var(--error); }
@@ -328,22 +358,21 @@ html:has(.page--play) { height: 100%; }
 .editor .cm-matchingBracket { background: color-mix(in srgb, var(--accent) 16%, transparent); outline: none; }
 .editor .cm-focused { outline: none; }
 
-.tabs { display: flex; align-items: center; gap: 4px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--paper); }
-.tabs button { padding: 5px 12px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font: 500 0.88rem var(--font-body); cursor: pointer; }
-.tabs button[aria-selected="true"] { background: var(--paper-sunk); color: var(--ink); }
-.tabs__action { margin-left: auto; }
+.pane__bar { display: flex; align-items: center; gap: 4px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--paper); }
+.pane__title { padding: 5px 12px; color: var(--ink); font: 500 0.88rem var(--font-body); }
+.pane__bar button { margin-left: auto; padding: 5px 12px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font: 500 0.88rem var(--font-body); cursor: pointer; }
+.pane__bar button:hover { color: var(--ink); }
 .output { flex: 1; overflow: auto; padding: 14px 16px; font: 0.85rem/1.6 var(--font-mono); font-variant-ligatures: none; overflow-wrap: anywhere; }
 .output .out, .output .result, .output .error { white-space: pre-wrap; }
 .output__hint { margin: 0; font-family: var(--font-body); color: var(--muted); white-space: normal; }
 .output .out { color: var(--ink); }
+.output .typed { color: var(--accent); }
+/* where the user types a line the program reads, right after its prompt */
+.output .term-input { width: 60%; min-width: 8ch; padding: 0; border: 0; outline: 0; background: transparent; color: var(--accent); font: inherit; caret-color: var(--accent); }
 .output .result { display: block; margin-top: 8px; color: var(--ok); }
 .output .result::before { content: "→ "; color: var(--muted); }
 .output .error { display: block; margin-top: 8px; padding: 10px 12px; border-radius: var(--radius-small); background: var(--error-soft); color: var(--error); }
 .output .meta { display: block; margin-top: 10px; font-family: var(--font-body); font-size: 0.78rem; color: var(--muted); }
-.input { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }
-.input label { font-size: 0.88rem; color: var(--ink-soft); }
-.input textarea { flex: 1; min-height: 120px; resize: none; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-small); background: var(--paper); color: var(--ink); font: 0.85rem/1.6 var(--font-mono); }
-.input p { margin: 0; }
 
 @media (max-width: 860px) {
   .play { height: auto; min-height: calc(100dvh - var(--header-h)); }

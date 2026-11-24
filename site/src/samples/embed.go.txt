@@ -4,25 +4,21 @@ import (
 	"fmt"
 
 	"github.com/hxkhan/evie"
-	"github.com/hxkhan/evie/vm"
 )
 
 func main() {
-	// a package of Go functions that scripts can import
-	api := vm.NewPackage("api")
-	api.Native("user", vm.Func1(func(id int) string {
-		return fmt.Sprintf("user-%d", id)
-	}))
-
-	eng := evie.New(evie.Options{Packages: []*vm.Package{api}})
+	eng := evie.New()
 	defer eng.Close()
 
-	_, err := eng.Eval(`package main imports("api")
-fn greet(id) => "Hi, " + api.user(id).toUpper()`)
+	_, err := eng.Eval(`package main
+fn greet(name) => "Hello, " + name + "!"`)
 	if err != nil {
 		panic(err)
 	}
 
-	v, _ := eng.Call("main.greet", 7)
-	fmt.Println(v) // Hi, USER-7
+	v, err := eng.Call("main.greet", "Gopher")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(v) // Hello, Gopher!
 }

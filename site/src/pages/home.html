@@ -41,7 +41,7 @@
       </article>
       <article class="feature">
         <h3>Fast, in pure Go</h3>
-        <p>No cgo, no JIT, a closure compiler over a 16-byte value. It runs on par with Lua 5.4 and about twice as fast as V8's interpreter.</p>
+        <p>No cgo, no JIT, a closure compiler over a 16-byte value. It runs a little faster than Lua 5.4 overall and about twice as fast as V8's interpreter.</p>
       </article>
     </div>
   </section>
@@ -53,13 +53,13 @@
       <p class="small"><a href="{{repo}}/tree/main/benchmarks/compare">The suite and how it was measured</a></p>
     </div>
     <ol class="bars" aria-label="Geomean time per runtime, in milliseconds">
-      <li class="bar bar--evie" style="--v:56.8"><span class="bar__name">Evie</span><span class="bar__value">56.8 ms</span></li>
-      <li class="bar" style="--v:56.5"><span class="bar__name">Lua 5.4</span><span class="bar__value">56.5 ms</span></li>
-      <li class="bar" style="--v:83.8"><span class="bar__name">QuickJS</span><span class="bar__value">83.8 ms</span></li>
-      <li class="bar" style="--v:115.9"><span class="bar__name">Python 3</span><span class="bar__value">115.9 ms</span></li>
-      <li class="bar" style="--v:124.2"><span class="bar__name">V8 jitless</span><span class="bar__value">124.2 ms</span></li>
-      <li class="bar" style="--v:160.8"><span class="bar__name">Wren</span><span class="bar__value">160.8 ms</span></li>
-      <li class="bar" style="--v:249.9"><span class="bar__name">Tengo</span><span class="bar__value">249.9 ms</span></li>
+      <li class="bar bar--evie" style="--v:54.7"><span class="bar__name">Evie</span><span class="bar__value">54.7 ms</span></li>
+      <li class="bar" style="--v:56.9"><span class="bar__name">Lua 5.4</span><span class="bar__value">56.9 ms</span></li>
+      <li class="bar" style="--v:84.0"><span class="bar__name">QuickJS</span><span class="bar__value">84.0 ms</span></li>
+      <li class="bar" style="--v:115.7"><span class="bar__name">Python 3</span><span class="bar__value">115.7 ms</span></li>
+      <li class="bar" style="--v:122.8"><span class="bar__name">V8 jitless</span><span class="bar__value">122.8 ms</span></li>
+      <li class="bar" style="--v:160.5"><span class="bar__name">Wren</span><span class="bar__value">160.5 ms</span></li>
+      <li class="bar" style="--v:248.8"><span class="bar__name">Tengo</span><span class="bar__value">248.8 ms</span></li>
     </ol>
   </section>
 

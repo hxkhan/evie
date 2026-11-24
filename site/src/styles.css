@@ -351,7 +351,7 @@ html:has(.page--play) { height: 100%; }
 .editor { flex: 1; min-height: 0; }
 .editor .cm-editor { height: 100%; background: transparent; color: var(--code-ink); font-size: 0.9rem; }
 .editor .cm-scroller { font-family: var(--font-mono); line-height: 1.65; font-variant-ligatures: none; }
-.editor .cm-gutters { background: transparent; border-right: 1px solid var(--line); color: var(--muted); }
+.editor .cm-gutters { background: var(--code-bg); border-right: 1px solid var(--line); color: var(--muted); }
 .editor .cm-activeLine, .editor .cm-activeLineGutter { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 .editor .cm-cursor { border-left-color: var(--accent); border-left-width: 2px; }
 .editor .cm-selectionBackground, .editor .cm-focused .cm-selectionBackground, .editor ::selection { background: color-mix(in srgb, var(--accent) 22%, transparent) !important; }

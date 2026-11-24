@@ -205,13 +205,17 @@ kbd { padding: 1px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; --max: 587.4; }
 .bar { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); align-items: center; gap: 14px; font-size: 0.92rem; }
 .bar__name { color: var(--ink-soft); font-weight: 500; }
-.bar__value {
-  position: relative; display: block; width: calc(var(--v) / var(--max) * 100%); min-width: 7.2em;
-  padding: 5px 10px; border-radius: 6px; background: var(--paper-sunk); border: 1px solid var(--line);
-  font: 500 0.8rem var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;
+/* the fill's length is the time, to scale; the time is written just after it,
+   in room the track keeps for it, so even the shortest bar stays true */
+.bar__track { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.bar__fill {
+  flex: none; height: 1.9em; width: calc(var(--v) / var(--max) * (100% - 6em)); min-width: 3px;
+  border-radius: 6px; background: var(--paper-sunk); border: 1px solid var(--line);
 }
+.bar__value { font: 500 0.8rem var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .bar--evie .bar__name { color: var(--ink); font-weight: 700; }
-.bar--evie .bar__value { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.bar--evie .bar__fill { background: var(--accent); border-color: var(--accent); }
+.bar--evie .bar__value { color: var(--ink); font-weight: 700; }
 
 .embed { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 56px; align-items: center; padding-block: 48px; }
 .embed__text p { color: var(--ink-soft); margin-bottom: 22px; }

@@ -58,7 +58,7 @@ Two tasks incrementing one global always end at the exact total, because fibers 
   - `for item in collection` and `for idx, item in collection` over arrays, objects, strings, and buffers.
   - Indexing and slicing (`arr[a:b]`, `str[a:b]`, `buf[a:b]`) with UTF-8 character semantics on strings.
 - **Robust Error Handling**:
-  - `throw error("...")` and `catch(expr)` semantics with first-class `error` values that know their file, line, column and call trace.
+  - `throw` and `catch(expr)` or `catch { ... }` with first-class `error` values: a message, a kind such as `"notFound"` or `"timeout"` to tell failures apart, any fields and a cause, and the file, line, column and call trace.
   - Compiler-grade diagnostics: every error shows the offending line with the span underlined, related places, a hint, and suggestions for misspelled names.
 - **Compact 16-Byte Tagged Value**:
   - Compact 16-byte tagged `Value` (`uint64` + `unsafe.Pointer`) storing `number`, `bool`, and `nil` inline without heap allocation (`number`, `bool`, `string`, `buffer`, `array`, `object`, `class`, `task`, `error`, `function`, `nil`).
@@ -165,7 +165,7 @@ _, err := eng.CallContext(ctx, "main.status", 42) // errors.Is(err, context.Dead
 - [x] Concurrency (`go`, `await`, `await.all`, `await.any`, `await.race`, `await.timeout`, `Task`, `task.cancel`)
 - [x] One running fiber per instance (no locks, no data races, cooperative await)
 - [x] Scoping (global, package, function, block, captured closures)
-- [x] Error handling (`throw`, `catch(expr)`, `error` type)
+- [x] Error handling (`throw`, `catch`, `error` values with kinds, fields and causes)
 - [x] Go Host Embedding (bidirectional marshaling, function reflection, struct unmarshaling, stdlib sandboxing, custom I/O)
 - [x] Standard library (`io`, `fs`, `math`, `time`, `json`)
 - [x] Compiler-style diagnostics (source excerpts, spans, hints, did-you-mean, stack traces)

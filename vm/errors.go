@@ -1,7 +1,11 @@
 package vm
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	goruntime "runtime"
 	"runtime/debug"
 	"slices"
@@ -17,13 +21,41 @@ type fieldsID = fields.ID
 // Error is an exception: what went wrong, where, and the calls that led
 // there. It is what `catch` turns into an error value and what the host gets
 // back from a call that failed.
+//
+// Besides its message an error has a kind, such as "notFound" or "timeout",
+// that says what sort of failure it is, so code can tell failures apart
+// without reading messages; any fields a script gave it, as in
+// error("no config", {path: p}); and the error it was raised because of, its
+// cause. Cause is that error for the host, so errors.Is and errors.As see
+// through it.
 type Error struct {
 	diag.Report
 	Cause error
 
+	kind   string
+	cause  Value   // the cause as scripts see it; nil when there is none
+	fields *Object // what the script gave the error besides its message, kind and cause
+
 	code  int  // distinguishes internal control-flow signals
 	fatal bool // the run was stopped; catch lets it pass
 }
+
+// The kinds of error the runtime and the standard library raise. A script
+// can give an error any kind; these are the ones Evie itself uses.
+const (
+	KindError      = "error"      // the default, for errors without a more specific kind
+	KindType       = "type"       // a value of the wrong type, a call with the wrong arguments, a constant assigned
+	KindValue      = "value"      // the right type but a value that cannot be used, as in number("two")
+	KindRange      = "range"      // an index outside an array, string or buffer
+	KindMember     = "member"     // a field, key, method or package member that does not exist
+	KindNotFound   = "notFound"   // a file or directory that does not exist
+	KindExists     = "exists"     // a file or directory that already exists
+	KindPermission = "permission" // access that is not allowed
+	KindIO         = "io"         // any other failure to read or write
+	KindTimeout    = "timeout"    // a wait that ran out of time
+	KindCancelled  = "cancelled"  // a task that was cancelled
+	KindSyntax     = "syntax"     // text that does not parse, as for json.decode
+)
 
 type exception = *Error
 
@@ -31,12 +63,169 @@ var signalReturn = &Error{Report: diag.Report{Message: "return"}, code: 0}
 var signalContinue = &Error{Report: diag.Report{Message: "continue"}, code: 1}
 var signalBreak = &Error{Report: diag.Report{Message: "break"}, code: 2}
 
+// Errorf makes an error of a kind, for a native function to return: scripts
+// see the kind as e.kind. Give it fields with With.
+func Errorf(kind, format string, a ...any) *Error {
+	return &Error{Report: diag.Report{Message: fmt.Sprintf(format, a...)}, kind: kind}
+}
+
 func (e *Error) Error() string {
 	return e.Report.Error()
 }
 
 func (e *Error) Unwrap() error {
 	return e.Cause
+}
+
+// Diagnostic is the error's report, which names its kind unless that is the
+// default, so a rendered error reads error[notFound]: ...
+func (e *Error) Diagnostic() *diag.Report {
+	if k := e.Kind(); k != KindError {
+		e.Report.Code = k
+	}
+	return &e.Report
+}
+
+// Kind says what sort of failure the error is, such as "notFound"; see the
+// Kind constants. An error raised by Go code without one takes it from the Go
+// error it came from, as "notFound" from fs.ErrNotExist, and is "error"
+// otherwise.
+func (e *Error) Kind() string {
+	if e.kind != "" {
+		return e.kind
+	}
+	return kindOf(e.Cause)
+}
+
+// kindOf finds the kind of a Go error from the standard errors it wraps
+func kindOf(err error) string {
+	var exc *Error
+	switch {
+	case err == nil:
+		return KindError
+	case errors.Is(err, ErrCanceled), errors.Is(err, context.Canceled):
+		return KindCancelled
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, os.ErrDeadlineExceeded):
+		return KindTimeout
+	case errors.Is(err, fs.ErrNotExist):
+		return KindNotFound
+	case errors.Is(err, fs.ErrExist):
+		return KindExists
+	case errors.Is(err, fs.ErrPermission):
+		return KindPermission
+	case errors.As(err, &exc):
+		return exc.Kind()
+	}
+	return KindError
+}
+
+// With gives the error a field that scripts read as e.name, and returns it.
+// The names message, kind, cause, file, line, column and trace are the
+// error's own and cannot be fields.
+func (e *Error) With(name string, v Value) *Error {
+	if isOwnField(name) {
+		panic(fmt.Sprintf("vm: '%s' is a field every error has; it cannot be set with With", name))
+	}
+	if e.fields == nil {
+		e.fields = NewObject(2)
+	}
+	e.fields.Set(name, v)
+	return e
+}
+
+// Field is a field the error was given, as with With or error(message, fields)
+func (e *Error) Field(name string) (Value, bool) {
+	if e.fields == nil {
+		return Value{}, false
+	}
+	return e.fields.Get(name)
+}
+
+// FieldNames lists the fields the error was given, in the order they were given
+func (e *Error) FieldNames() []string {
+	if e.fields == nil {
+		return nil
+	}
+	return e.fields.Keys()
+}
+
+// CauseValue is the cause as scripts see it: the error, or other value, the
+// error was raised because of; nil when there is none
+func (e *Error) CauseValue() Value {
+	if e.cause.IsNil() && e.Cause != nil {
+		if exc, ok := e.Cause.(*Error); ok {
+			return boxError(exc)
+		}
+	}
+	return e.cause
+}
+
+// setCause makes v the cause; an error also becomes the cause the host sees
+func (e *Error) setCause(v Value) {
+	e.cause = v
+	if exc, ok := v.AsError(); ok {
+		e.Cause = exc
+	}
+}
+
+// take gives the error the fields of an object: kind and cause as such, and
+// any other name as a field. message sets the message where allowed, as for
+// a thrown object; error(message, fields) takes its message first instead.
+func (e *Error) take(obj *Object, message bool) *Error {
+	for name, v := range obj.All() {
+		switch name {
+		case "kind":
+			kind, ok := v.AsString()
+			if !ok {
+				return Errorf(KindType, "an error's kind must be a string, got %s", article(v))
+			}
+			e.kind = kind
+		case "cause":
+			e.setCause(v)
+		case "message":
+			if !message {
+				return Errorf(KindType, "the message is error's first argument, not one of its fields")
+			}
+			if s, ok := v.AsString(); ok {
+				e.Message = s
+			} else {
+				e.Message = v.String()
+			}
+		case "file", "line", "column", "trace":
+			return Errorf(KindType, "an error's '%s' is where it was thrown and cannot be given; use another name", name)
+		default:
+			if e.fields == nil {
+				e.fields = NewObject(obj.Len())
+			}
+			e.fields.Set(name, v)
+		}
+	}
+	return nil
+}
+
+// thrown makes an error of what a script throws that is not one: a string is
+// the message, an object gives its fields as error(message, fields) does,
+// and anything else is kept as the field value
+func thrown(v Value) *Error {
+	if s, ok := v.AsString(); ok {
+		return customError("%s", s)
+	}
+	if obj, ok := v.AsObject(); ok {
+		e := customError("%s", v.String())
+		if err := e.take(obj, true); err != nil {
+			return err
+		}
+		return e
+	}
+	return customError("%s", v.String()).With("value", v)
+}
+
+func isOwnField(name string) bool {
+	switch name {
+	case "message", "kind", "cause", "file", "line", "column", "trace":
+		return true
+	}
+	return false
 }
 
 // isSignal reports whether e steers control flow rather than reporting a failure
@@ -70,21 +259,15 @@ func (vm *Instance) at(node ast.Node) site {
 	return site{src: vm.cp.src, pos: node.Where(), fn: fn}
 }
 
+// customError makes an error of the default kind; unlike one converted from
+// Go, it does not take a kind from its cause
 func customError(msg string, a ...any) exception {
-	return &Error{Report: diag.Report{Message: fmt.Sprintf(msg, a...)}}
+	return &Error{Report: diag.Report{Message: fmt.Sprintf(msg, a...)}, kind: KindError}
 }
 
-func runtimeErrorf(format string, a ...any) exception {
-	return customError(format, a...)
-}
-
-func argTypeErrorf(format string, a ...any) exception {
-	return customError(format, a...)
-}
-
-// errorAt raises an error at a site
-func errorAt(s site, format string, a ...any) exception {
-	return customError(format, a...).at(s)
+// errorAt raises an error of a kind at a site
+func errorAt(s site, kind, format string, a ...any) exception {
+	return Errorf(kind, format, a...).at(s)
 }
 
 // at locates an error that has no location yet and opens its trace there
@@ -119,11 +302,16 @@ func (e *Error) unwind(s site) *Error {
 	return e
 }
 
-// field exposes the error to scripts: message, line, column, file and trace
+// field exposes the error to scripts: message, kind, cause, line, column, file
+// and trace, and the fields the script gave it
 func (e *Error) field(f fieldsID) (Value, bool) {
 	switch f {
 	case messageID:
 		return BoxString(e.Message), true
+	case kindID:
+		return BoxString(e.Kind()), true
+	case causeID:
+		return e.CauseValue(), true
 	case lineID:
 		return BoxNumber(float64(e.Pos.Line)), true
 	case columnID:
@@ -140,12 +328,15 @@ func (e *Error) field(f fieldsID) (Value, bool) {
 		}
 		return BoxArray(NewArray(frames...)), true
 	}
+	if e.fields != nil {
+		return e.fields.Get(fields.Lookup(f))
+	}
 	return Value{}, false
 }
 
 // memberError explains a missing member and suggests a close one
 func memberError(s site, name string, v Value) exception {
-	e := errorAt(s, "no member '%s' on %s", name, article(v))
+	e := errorAt(s, KindMember, "no member '%s' on %s", name, article(v))
 	if closest, ok := diag.Suggest(name, v.memberNames()); ok {
 		e.Hint = fmt.Sprintf("%s has a member with a similar name: '%s'", article(v), closest)
 	}
@@ -183,7 +374,7 @@ func article(v Value) string {
 
 // operatorError explains a binary operator applied to the wrong operands
 func operatorError(s site, op string, a Value, b Value) exception {
-	e := errorAt(s, "cannot apply '%s' to %s and %s", op, article(a), article(b))
+	e := errorAt(s, KindType, "cannot apply '%s' to %s and %s", op, article(a), article(b))
 	e.Label = fmt.Sprintf("%s %s %s", a.TypeOf(), op, b.TypeOf())
 	_, aStr := a.AsString()
 	_, bStr := b.AsString()

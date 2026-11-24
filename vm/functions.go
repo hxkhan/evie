@@ -77,9 +77,9 @@ func (fn *funcInfoStatic) arityError(n int) exception {
 		want, got = want-1, got-1
 	}
 	if fn.isVariadic {
-		return customError("%s takes at least %s but %s supplied", fn.describe(), plural(want-1, "argument"), supplied(got))
+		return Errorf(KindType, "%s takes at least %s but %s supplied", fn.describe(), plural(want-1, "argument"), supplied(got))
 	}
-	return customError("%s takes %s but %s supplied", fn.describe(), plural(want, "argument"), supplied(got))
+	return Errorf(KindType, "%s takes %s but %s supplied", fn.describe(), plural(want, "argument"), supplied(got))
 }
 
 // plural renders a count with its noun: "1 argument", "2 arguments", "no arguments"
@@ -424,9 +424,9 @@ func (fn *GoFunc) arityError(n int) exception {
 		name = "'" + fn.Name + "'"
 	}
 	if fn.isVariadic {
-		return customError("%s takes at least %s but %s supplied", name, plural(want, "argument"), supplied(got))
+		return Errorf(KindType, "%s takes at least %s but %s supplied", name, plural(want, "argument"), supplied(got))
 	}
-	return customError("%s takes %s but %s supplied", name, plural(want, "argument"), supplied(got))
+	return Errorf(KindType, "%s takes %s but %s supplied", name, plural(want, "argument"), supplied(got))
 }
 
 // run executes the native on the frame at base, where its arguments are, and

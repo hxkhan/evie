@@ -6,7 +6,6 @@ package fs
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	iofs "io/fs"
 	"os"
@@ -40,7 +39,70 @@ type files interface {
 	rename(from, to string) error
 }
 
-func build(files files) *vm.Package {
+// checked reports what goes wrong the same way on every system, so a script
+// can rely on it: a missing file is a "notFound" error that names the file,
+// whether Evie runs on Linux, Windows or in a browser
+type checked struct{ files }
+
+func (c checked) open(name string) (iofs.File, error) {
+	f, err := c.files.open(name)
+	return f, failed(name, err)
+}
+func (c checked) stat(name string) (iofs.FileInfo, error) {
+	info, err := c.files.stat(name)
+	return info, failed(name, err)
+}
+func (c checked) readDir(name string) ([]iofs.DirEntry, error) {
+	entries, err := c.files.readDir(name)
+	return entries, failed(name, err)
+}
+func (c checked) writeFile(name string, data []byte) error {
+	return failed(name, c.files.writeFile(name, data))
+}
+func (c checked) appendFile(name string, data []byte) error {
+	return failed(name, c.files.appendFile(name, data))
+}
+func (c checked) mkdir(name string) error  { return failed(name, c.files.mkdir(name)) }
+func (c checked) remove(name string) error { return failed(name, c.files.remove(name)) }
+func (c checked) rename(from, to string) error {
+	err := c.files.rename(from, to)
+	if errors.Is(err, iofs.ErrExist) {
+		return failed(to, err)
+	}
+	return failed(from, err)
+}
+
+// failed turns what the operating system or a file system returned for the
+// file name into an error with a kind, a message that names the file, and the
+// file as the field path. The original error stays its cause for the host.
+func failed(name string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if exc, ok := err.(*vm.Error); ok {
+		return exc
+	}
+	var e *vm.Error
+	switch {
+	case errors.Is(err, errReadOnly):
+		e = vm.Errorf(vm.KindPermission, "cannot change '%s': the file system of this engine is read-only", name)
+	case errors.Is(err, errOutside):
+		e = vm.Errorf(vm.KindPermission, "'%s' is outside the file system of this engine", name)
+	case errors.Is(err, iofs.ErrNotExist):
+		e = vm.Errorf(vm.KindNotFound, "'%s' does not exist", name)
+	case errors.Is(err, iofs.ErrExist):
+		e = vm.Errorf(vm.KindExists, "'%s' already exists", name)
+	case errors.Is(err, iofs.ErrPermission):
+		e = vm.Errorf(vm.KindPermission, "no permission to access '%s'", name)
+	default:
+		e = vm.Errorf(vm.KindIO, "%s", err)
+	}
+	e.Cause = err
+	return e.With("path", vm.BoxString(name))
+}
+
+func build(inner files) *vm.Package {
+	files := checked{inner}
 	pkg := vm.NewPackage("fs")
 	blocking := func(name string, arity int, fn vm.NativeFn) {
 		pkg.Func(name, arity, func(c vm.Call) (vm.Value, error) {
@@ -183,15 +245,19 @@ func (osFiles) appendFile(name string, data []byte) error {
 // fsFiles is a read-only view of a host-supplied file system
 type fsFiles struct{ fsys iofs.FS }
 
-// errReadOnly is what every write gets from an engine confined to a file system
-var errReadOnly = errors.New("the file system of this engine is read-only")
+// errReadOnly is what every write gets from an engine confined to a file
+// system, and errOutside what a path that leaves it gets
+var (
+	errReadOnly = errors.New("the file system of this engine is read-only")
+	errOutside  = errors.New("outside the file system of this engine")
+)
 
 // clean turns a script's path into a name fsys accepts: slash-separated, with
 // no leading slash and no '..' that would step outside the root
 func clean(name string) (string, error) {
 	p := path.Clean(filepath.ToSlash(name))
 	if !iofs.ValidPath(p) {
-		return "", fmt.Errorf("'%s' is outside the file system of this engine", name)
+		return "", errOutside
 	}
 	return p, nil
 }
@@ -251,14 +317,14 @@ func readFile(c vm.Call, files files) ([]byte, error) {
 		}
 		n, err := f.Read(chunk)
 		if len(data)+n > maxReadBytes {
-			return nil, fmt.Errorf("'%s' is larger than %d MB, the most a read takes", name, maxReadBytes>>20)
+			return nil, vm.Errorf(vm.KindIO, "'%s' is larger than %d MB, the most a read takes", name, maxReadBytes>>20).With("path", vm.BoxString(name))
 		}
 		data = append(data, chunk[:n]...)
 		if errors.Is(err, io.EOF) {
 			return data, nil
 		}
 		if err != nil {
-			return nil, err
+			return nil, failed(name, err)
 		}
 	}
 }
@@ -271,5 +337,5 @@ func bytesOf(fn string, content vm.Value) ([]byte, error) {
 	if b, ok := content.AsBuffer(); ok {
 		return b, nil
 	}
-	return nil, fmt.Errorf("%s: argument 2 must be a string or a buffer, got %s", fn, content.TypeOf())
+	return nil, vm.Errorf(vm.KindType, "%s: argument 2 must be a string or a buffer, got %s", fn, content.TypeOf())
 }

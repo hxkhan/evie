@@ -1071,7 +1071,7 @@ func (vm *Instance) emitClass(cls ast.ClassDefinition) instruction {
 			}
 			parentClass, ok := pVal.asUserClass()
 			if !ok {
-				return Value{}, errorAt(site, "'%v' is %s, not a class", cls.Parent, article(pVal))
+				return Value{}, errorAt(site, KindType, "'%v' is %s, not a class", cls.Parent, article(pVal))
 			}
 			parent = parentClass
 		}

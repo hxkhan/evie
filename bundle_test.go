@@ -111,7 +111,7 @@ func TestFSConfinesTheFsPackage(t *testing.T) {
 	}
 	want := `["hello", ["note.txt"], true, false, true, ` +
 		`"'../secret.txt' is outside the file system of this engine", ` +
-		`"the file system of this engine is read-only", "the file system of this engine is read-only"]`
+		`"cannot change 'out.txt': the file system of this engine is read-only", "cannot change 'data': the file system of this engine is read-only"]`
 	if v.String() != want {
 		t.Fatalf("got  %s\nwant %s", v, want)
 	}

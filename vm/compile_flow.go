@@ -70,7 +70,7 @@ func (vm *Instance) emitThrow(node ast.Throw) instruction {
 			return Value{}, e.at(site)
 		}
 
-		return Value{}, errorAt(site, "%s", v.String())
+		return Value{}, thrown(v).at(site)
 	}
 }
 
@@ -797,7 +797,7 @@ func (vm *Instance) emitFor(node ast.For) instruction {
 			return Value{}, nil
 		}
 
-		return Value{}, errorAt(site, "cannot iterate over %s", article(collVal)).hinted("for loops run over arrays, objects, strings and buffers")
+		return Value{}, errorAt(site, KindType, "cannot iterate over %s", article(collVal)).hinted("for loops run over arrays, objects, strings and buffers")
 	}
 }
 

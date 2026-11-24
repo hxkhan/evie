@@ -46,7 +46,7 @@ func (vm *Instance) emitPlus(node ast.Plus) instruction {
 		if _, ok := value.AsFloat64(); ok {
 			return value, nil
 		}
-		return Value{}, errorAt(site, "cannot apply unary '+' to %s", article(value))
+		return Value{}, errorAt(site, KindType, "cannot apply unary '+' to %s", article(value))
 	}
 }
 
@@ -69,7 +69,7 @@ func (vm *Instance) emitNeg(node ast.Neg) instruction {
 		if float, ok := value.AsFloat64(); ok {
 			return BoxNumber(-float), nil
 		}
-		return Value{}, errorAt(site, "cannot negate %s", article(value))
+		return Value{}, errorAt(site, KindType, "cannot negate %s", article(value))
 	}
 }
 

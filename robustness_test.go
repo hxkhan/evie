@@ -1461,7 +1461,7 @@ func TestBufferMutationAndConstruction(t *testing.T) {
 		]
 		return [b1.string(), b2.string(), [b3[0], b3[1], b3[2]], errs]
 	}`)
-	want := `["Abd!?", "Hi", [0, 42, 0], ["buffer element must be an integer in 0..255, got 300", "buffer element must be an integer in 0..255, got -1", "IndexError: buffer index 10 out of bounds (length 5)", "buffer: size must not be negative, got -2", "buffer: size 1000000000000 exceeds the maximum buffer size (67108864 bytes)"]]`
+	want := `["Abd!?", "Hi", [0, 42, 0], ["buffer element must be an integer in 0..255, got 300", "buffer element must be an integer in 0..255, got -1", "buffer index 10 out of bounds (length 5)", "buffer: size must not be negative, got -2", "buffer: size 1000000000000 exceeds the maximum buffer size (67108864 bytes)"]]`
 	if val.String() != want {
 		t.Fatalf("got  %s\nwant %s", val, want)
 	}

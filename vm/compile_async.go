@@ -148,7 +148,7 @@ func (vm *Instance) emitGo(node ast.Go) instruction {
 			}
 		}
 
-		return Value{}, errorAt(site, "cannot call %s", article(value)).labelled("this is " + article(value))
+		return Value{}, errorAt(site, KindType, "cannot call %s", article(value)).labelled("this is " + article(value))
 	}
 }
 
@@ -311,7 +311,7 @@ func (vm *Instance) emitAwaitAny(node ast.AwaitAny) instruction {
 
 		tasks, raw := extractTasks(evaluated)
 		if len(tasks) == 0 {
-			return Value{}, errorAt(site, "await.any needs at least one task")
+			return Value{}, errorAt(site, KindValue, "await.any needs at least one task")
 		}
 
 		// Check if any item is already a resolved non-task or completed task without error
@@ -333,7 +333,7 @@ func (vm *Instance) emitAwaitAny(node ast.AwaitAny) instruction {
 			if exc := fbr.halt(site); exc != nil {
 				return Value{}, exc
 			}
-			return Value{}, errorAt(site, "all tasks failed in await.any")
+			return Value{}, errorAt(site, KindError, "all tasks failed in await.any")
 		}
 
 		if first, ok := settle(fbr, pending, true); ok {
@@ -342,7 +342,7 @@ func (vm *Instance) emitAwaitAny(node ast.AwaitAny) instruction {
 			}
 			return first.res, nil
 		}
-		return Value{}, errorAt(site, "all tasks failed in await.any")
+		return Value{}, errorAt(site, KindError, "all tasks failed in await.any")
 	}
 }
 
@@ -365,7 +365,7 @@ func (vm *Instance) emitAwaitRace(node ast.AwaitRace) instruction {
 
 		tasks, raw := extractTasks(evaluated)
 		if len(tasks) == 0 {
-			return Value{}, errorAt(site, "await.race needs at least one task")
+			return Value{}, errorAt(site, KindValue, "await.race needs at least one task")
 		}
 
 		// Check if any item is already a non-task or completed task
@@ -406,10 +406,10 @@ func (vm *Instance) emitAwaitTimeout(node ast.AwaitTimeout) instruction {
 		}
 		ms, ok := durVal.AsFloat64()
 		if !ok {
-			return Value{}, errorAt(site, "await.timeout: duration must be a number, got %s", durVal.TypeOf())
+			return Value{}, errorAt(site, KindType, "await.timeout: duration must be a number, got %s", durVal.TypeOf())
 		}
 		if math.IsNaN(ms) {
-			return Value{}, errorAt(site, "await.timeout: duration must not be NaN")
+			return Value{}, errorAt(site, KindValue, "await.timeout: duration must not be NaN")
 		}
 
 		task, isTask := v.AsTask()
@@ -427,7 +427,7 @@ func (vm *Instance) emitAwaitTimeout(node ast.AwaitTimeout) instruction {
 
 		if ms <= 0 {
 			task.Cancel()
-			return Value{}, errorAt(site, "await.timeout: timed out after %vms", ms)
+			return Value{}, errorAt(site, KindTimeout, "await.timeout: timed out after %vms", ms)
 		}
 
 		if math.IsInf(ms, 1) || ms*float64(time.Millisecond) >= float64(math.MaxInt64) {
@@ -461,7 +461,7 @@ func (vm *Instance) emitAwaitTimeout(node ast.AwaitTimeout) instruction {
 				return Value{}, fbr.stop.failure().at(site)
 			}
 			task.Cancel()
-			return Value{}, errorAt(site, "await.timeout: timed out after %vms", ms)
+			return Value{}, errorAt(site, KindTimeout, "await.timeout: timed out after %vms", ms)
 		case <-fbr.stop.ctx.Done():
 			return Value{}, fbr.stop.failure().at(site)
 		}

@@ -16,7 +16,9 @@ func Construct() *vm.Package {
 		}
 		var val vm.Value
 		if err := json.Unmarshal([]byte(str), &val); err != nil {
-			return vm.Value{}, err
+			e := vm.Errorf(vm.KindSyntax, "json.decode: %v", err)
+			e.Cause = err
+			return vm.Value{}, e
 		}
 		return val, nil
 	})

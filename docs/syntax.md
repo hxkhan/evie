@@ -667,7 +667,7 @@ string(buf)               // "Hi!" (string conversion constructor)
 
 ## 9. Error Handling
 
-Evie uses an explicit exception system with `throw`, `catch`, and an `error` constructor.
+Something that goes wrong is an `error` value. `throw` raises one, and `catch` turns one back into a value you can look at. Every error says what went wrong, what sort of failure it is, and where it happened.
 
 ### Throwing Errors
 ```go
@@ -679,26 +679,80 @@ fn divide(a, b) {
 }
 ```
 
+`error(message, fields)` also takes an object of fields. `kind` names the sort of failure, `cause` is the error this one was raised because of, and any other name is data the catcher can read:
+
+```go
+throw error("cannot load the config", {kind: "config", path: path, cause: failure})
+```
+
+Throwing something that is not an error makes one: a string is the message, an object gives its fields as above (with `message` as the message), and any other value is kept as the field `value`. So `throw {kind: "http", code: 404}` arrives with `e.kind == "http"` and `e.code == 404`.
+
 ### Catching Errors
-`catch(expr)` executes an expression and intercepts both runtime errors and user-thrown errors. An error value knows what went wrong and where: `message`, `file`, `line`, `column`, and `trace`, the functions that were running from the innermost outwards, each with its position:
+`catch(expr)` runs an expression and gives back its value, or the error it raised. `catch { ... }` does the same for a block of statements, and is `nil` when the block finishes without an error. A `return`, `break` or `continue` inside the block works as it would outside it.
 
 ```go
 result := catch(divide(10, 0))
-
 if result is error {
     io.println("Failed:", result.message, "at", result.file, result.line)
-    for frame in result.trace {
-        io.println("  in", frame)
-    }
-} else {
-    io.println("Success:", result)
+}
+
+var config := {}
+failure := catch {
+    text := fs.readText("app.json")
+    config = json.decode(text)
 }
 ```
 
-Uncaught errors reach the host with the same information. The `evie` command prints them with the offending line, the span underlined and labelled, related places, a hint when one applies, and the trace:
+### What an Error Holds
+
+| field | is |
+| :-- | :-- |
+| `message` | what went wrong |
+| `kind` | the sort of failure, such as `"notFound"`; `"error"` unless one was given |
+| `cause` | the error, or other value, this one was raised because of; `nil` when there is none |
+| `file`, `line`, `column` | where it was thrown |
+| `trace` | the functions that were running, from the innermost outwards, each with its position |
+| any other | the fields it was given, as `e.path` above; `e.path?` tests for one |
+
+Errors are values: they can be stored, passed around and thrown again. Throwing a caught error keeps its original position and trace.
+
+### Kinds
+The kind is how code tells failures apart, without depending on the wording of a message. Evie and its standard library use these:
+
+| kind | for |
+| :-- | :-- |
+| `"type"` | a value of the wrong type, a call with the wrong number of arguments, a constant assigned |
+| `"value"` | the right type but an unusable value, as in `number("two")` |
+| `"range"` | an index outside an array, string or buffer |
+| `"member"` | a field, key, method or package member that does not exist |
+| `"notFound"`, `"exists"`, `"permission"`, `"io"` | the `fs` package: a missing file, one that already exists, access not allowed, any other failure; the error's `path` names the file |
+| `"timeout"` | `await.timeout` that ran out of time |
+| `"cancelled"` | a task that was cancelled |
+| `"syntax"` | text that does not parse, for `json.decode` and `time.parse` |
+| `"error"` | everything else, and errors made without a kind |
+
+Your own kinds work the same way:
+
+```go
+fn load(path) {
+    text := catch(fs.readText(path))
+    if text is error {
+        throw error("cannot load the config", {kind: "config", path: path, cause: text})
+    }
+    return json.decode(text)
+}
+
+e := catch(load("app.json"))
+if e is error && e.cause.kind == "notFound" {
+    io.println("no config at", e.path, "- using the defaults")
+}
+```
+
+### Uncaught Errors
+Uncaught errors reach the host with the same information. The `evie` command prints them with their kind, unless it is `"error"`, the offending line, the span underlined and labelled, related places, a hint when one applies, and the trace:
 
 ```
-error: cannot apply '+' to a number and a string
+error[type]: cannot apply '+' to a number and a string
  --> example.ev:6:9
   |
 6 |         sum += v
@@ -710,7 +764,7 @@ error: cannot apply '+' to a number and a string
            main at example.ev:14:5
 ```
 
-A Go host gets the same rendering from any error that implements `Diagnostic() *diag.Report`: `report.Render(diag.Colors)` for a terminal, `diag.Palette{}` for plain text, and `err.Error()` for the one-line form with the location in parentheses.
+A Go host gets the same rendering from any error that implements `Diagnostic() *diag.Report`: `report.Render(diag.Colors)` for a terminal, `diag.Palette{}` for plain text, and `err.Error()` for the one-line form with the location in parentheses. The host also reads an error's kind, fields and cause, and gives errors its own (see Go Host Embedding).
 
 ---
 
@@ -876,6 +930,8 @@ The pieces, from most to least convenient:
 | read a result | `AsFloat64`, `AsString`, `AsArray`, `AsObject` and the other `As` methods, `Field(name)` / `ClassName()` on objects and class instances, `ToGo`, `Unmarshal(&target)`, `json.Marshal(val)` |
 | compare values the way the language does | `a.Equals(b)`, `v.IsTruthy()` |
 | show an error | `evie.Format(err, colors)` renders it the way the `evie` command does |
+| raise an error scripts can tell apart | return `vm.Errorf(vm.KindNotFound, "no user %d", id).With("id", vm.BoxNumber(id))` from a native; a plain Go error works too and takes its kind from what it wraps, as `"notFound"` from `fs.ErrNotExist` and `"timeout"` from `context.DeadlineExceeded` |
+| read an error a script raised | `errors.As(err, &e)` with `e *vm.Error`, then `e.Kind()`, `e.Field(name)`, `e.FieldNames()` and `e.CauseValue()`; `errors.Is` sees through the causes a script gave |
 | stop a runaway script | `eng.Interrupt()`, or a context: `eng.RunFileContext`, `EvalContext`, `CallContext`, `RunBundle(ctx, b)` |
 | finish with an engine | `eng.Wait()` lets background tasks finish; `eng.Close()` stops them, waits, and makes later calls return `evie.ErrClosed` |
 
@@ -885,7 +941,7 @@ A stopped script fails at its next loop iteration or call, or as soon as it wake
 ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 defer cancel()
 if _, err := eng.RunFileContext(ctx, "main.ev"); errors.Is(err, context.DeadlineExceeded) {
-    fmt.Print(evie.Format(err, false)) // error: context deadline exceeded, at the loop it was in
+    fmt.Print(evie.Format(err, false)) // error[timeout]: context deadline exceeded, at the loop it was in
 }
 ```
 

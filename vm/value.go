@@ -532,6 +532,8 @@ var (
 	columnID  = fields.Get("column")
 	fileID    = fields.Get("file")
 	traceID   = fields.Get("trace")
+	kindID    = fields.Get("kind")
+	causeID   = fields.Get("cause")
 )
 
 func (x Value) getField(k fieldKey) (field Value, ok bool) {
@@ -613,7 +615,7 @@ func (x Value) memberNames() []string {
 	case kindTask:
 		return ids(typeTask.Fields)
 	case kindError:
-		return append(ids(typeError.Fields), "message", "line", "column", "file", "trace")
+		return append(append(ids(typeError.Fields), "message", "kind", "cause", "line", "column", "file", "trace"), (*Error)(x.pointer).FieldNames()...)
 	case kindObject:
 		return append(x.object().Keys(), ids(typeObject.Fields)...)
 	case kindBuiltinType:
@@ -778,10 +780,10 @@ func (x Value) callGuarded(fbr *fiber, args ...Value) (result Value, exc excepti
 		case kindBuiltinType:
 			bt := (*builtinType)(x.pointer)
 			if bt.Constructor == nil {
-				return Value{}, runtimeErrorf("type '%s' cannot be called as a constructor", bt.Name)
+				return Value{}, Errorf(KindType, "type '%s' cannot be called as a constructor", bt.Name)
 			}
 			return bt.Constructor.callGuarded(fbr, args...)
 		}
 	}
-	return Value{}, runtimeErrorf("cannot invoke a non-callable '%v'", x)
+	return Value{}, Errorf(KindType, "cannot invoke a non-callable '%v'", x)
 }

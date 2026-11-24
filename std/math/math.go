@@ -3,8 +3,6 @@
 package math
 
 import (
-	"errors"
-	"fmt"
 	"math"
 	"math/rand/v2"
 
@@ -64,7 +62,7 @@ func Construct() *vm.Package {
 	pkg.Native("isFinite", vm.Func1(func(x float64) bool { return !math.IsInf(x, 0) && !math.IsNaN(x) }))
 	pkg.Native("clamp", vm.Func3E(func(x, lo, hi float64) (float64, error) {
 		if lo > hi {
-			return 0, errors.New("clamp: the lower bound exceeds the upper bound")
+			return 0, vm.Errorf(vm.KindValue, "clamp: the lower bound exceeds the upper bound")
 		}
 		return math.Min(math.Max(x, lo), hi), nil
 	}))
@@ -75,7 +73,7 @@ func Construct() *vm.Package {
 	pkg.Native("random", vm.Func0(rand.Float64))
 	pkg.Native("randomInt", vm.Func2E(func(lo, hi int) (int, error) {
 		if hi < lo {
-			return 0, errors.New("randomInt: the upper bound is below the lower bound")
+			return 0, vm.Errorf(vm.KindValue, "randomInt: the upper bound is below the lower bound")
 		}
 		span := uint64(hi) - uint64(lo)
 		if span == math.MaxUint64 {
@@ -133,7 +131,7 @@ func extreme(name string, pick func(a, b float64) float64) vm.NativeFn {
 		if n == 1 {
 			if arr, ok := c.Arg(0).AsArray(); ok {
 				if len(arr.Data) == 0 {
-					return vm.Value{}, fmt.Errorf("%s: cannot take %s of an empty array", name, name)
+					return vm.Value{}, vm.Errorf(vm.KindValue, "%s: cannot take %s of an empty array", name, name)
 				}
 				n, at = len(arr.Data), func(i int) vm.Value { return arr.Data[i] }
 			}
@@ -143,7 +141,7 @@ func extreme(name string, pick func(a, b float64) float64) vm.NativeFn {
 			arg := at(i)
 			x, ok := arg.AsFloat64()
 			if !ok {
-				return vm.Value{}, fmt.Errorf("%s: expected numbers, got %s at position %d", name, arg.TypeOf(), i+1)
+				return vm.Value{}, vm.Errorf(vm.KindType, "%s: expected numbers, got %s at position %d", name, arg.TypeOf(), i+1)
 			}
 			if i == 0 {
 				best = x

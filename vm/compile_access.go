@@ -133,10 +133,10 @@ func assignField(fbr *fiber, site site, obj Value, name string, index fields.ID,
 	if pkg, ok := obj.AsPackage(); ok {
 		field, exists := pkg.globals[index]
 		if !exists || !field.IsPublic {
-			return Value{}, errorAt(site, "package '%s' has no symbol '%s'", pkg.name, name)
+			return Value{}, errorAt(site, KindMember, "package '%s' has no symbol '%s'", pkg.name, name)
 		}
 		if field.IsStatic {
-			return Value{}, errorAt(site, "cannot assign to '%s.%s' because it is a constant", pkg.name, name)
+			return Value{}, errorAt(site, KindType, "cannot assign to '%s.%s' because it is a constant", pkg.name, name)
 		}
 		v, exc := value(fbr)
 		if exc != nil {
@@ -166,7 +166,7 @@ func assignField(fbr *fiber, site site, obj Value, name string, index fields.ID,
 		return Value{}, nil
 	}
 
-	return Value{}, errorAt(site, "cannot assign field '%s' on %s", name, obj.TypeOf())
+	return Value{}, errorAt(site, KindType, "cannot assign field '%s' on %s", name, obj.TypeOf())
 }
 
 func (vm *Instance) emitAssign(node ast.Assign) instruction {
@@ -273,7 +273,7 @@ func (vm *Instance) emitFieldAssign(node ast.Assign, fa ast.FieldAccess) instruc
 					}
 					return Value{}, nil
 				}
-				return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, thisVal.TypeOf())
+				return Value{}, errorAt(site, KindType, "cannot assign field '%s' on %s", fa.Rhs, thisVal.TypeOf())
 			}
 		}
 
@@ -312,7 +312,7 @@ func (vm *Instance) emitFieldAssign(node ast.Assign, fa ast.FieldAccess) instruc
 				return Value{}, nil
 			}
 
-			return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, target.TypeOf())
+			return Value{}, errorAt(site, KindType, "cannot assign field '%s' on %s", fa.Rhs, target.TypeOf())
 		}
 
 	case Value:
@@ -382,7 +382,7 @@ func assignSubscriptValue(site site, target, keyVal, newVal Value) (Value, excep
 	if obj, ok := target.AsObject(); ok {
 		keyStr, ok := keyVal.AsString()
 		if !ok {
-			return Value{}, errorAt(site, "object key must be a string, got '%s'", keyVal.TypeOf())
+			return Value{}, errorAt(site, KindType, "object key must be a string, got '%s'", keyVal.TypeOf())
 		}
 		obj.Set(keyStr, newVal)
 		return Value{}, nil
@@ -392,7 +392,7 @@ func assignSubscriptValue(site site, target, keyVal, newVal Value) (Value, excep
 	if ci, ok := target.asClassInstance(); ok {
 		keyStr, ok := keyVal.AsString()
 		if !ok {
-			return Value{}, errorAt(site, "class field key must be a string, got '%s'", keyVal.TypeOf())
+			return Value{}, errorAt(site, KindType, "class field key must be a string, got '%s'", keyVal.TypeOf())
 		}
 		if exc := ci.setFieldByName(site, keyStr, newVal); exc != nil {
 			return Value{}, exc
@@ -414,7 +414,7 @@ func assignSubscriptValue(site site, target, keyVal, newVal Value) (Value, excep
 		return Value{}, nil
 	}
 
-	return Value{}, errorAt(site, "cannot assign to subscript of type '%s'", target.TypeOf())
+	return Value{}, errorAt(site, KindType, "cannot assign to subscript of type '%s'", target.TypeOf())
 }
 
 func (vm *Instance) emitSubscriptAssign(node ast.Assign, sub ast.Subscript) instruction {
@@ -599,7 +599,7 @@ func (vm *Instance) emitFieldAccess(node ast.FieldAccess) instruction {
 			}
 			fn := parent.lookupMethod(index)
 			if fn == nil {
-				return Value{}, errorAt(site, "no method '%s' on parent class '%s'", node.Rhs, parent.Name)
+				return Value{}, errorAt(site, KindMember, "no method '%s' on parent class '%s'", node.Rhs, parent.Name)
 			}
 			thisVal := *fbr.get(thisLocal)
 			return boxMethod(boundMethod{this: thisVal, fn: boxUserFnPtr(fn)}), nil
@@ -753,16 +753,16 @@ func resolveIndex(keyVal Value, length int) (int, bool) {
 func indexError(site site, keyVal Value, length int, kind string) exception {
 	idxFloat, ok := keyVal.AsFloat64()
 	if !ok {
-		return errorAt(site, "%s index must be a number, got '%s'", kind, keyVal.TypeOf())
+		return errorAt(site, KindType, "%s index must be a number, got '%s'", kind, keyVal.TypeOf())
 	}
 	idx := int(idxFloat)
 	if float64(idx) != idxFloat {
-		return errorAt(site, "%s index must be an integer, got %v", kind, idxFloat)
+		return errorAt(site, KindValue, "%s index must be an integer, got %v", kind, idxFloat)
 	}
 	if kind == "array" {
-		return errorAt(site, "IndexError: index %d out of bounds (length %d)", idx, length)
+		return errorAt(site, KindRange, "index %d out of bounds (length %d)", idx, length)
 	}
-	return errorAt(site, "IndexError: %s index %d out of bounds (length %d)", kind, idx, length)
+	return errorAt(site, KindRange, "%s index %d out of bounds (length %d)", kind, idx, length)
 }
 
 func subscriptValue(site site, target, indexVal Value) (Value, exception) {
@@ -786,7 +786,7 @@ func subscriptValue(site site, target, indexVal Value) (Value, exception) {
 	if obj, ok := target.AsObject(); ok {
 		keyStr, ok := indexVal.AsString()
 		if !ok {
-			return Value{}, errorAt(site, "object key must be a string, got '%s'", indexVal.TypeOf())
+			return Value{}, errorAt(site, KindType, "object key must be a string, got '%s'", indexVal.TypeOf())
 		}
 		return obj.get(keyStr), nil
 	}
@@ -795,11 +795,11 @@ func subscriptValue(site site, target, indexVal Value) (Value, exception) {
 	if ci, ok := target.asClassInstance(); ok {
 		keyStr, ok := indexVal.AsString()
 		if !ok {
-			return Value{}, errorAt(site, "class field key must be a string, got '%s'", indexVal.TypeOf())
+			return Value{}, errorAt(site, KindType, "class field key must be a string, got '%s'", indexVal.TypeOf())
 		}
 		val, exists := ci.getFieldByName(keyStr)
 		if !exists {
-			return Value{}, errorAt(site, "undefined field '%s' in class", keyStr)
+			return Value{}, errorAt(site, KindMember, "undefined field '%s' in class", keyStr)
 		}
 		return val, nil
 	}
@@ -830,7 +830,7 @@ func subscriptValue(site site, target, indexVal Value) (Value, exception) {
 		return BoxNumber(float64(buf[idx])), nil
 	}
 
-	return Value{}, errorAt(site, "cannot index value of type '%s'", target.TypeOf())
+	return Value{}, errorAt(site, KindType, "cannot index value of type '%s'", target.TypeOf())
 }
 
 func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
@@ -960,11 +960,11 @@ func (vm *Instance) emitSubscript(node ast.Subscript) instruction {
 func checkByte(site site, val Value) (byte, exception) {
 	f, ok := val.AsFloat64()
 	if !ok {
-		return 0, errorAt(site, "buffer element must be a number, got '%s'", val.TypeOf())
+		return 0, errorAt(site, KindType, "buffer element must be a number, got '%s'", val.TypeOf())
 	}
 	b := int(f)
 	if float64(b) != f || b < 0 || b > 255 {
-		return 0, errorAt(site, "buffer element must be an integer in 0..255, got %v", f)
+		return 0, errorAt(site, KindValue, "buffer element must be an integer in 0..255, got %v", f)
 	}
 	return byte(b), nil
 }
@@ -1036,11 +1036,11 @@ func sliceStringRunes(s string, n, start, end int) string {
 func checkSliceBound(site site, val Value, which string) (int, exception) {
 	f, ok := val.AsFloat64()
 	if !ok {
-		return 0, errorAt(site, "slice %s index must be a number, got '%s'", which, val.TypeOf())
+		return 0, errorAt(site, KindType, "slice %s index must be a number, got '%s'", which, val.TypeOf())
 	}
 	idx := int(f)
 	if float64(idx) != f {
-		return 0, errorAt(site, "slice %s index must be an integer, got %v", which, f)
+		return 0, errorAt(site, KindValue, "slice %s index must be an integer, got %v", which, f)
 	}
 	return idx, nil
 }
@@ -1118,7 +1118,7 @@ func (vm *Instance) emitSlice(node ast.Slice) instruction {
 			return BoxBuffer(sub), nil
 		}
 
-		return Value{}, errorAt(site, "cannot slice value of type '%s'", target.TypeOf())
+		return Value{}, errorAt(site, KindType, "cannot slice value of type '%s'", target.TypeOf())
 	}
 }
 
@@ -1319,7 +1319,7 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 						return apply(fbr, current, value)
 					})
 				}
-				return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, thisVal.TypeOf())
+				return Value{}, errorAt(site, KindType, "cannot assign field '%s' on %s", fa.Rhs, thisVal.TypeOf())
 			}
 		}
 
@@ -1361,7 +1361,7 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 			if m, ok := obj.AsObject(); ok {
 				current, exists := m.Get(fa.Rhs)
 				if !exists {
-					return Value{}, errorAt(site, "undefined key '%s' in object", fa.Rhs)
+					return Value{}, errorAt(site, KindMember, "undefined key '%s' in object", fa.Rhs)
 				}
 				if result, ok := fastCompound(op, current, value); ok {
 					m.Set(fa.Rhs, result)
@@ -1377,10 +1377,10 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 			if pkg, ok := obj.AsPackage(); ok {
 				field, exists := pkg.globals[index]
 				if !exists || !field.IsPublic {
-					return Value{}, errorAt(site, "package '%s' has no symbol '%s'", pkg.name, fa.Rhs)
+					return Value{}, errorAt(site, KindMember, "package '%s' has no symbol '%s'", pkg.name, fa.Rhs)
 				}
 				if field.IsStatic {
-					return Value{}, errorAt(site, "cannot assign to '%s.%s' because it is a constant", pkg.name, fa.Rhs)
+					return Value{}, errorAt(site, KindType, "cannot assign to '%s.%s' because it is a constant", pkg.name, fa.Rhs)
 				}
 				result, exc := apply(fbr, *field.Value, value)
 				if exc != nil {
@@ -1389,7 +1389,7 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 				*field.Value = result
 				return Value{}, nil
 			}
-			return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, obj.TypeOf())
+			return Value{}, errorAt(site, KindType, "cannot assign field '%s' on %s", fa.Rhs, obj.TypeOf())
 		}
 	}
 
@@ -1417,7 +1417,7 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 		if m, ok := obj.AsObject(); ok {
 			current, exists := m.Get(fa.Rhs)
 			if !exists {
-				return Value{}, errorAt(site, "undefined key '%s' in object", fa.Rhs)
+				return Value{}, errorAt(site, KindMember, "undefined key '%s' in object", fa.Rhs)
 			}
 			if result, ok := fastCompound(op, current, value); ok {
 				m.Set(fa.Rhs, result)
@@ -1434,10 +1434,10 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 		if pkg, ok := obj.AsPackage(); ok {
 			field, exists := pkg.globals[index]
 			if !exists || !field.IsPublic {
-				return Value{}, errorAt(site, "package '%s' has no symbol '%s'", pkg.name, fa.Rhs)
+				return Value{}, errorAt(site, KindMember, "package '%s' has no symbol '%s'", pkg.name, fa.Rhs)
 			}
 			if field.IsStatic {
-				return Value{}, errorAt(site, "cannot assign to '%s.%s' because it is a constant", pkg.name, fa.Rhs)
+				return Value{}, errorAt(site, KindType, "cannot assign to '%s.%s' because it is a constant", pkg.name, fa.Rhs)
 			}
 			result, exc := apply(fbr, *field.Value, value)
 			if exc != nil {
@@ -1447,7 +1447,7 @@ func (vm *Instance) emitCompoundFieldAssign(node ast.MutableBinOp, fa ast.FieldA
 			return Value{}, nil
 		}
 
-		return Value{}, errorAt(site, "cannot assign field '%s' on %s", fa.Rhs, obj.TypeOf())
+		return Value{}, errorAt(site, KindType, "cannot assign field '%s' on %s", fa.Rhs, obj.TypeOf())
 	}
 }
 
@@ -1521,11 +1521,11 @@ func compoundSubscript(fbr *fiber, site site, apply func(fbr *fiber, current, rh
 
 	if m, ok := obj.AsObject(); ok {
 		if !isString {
-			return Value{}, errorAt(site, "object key must be a string, got '%s'", keyVal.TypeOf())
+			return Value{}, errorAt(site, KindType, "object key must be a string, got '%s'", keyVal.TypeOf())
 		}
 		current, exists := m.Get(keyStr)
 		if !exists {
-			return Value{}, errorAt(site, "undefined key '%s' in object", keyStr)
+			return Value{}, errorAt(site, KindMember, "undefined key '%s' in object", keyStr)
 		}
 		result, exc := apply(fbr, current, value)
 		if exc != nil {
@@ -1537,7 +1537,7 @@ func compoundSubscript(fbr *fiber, site site, apply func(fbr *fiber, current, rh
 
 	if ci, ok := obj.asClassInstance(); ok {
 		if !isString {
-			return Value{}, errorAt(site, "class field key must be a string, got '%s'", keyVal.TypeOf())
+			return Value{}, errorAt(site, KindType, "class field key must be a string, got '%s'", keyVal.TypeOf())
 		}
 		exc := ci.updateFieldByName(site, keyStr, func(current Value) (Value, exception) {
 			return apply(fbr, current, value)
@@ -1562,7 +1562,7 @@ func compoundSubscript(fbr *fiber, site site, apply func(fbr *fiber, current, rh
 		return Value{}, nil
 	}
 
-	return Value{}, errorAt(site, "cannot assign to subscript of type '%s'", obj.TypeOf())
+	return Value{}, errorAt(site, KindType, "cannot assign to subscript of type '%s'", obj.TypeOf())
 }
 
 // arrayLoad reads target[key] when target is an array and key an integer index inside it

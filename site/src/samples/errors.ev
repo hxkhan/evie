@@ -9,9 +9,9 @@ figs, 10, 0.20`
 fn parse(line) {
     parts := line.split(",").map(fn(p) => p.trim())
     if parts.len() != 3 {
-        throw error(`expected item, quantity and price, got {parts.len()} fields`)
+        throw error("expected an item, a quantity and a price", {kind: "order", fields: parts.len()})
     }
-    // number throws too, for text that is not a number
+    // number throws too, a "value" error, for text that is not a number
     return {item: parts[0], qty: number(parts[1]), price: number(parts[2])}
 }
 
@@ -20,7 +20,7 @@ fn main() {
     for i, line in orders.lines() {
         order := catch(parse(line))
         if order is error {
-            io.println(`line {i + 1} skipped: {order.message}`)
+            io.println(`line {i + 1} skipped ({order.kind}): {order.message}`)
             continue
         }
         io.println(`{order.qty} {order.item} at {order.price}`)

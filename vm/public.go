@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"fmt"
 	"maps"
 	"slices"
 	"unsafe"
@@ -231,7 +230,7 @@ func (x Value) SetField(name string, v Value) error {
 		}
 		return nil
 	}
-	return fmt.Errorf("cannot set field '%s' on %s", name, article(x))
+	return Errorf(KindType, "cannot set field '%s' on %s", name, article(x))
 }
 
 // ClassName is the name of the class a class instance was made from

@@ -73,7 +73,7 @@ func (vm *Instance) CallContext(ctx context.Context, path string, args ...any) (
 // a native it calls belongs to the instance.
 func (vm *Instance) CallValue(fn Value, args ...any) (Value, error) {
 	if !fn.IsCallable() {
-		return Value{}, fmt.Errorf("a %s is not callable", fn.TypeOf())
+		return Value{}, Errorf(KindType, "a %s is not callable", fn.TypeOf())
 	}
 	boxed, err := boxArgs(args)
 	if err != nil {
@@ -101,10 +101,10 @@ func boxArgs(args []any) ([]Value, error) {
 func (vm *Instance) callable(path string, args []any) (Value, []Value, error) {
 	fn, ok := vm.Lookup(path)
 	if !ok {
-		return Value{}, nil, fmt.Errorf("symbol '%s' not found", path)
+		return Value{}, nil, Errorf(KindMember, "symbol '%s' not found", path)
 	}
 	if !fn.IsCallable() {
-		return Value{}, nil, fmt.Errorf("symbol '%s' is a %s, not a callable", path, fn.TypeOf())
+		return Value{}, nil, Errorf(KindType, "symbol '%s' is a %s, not a callable", path, fn.TypeOf())
 	}
 	boxed, err := boxArgs(args)
 	if err != nil {

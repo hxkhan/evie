@@ -81,7 +81,7 @@ func boxAny(v any, seen map[uintptr]bool) (Value, error) {
 		ptr := reflect.ValueOf(val).Pointer()
 		if len(val) > 0 && ptr != 0 {
 			if seen[ptr] {
-				return Value{}, fmt.Errorf("cannot box cyclic map")
+				return Value{}, Errorf(KindValue, "cannot box cyclic map")
 			}
 			if seen == nil {
 				seen = make(map[uintptr]bool)
@@ -102,7 +102,7 @@ func boxAny(v any, seen map[uintptr]bool) (Value, error) {
 		ptr := reflect.ValueOf(val).Pointer()
 		if len(val) > 0 && ptr != 0 {
 			if seen[ptr] {
-				return Value{}, fmt.Errorf("cannot box cyclic slice")
+				return Value{}, Errorf(KindValue, "cannot box cyclic slice")
 			}
 			if seen == nil {
 				seen = make(map[uintptr]bool)
@@ -167,7 +167,7 @@ func boxAny(v any, seen map[uintptr]bool) (Value, error) {
 		}
 		return boxError(val), nil
 	case error:
-		return boxError(customError("%s", val.Error())), nil
+		return boxError(toException(val)), nil
 	}
 
 	// a Go type the host registered travels as it is
@@ -184,7 +184,7 @@ func boxAny(v any, seen map[uintptr]bool) (Value, error) {
 		ptr := rv.Pointer()
 		if ptr != 0 {
 			if seen[ptr] {
-				return Value{}, fmt.Errorf("cannot box cyclic pointer of type %T", v)
+				return Value{}, Errorf(KindValue, "cannot box cyclic pointer of type %T", v)
 			}
 			if seen == nil {
 				seen = make(map[uintptr]bool)
@@ -198,7 +198,7 @@ func boxAny(v any, seen map[uintptr]bool) (Value, error) {
 		if rv.Kind() == reflect.Slice && rv.Len() > 0 {
 			if ptr := rv.Pointer(); ptr != 0 {
 				if seen[ptr] {
-					return Value{}, fmt.Errorf("cannot box cyclic slice of type %T", v)
+					return Value{}, Errorf(KindValue, "cannot box cyclic slice of type %T", v)
 				}
 				if seen == nil {
 					seen = make(map[uintptr]bool)
@@ -224,7 +224,7 @@ func boxAny(v any, seen map[uintptr]bool) (Value, error) {
 		if rv.Len() > 0 {
 			if ptr := rv.Pointer(); ptr != 0 {
 				if seen[ptr] {
-					return Value{}, fmt.Errorf("cannot box cyclic map of type %T", v)
+					return Value{}, Errorf(KindValue, "cannot box cyclic map of type %T", v)
 				}
 				if seen == nil {
 					seen = make(map[uintptr]bool)
@@ -279,7 +279,7 @@ func boxAny(v any, seen map[uintptr]bool) (Value, error) {
 		return BoxGoFunc(Reflect(v)), nil
 
 	default:
-		return Value{}, fmt.Errorf("cannot box type %T into Evie Value", v)
+		return Value{}, Errorf(KindType, "cannot box type %T into Evie Value", v)
 	}
 }
 
@@ -352,7 +352,7 @@ func Reflect(fn any) *GoFunc {
 		for i, o := range out {
 			b, err := BoxAny(o.Interface())
 			if err != nil {
-				return Value{}, fmt.Errorf("return value %d: %v", i+1, err)
+				return Value{}, fmt.Errorf("return value %d: %w", i+1, err)
 			}
 			results[i] = b
 		}
@@ -369,7 +369,7 @@ func marshalReflectArgs(c Call, fnType reflect.Type, numIn, fixedCount int, isVa
 	for i := 0; i < fixedCount; i++ {
 		goVal, err := unmarshalToType(c.Arg(i), fnType.In(i))
 		if err != nil {
-			return nil, fmt.Errorf("argument %d: %v", i+1, err)
+			return nil, fmt.Errorf("argument %d: %w", i+1, err)
 		}
 		if goVal == nil {
 			inArgs[i] = reflect.Zero(fnType.In(i))
@@ -385,7 +385,7 @@ func marshalReflectArgs(c Call, fnType reflect.Type, numIn, fixedCount int, isVa
 		for j := 0; j < varCount; j++ {
 			goVal, err := unmarshalToType(c.Arg(fixedCount+j), elemType)
 			if err != nil {
-				return nil, fmt.Errorf("variadic argument %d: %v", j+1, err)
+				return nil, fmt.Errorf("variadic argument %d: %w", j+1, err)
 			}
 			if goVal == nil {
 				sliceVal.Index(j).Set(reflect.Zero(elemType))
@@ -419,13 +419,13 @@ func unmarshalToType(val Value, targetType reflect.Type) (any, error) {
 			case reflect.Pointer, reflect.Slice, reflect.Map, reflect.Interface:
 				return nil, nil
 			default:
-				return nil, fmt.Errorf("cannot pass nil %s as %v", val.TypeOf(), targetType)
+				return nil, Errorf(KindType, "cannot pass nil %s as %v", val.TypeOf(), targetType)
 			}
 		}
 		if reflect.TypeOf(hv).AssignableTo(targetType) {
 			return hv, nil
 		}
-		return nil, fmt.Errorf("cannot pass %s as %v", val.TypeOf(), targetType)
+		return nil, Errorf(KindType, "cannot pass %s as %v", val.TypeOf(), targetType)
 	}
 
 	if val.IsNil() {
@@ -433,7 +433,7 @@ func unmarshalToType(val Value, targetType reflect.Type) (any, error) {
 		case reflect.Pointer, reflect.Slice, reflect.Map, reflect.Interface:
 			return nil, nil
 		default:
-			return nil, fmt.Errorf("cannot unmarshal nil into %v", targetType)
+			return nil, Errorf(KindType, "cannot unmarshal nil into %v", targetType)
 		}
 	}
 
@@ -445,7 +445,7 @@ func unmarshalToType(val Value, targetType reflect.Type) (any, error) {
 		if goVal != nil && reflect.TypeOf(goVal).AssignableTo(targetType) {
 			return goVal, nil
 		}
-		return nil, fmt.Errorf("cannot pass %s as %v", val.TypeOf(), targetType)
+		return nil, Errorf(KindType, "cannot pass %s as %v", val.TypeOf(), targetType)
 	}
 
 	switch targetType.Kind() {
@@ -461,10 +461,10 @@ func unmarshalToType(val Value, targetType reflect.Type) (any, error) {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		n, ok := val.AsFloat64()
 		if !ok {
-			return nil, fmt.Errorf("expected number for %v, got %s", targetType, val.TypeOf())
+			return nil, Errorf(KindType, "expected number for %v, got %s", targetType, val.TypeOf())
 		}
 		if math.IsNaN(n) || math.IsInf(n, 0) || n != math.Trunc(n) {
-			return nil, fmt.Errorf("expected integer for %v, got %v", targetType, n)
+			return nil, Errorf(KindValue, "expected integer for %v, got %v", targetType, n)
 		}
 		var minV, maxExcl float64
 		switch targetType.Kind() {
@@ -480,7 +480,7 @@ func unmarshalToType(val Value, targetType reflect.Type) (any, error) {
 			minV, maxExcl = float64(math.MinInt64), -float64(math.MinInt64)
 		}
 		if n < minV || n >= maxExcl {
-			return nil, fmt.Errorf("value %v out of range for %v", n, targetType)
+			return nil, Errorf(KindValue, "value %v out of range for %v", n, targetType)
 		}
 		v := int64(n)
 		switch targetType.Kind() {
@@ -499,10 +499,10 @@ func unmarshalToType(val Value, targetType reflect.Type) (any, error) {
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		n, ok := val.AsFloat64()
 		if !ok {
-			return nil, fmt.Errorf("expected number for %v, got %s", targetType, val.TypeOf())
+			return nil, Errorf(KindType, "expected number for %v, got %s", targetType, val.TypeOf())
 		}
 		if math.IsNaN(n) || math.IsInf(n, 0) || n != math.Trunc(n) || n < 0 {
-			return nil, fmt.Errorf("expected non-negative integer for %v, got %v", targetType, n)
+			return nil, Errorf(KindValue, "expected non-negative integer for %v, got %v", targetType, n)
 		}
 		var maxExcl float64
 		switch targetType.Kind() {
@@ -518,7 +518,7 @@ func unmarshalToType(val Value, targetType reflect.Type) (any, error) {
 			maxExcl = float64(math.MaxUint64)
 		}
 		if n >= maxExcl {
-			return nil, fmt.Errorf("value %v out of range for %v", n, targetType)
+			return nil, Errorf(KindValue, "value %v out of range for %v", n, targetType)
 		}
 		v := uint64(n)
 		switch targetType.Kind() {
@@ -538,13 +538,13 @@ func unmarshalToType(val Value, targetType reflect.Type) (any, error) {
 		if n, ok := val.AsFloat64(); ok {
 			return convertNamed(float32(n), targetType), nil
 		}
-		return nil, fmt.Errorf("expected number for %v, got %s", targetType, val.TypeOf())
+		return nil, Errorf(KindType, "expected number for %v, got %s", targetType, val.TypeOf())
 
 	case reflect.Float64:
 		if n, ok := val.AsFloat64(); ok {
 			return convertNamed(n, targetType), nil
 		}
-		return nil, fmt.Errorf("expected number for %v, got %s", targetType, val.TypeOf())
+		return nil, Errorf(KindType, "expected number for %v, got %s", targetType, val.TypeOf())
 
 	case reflect.String:
 		if s, ok := val.AsString(); ok {
@@ -578,7 +578,7 @@ func unmarshalToType(val Value, targetType reflect.Type) (any, error) {
 			}
 			return sliceVal.Interface(), nil
 		}
-		return nil, fmt.Errorf("expected array for %v, got %s", targetType, val.TypeOf())
+		return nil, Errorf(KindType, "expected array for %v, got %s", targetType, val.TypeOf())
 
 	case reflect.Map:
 		if obj, ok := val.AsObject(); ok {
@@ -609,7 +609,7 @@ func unmarshalToType(val Value, targetType reflect.Type) (any, error) {
 			}
 			return mapVal.Interface(), nil
 		}
-		return nil, fmt.Errorf("expected object for %v, got %s", targetType, val.TypeOf())
+		return nil, Errorf(KindType, "expected object for %v, got %s", targetType, val.TypeOf())
 
 	case reflect.Struct:
 		target := reflect.New(targetType).Interface()
@@ -626,7 +626,7 @@ func unmarshalToType(val Value, targetType reflect.Type) (any, error) {
 		return target, nil
 
 	default:
-		return nil, fmt.Errorf("unsupported target type: %v", targetType)
+		return nil, Errorf(KindType, "unsupported target type: %v", targetType)
 	}
 }
 
@@ -757,7 +757,7 @@ func (v Value) encodeJSON(enc *jsontext.Encoder, seen map[unsafe.Pointer]bool) e
 	case f64Type:
 		f := math.Float64frombits(v.scalar)
 		if math.IsNaN(f) || math.IsInf(f, 0) {
-			return fmt.Errorf("cannot encode non-finite number (%v) as JSON", f)
+			return Errorf(KindValue, "cannot encode non-finite number (%v) as JSON", f)
 		}
 		return enc.WriteToken(jsontext.Float(f))
 	}
@@ -770,7 +770,7 @@ func (v Value) encodeJSON(enc *jsontext.Encoder, seen map[unsafe.Pointer]bool) e
 		arr := (*Array)(v.pointer)
 		ptr := unsafe.Pointer(arr)
 		if seen[ptr] {
-			return fmt.Errorf("cannot encode cyclic array as JSON")
+			return Errorf(KindValue, "cannot encode cyclic array as JSON")
 		}
 		if seen == nil {
 			seen = make(map[unsafe.Pointer]bool)
@@ -793,7 +793,7 @@ func (v Value) encodeJSON(enc *jsontext.Encoder, seen map[unsafe.Pointer]bool) e
 		ptr := v.pointer
 		if ptr != nil {
 			if seen[ptr] {
-				return fmt.Errorf("cannot encode cyclic object as JSON")
+				return Errorf(KindValue, "cannot encode cyclic object as JSON")
 			}
 			if seen == nil {
 				seen = make(map[unsafe.Pointer]bool)
@@ -818,7 +818,7 @@ func (v Value) encodeJSON(enc *jsontext.Encoder, seen map[unsafe.Pointer]bool) e
 		inst := (*classInstance)(v.pointer)
 		ptr := unsafe.Pointer(inst)
 		if seen[ptr] {
-			return fmt.Errorf("cannot encode cyclic class '%s' as JSON", inst.InstanceOf.Name)
+			return Errorf(KindValue, "cannot encode cyclic class '%s' as JSON", inst.InstanceOf.Name)
 		}
 		if seen == nil {
 			seen = make(map[unsafe.Pointer]bool)
@@ -856,7 +856,7 @@ func (v Value) encodeJSON(enc *jsontext.Encoder, seen map[unsafe.Pointer]bool) e
 		}
 	}
 
-	return fmt.Errorf("cannot encode value of type %s as JSON", v.TypeOf())
+	return Errorf(KindType, "cannot encode value of type %s as JSON", v.TypeOf())
 }
 
 // UnmarshalJSON implements json.Unmarshaler for Evie values.
@@ -927,7 +927,7 @@ func decodeJSONValue(dec *jsontext.Decoder) (Value, error) {
 		}
 		return BoxObject(obj), nil
 	default:
-		return Value{}, fmt.Errorf("unexpected JSON token %v", tok.Kind())
+		return Value{}, Errorf(KindSyntax, "unexpected JSON token %v", tok.Kind())
 	}
 }
 

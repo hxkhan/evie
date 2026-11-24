@@ -2,7 +2,6 @@ package vm
 
 import (
 	"context"
-	"fmt"
 	"math"
 
 	"github.com/hxkhan/evie/diag"
@@ -114,7 +113,7 @@ func (c Call) typeError(i int, want string) error {
 	if c.fn.isMethod {
 		pos = i
 	}
-	return fmt.Errorf("%s: argument %d must be %s, got %s", name, pos, want, c.Arg(i).TypeOf())
+	return Errorf(KindType, "%s: argument %d must be %s, got %s", name, pos, want, c.Arg(i).TypeOf())
 }
 
 // Number returns argument i as a number

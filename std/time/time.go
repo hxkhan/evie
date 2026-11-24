@@ -4,8 +4,6 @@ package time
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"math"
 	"time"
 
@@ -25,7 +23,7 @@ func Construct() *vm.Package {
 			return vm.Value{}, err
 		}
 		if math.IsNaN(ms) {
-			return vm.Value{}, errors.New("duration must not be NaN")
+			return vm.Value{}, vm.Errorf(vm.KindValue, "duration must not be NaN")
 		}
 		if ms <= 0 {
 			if err := c.Context().Err(); err != nil {
@@ -59,7 +57,7 @@ func Construct() *vm.Package {
 
 	pkg.Variadic("format", 1, func(c vm.Call) (vm.Value, error) {
 		if c.Len() > 2 {
-			return vm.Value{}, fmt.Errorf("format takes 1 or 2 arguments, got %d", c.Len())
+			return vm.Value{}, vm.Errorf(vm.KindType, "format takes 1 or 2 arguments, got %d", c.Len())
 		}
 		ms, err := c.Number(0)
 		if err != nil {
@@ -79,7 +77,7 @@ func Construct() *vm.Package {
 	})
 	pkg.Variadic("parse", 1, func(c vm.Call) (vm.Value, error) {
 		if c.Len() > 2 {
-			return vm.Value{}, fmt.Errorf("parse takes 1 or 2 arguments, got %d", c.Len())
+			return vm.Value{}, vm.Errorf(vm.KindType, "parse takes 1 or 2 arguments, got %d", c.Len())
 		}
 		s, err := c.String(0)
 		if err != nil {
@@ -93,7 +91,9 @@ func Construct() *vm.Package {
 		}
 		t, err := time.Parse(layout, s)
 		if err != nil {
-			return vm.Value{}, err
+			e := vm.Errorf(vm.KindSyntax, "time.parse: %v", err)
+			e.Cause = err
+			return vm.Value{}, e
 		}
 		return vm.BoxNumber(millis(t)), nil
 	})
@@ -122,11 +122,11 @@ func millis(t time.Time) float64 { return float64(t.UnixMicro()) / 1000 }
 
 func fromMillis(ms float64) (time.Time, error) {
 	if math.IsNaN(ms) || math.IsInf(ms, 0) {
-		return time.Time{}, fmt.Errorf("timestamp must be a finite number, got %v", ms)
+		return time.Time{}, vm.Errorf(vm.KindValue, "timestamp must be a finite number, got %v", ms)
 	}
 	us := ms * 1000
 	if us < float64(math.MinInt64) || us >= -float64(math.MinInt64) {
-		return time.Time{}, fmt.Errorf("timestamp %v is out of range", ms)
+		return time.Time{}, vm.Errorf(vm.KindValue, "timestamp %v is out of range", ms)
 	}
 	return time.UnixMicro(int64(us)), nil
 }

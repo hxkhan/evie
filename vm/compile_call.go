@@ -282,7 +282,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 
 		if uc, isUserClass := value.asUserClass(); isUserClass {
 			if uc.ParamCount != len(arguments) {
-				vm.arity(customError("class '%v' takes %v argument(s) but %v were supplied", uc.Name, uc.ParamCount, len(arguments)), node, uc.def)
+				vm.arity(Errorf(KindType, "class '%v' takes %v argument(s) but %v were supplied", uc.Name, uc.ParamCount, len(arguments)), node, uc.def)
 			}
 			return func(fbr *fiber) (Value, exception) {
 				return uc.construct(fbr, site, arguments)
@@ -316,7 +316,7 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 				}
 				fn := parent.lookupMethod(methodID)
 				if fn == nil {
-					return Value{}, errorAt(site, "no method '%s' on parent class '%s'", iFA.Rhs, parent.Name)
+					return Value{}, errorAt(site, KindMember, "no method '%s' on parent class '%s'", iFA.Rhs, parent.Name)
 				}
 				if exc := fn.accepts(1 + len(arguments)); exc != nil {
 					return Value{}, exc.at(site)
@@ -430,11 +430,11 @@ func callValue(fbr *fiber, site site, value Value, arguments []instruction) (Val
 	}
 	if bt, isBuiltinType := value.asBuiltinType(); isBuiltinType {
 		if bt.Constructor == nil {
-			return Value{}, errorAt(site, "type '%s' cannot be called as a constructor", bt.Name)
+			return Value{}, errorAt(site, KindType, "type '%s' cannot be called as a constructor", bt.Name)
 		}
 		return bt.Constructor.call(fbr, site, arguments)
 	}
-	return Value{}, errorAt(site, "cannot call %s", article(value)).labelled("this is " + article(value))
+	return Value{}, errorAt(site, KindType, "cannot call %s", article(value)).labelled("this is " + article(value))
 }
 
 // classMemberCache holds one resolved member (either a method or a callable

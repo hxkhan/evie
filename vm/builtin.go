@@ -1,8 +1,6 @@
 package vm
 
 import (
-	"errors"
-	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -68,19 +66,34 @@ var typeNumber = newBuiltinType("number", NewFunc("number", 1, func(c Call) (Val
 	if s, ok := arg.AsString(); ok {
 		f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
 		if err != nil {
-			return Value{}, fmt.Errorf("cannot convert '%v' to a number", s)
+			return Value{}, Errorf(KindValue, "cannot convert '%v' to a number", s)
 		}
 		return BoxNumber(f), nil
 	}
-	return Value{}, fmt.Errorf("cannot convert %v to a number", arg.TypeOf())
+	return Value{}, Errorf(KindType, "cannot convert %v to a number", arg.TypeOf())
 }), methodTable())
 
 var typeBool = newBuiltinType("bool", NewFunc("bool", 1, func(c Call) (Value, error) {
 	return BoxBool(c.Arg(0).IsTruthy()), nil
 }), methodTable())
 
-var typeError = newBuiltinType("error", NewFunc("error", 1, func(c Call) (Value, error) {
-	return boxError(customError("%s", c.Arg(0).String())), nil
+// error(message) makes an error; error(message, fields) also gives it a kind,
+// a cause or any other fields, as in error("no config", {kind: "config", path: p})
+var typeError = newBuiltinType("error", NewVariadic("error", 1, func(c Call) (Value, error) {
+	if c.Len() > 2 {
+		return Value{}, Errorf(KindType, "error takes a message and an object of fields, but %d arguments were supplied", c.Len())
+	}
+	e := customError("%s", c.Arg(0).String())
+	if c.Len() == 2 {
+		obj, ok := c.Arg(1).AsObject()
+		if !ok {
+			return Value{}, c.typeError(1, "an object of fields")
+		}
+		if err := e.take(obj, false); err != nil {
+			return Value{}, err
+		}
+	}
+	return boxError(e), nil
 }), methodTable(
 	newMethod("message", 0, func(c Call) (Value, error) {
 		return BoxString(c.This().mustError().Message), nil
@@ -201,11 +214,11 @@ var typeString = newBuiltinType("string", NewFunc("string", 1, func(c Call) (Val
 			return Value{}, err
 		}
 		if n < 0 {
-			return Value{}, errors.New("repeat: the count must not be negative")
+			return Value{}, Errorf(KindValue, "repeat: the count must not be negative")
 		}
 		s := c.This().mustString()
 		if len(s) > 0 && n > maxStringAllocBytes/len(s) {
-			return Value{}, fmt.Errorf("repeat: result exceeds maximum string size (%d bytes)", maxStringAllocBytes)
+			return Value{}, Errorf(KindValue, "repeat: result exceeds maximum string size (%d bytes)", maxStringAllocBytes)
 		}
 		return BoxString(strings.Repeat(s, n)), nil
 	}),
@@ -306,7 +319,7 @@ func stringPadding(s string, width int, pad string) (string, error) {
 		return "", nil
 	}
 	if missing > maxStringAllocBytes/utf8.UTFMax {
-		return "", fmt.Errorf("pad: target width %d exceeds maximum string size", width)
+		return "", Errorf(KindValue, "pad: target width %d exceeds maximum string size", width)
 	}
 	padRunes := []rune(pad)
 	out := make([]rune, missing)
@@ -318,7 +331,7 @@ func stringPadding(s string, width int, pad string) (string, error) {
 
 func sliceArgs(c Call, n int) (int, int, error) {
 	if c.Len() > 3 {
-		return 0, 0, fmt.Errorf("slice takes 1 or 2 arguments, got %d", c.Len()-1)
+		return 0, 0, Errorf(KindType, "slice takes 1 or 2 arguments, got %d", c.Len()-1)
 	}
 	start, err := c.Int(1)
 	if err != nil {
@@ -429,7 +442,7 @@ var typeArray = newBuiltinType("array", NewFunc("array", 0, func(c Call) (Value,
 		for i, item := range data {
 			str, ok := item.AsString()
 			if !ok {
-				return Value{}, fmt.Errorf("join: element %d is %s, not a string", i, item.TypeOf())
+				return Value{}, Errorf(KindType, "join: element %d is %s, not a string", i, item.TypeOf())
 			}
 			parts[i] = str
 		}
@@ -499,10 +512,10 @@ var bufferPush = newMethod("push", 1, func(c Call) (Value, error) {
 	}
 	b, err := c.Int(1)
 	if err != nil {
-		return Value{}, fmt.Errorf("buffer.push: argument must be a byte (0..255), string or buffer, got %s", arg.TypeOf())
+		return Value{}, Errorf(KindType, "buffer.push: argument must be a byte (0..255), string or buffer, got %s", arg.TypeOf())
 	}
 	if b < 0 || b > 255 {
-		return Value{}, fmt.Errorf("buffer.push: byte value %d out of range 0..255", b)
+		return Value{}, Errorf(KindValue, "buffer.push: byte value %d out of range 0..255", b)
 	}
 	*bp = append(*bp, byte(b))
 	return c.This(), nil
@@ -513,7 +526,7 @@ var typeBuffer = newBuiltinType("buffer", NewVariadic("buffer", 0, func(c Call) 
 		return BoxBuffer([]byte{}), nil
 	}
 	if c.Len() > 1 {
-		return Value{}, fmt.Errorf("buffer takes at most 1 argument, got %d", c.Len())
+		return Value{}, Errorf(KindType, "buffer takes at most 1 argument, got %d", c.Len())
 	}
 	arg := c.Arg(0)
 	if s, ok := arg.AsString(); ok {
@@ -529,7 +542,7 @@ var typeBuffer = newBuiltinType("buffer", NewVariadic("buffer", 0, func(c Call) 
 		for i, item := range arr.Data {
 			f, ok := item.AsFloat64()
 			if !ok || float64(int(f)) != f || f < 0 || f > 255 {
-				return Value{}, fmt.Errorf("buffer: array element %d must be an integer in 0..255", i)
+				return Value{}, Errorf(KindValue, "buffer: array element %d must be an integer in 0..255", i)
 			}
 			out[i] = byte(int(f))
 		}
@@ -537,13 +550,13 @@ var typeBuffer = newBuiltinType("buffer", NewVariadic("buffer", 0, func(c Call) 
 	}
 	n, err := c.Int(0)
 	if err != nil {
-		return Value{}, fmt.Errorf("buffer: argument must be a string, array, buffer or size, got %s", arg.TypeOf())
+		return Value{}, Errorf(KindType, "buffer: argument must be a string, array, buffer or size, got %s", arg.TypeOf())
 	}
 	if n < 0 {
-		return Value{}, fmt.Errorf("buffer: size must not be negative, got %d", n)
+		return Value{}, Errorf(KindValue, "buffer: size must not be negative, got %d", n)
 	}
 	if n > maxStringAllocBytes {
-		return Value{}, fmt.Errorf("buffer: size %d exceeds the maximum buffer size (%d bytes)", n, maxStringAllocBytes)
+		return Value{}, Errorf(KindValue, "buffer: size %d exceeds the maximum buffer size (%d bytes)", n, maxStringAllocBytes)
 	}
 	return BoxBuffer(make([]byte, n)), nil
 }), methodTable(

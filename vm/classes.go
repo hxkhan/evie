@@ -51,7 +51,7 @@ func newUserClass(name string, def site, params []string) *userClass {
 // instantiate creates an instance from pre-evaluated constructor arguments (e.g. from Go Call).
 func (uc *userClass) instantiate(fbr *fiber, args []Value) (Value, exception) {
 	if len(args) != uc.ParamCount {
-		return Value{}, customError("class '%v' takes %v argument(s) but %v were supplied", uc.Name, uc.ParamCount, len(args))
+		return Value{}, Errorf(KindType, "class '%v' takes %v argument(s) but %v were supplied", uc.Name, uc.ParamCount, len(args))
 	}
 	ci := &classInstance{InstanceOf: uc, Fields: make([]Value, len(uc.Fields))}
 	copy(ci.Fields[:uc.ParamCount], args)
@@ -70,7 +70,7 @@ func (uc *userClass) instantiate(fbr *fiber, args []Value) (Value, exception) {
 // construct evaluates the constructor arguments and creates an instance.
 func (uc *userClass) construct(fbr *fiber, site site, arguments []instruction) (Value, exception) {
 	if len(arguments) != uc.ParamCount {
-		return Value{}, errorAt(site, "class '%v' takes %v argument(s) but %v were supplied", uc.Name, uc.ParamCount, len(arguments))
+		return Value{}, errorAt(site, KindType, "class '%v' takes %v argument(s) but %v were supplied", uc.Name, uc.ParamCount, len(arguments))
 	}
 	ci := &classInstance{InstanceOf: uc, Fields: make([]Value, len(uc.Fields))}
 	for i, argument := range arguments {
@@ -151,7 +151,7 @@ func (ci *classInstance) getFieldByName(name string) (Value, bool) {
 }
 
 func (ci *classInstance) missingFieldError(site site, name string) exception {
-	err := errorAt(site, "class '%s' has no field '%s'", ci.InstanceOf.Name, name)
+	err := errorAt(site, KindMember, "class '%s' has no field '%s'", ci.InstanceOf.Name, name)
 	if hint, ok := diag.Suggest(name, ci.InstanceOf.fieldNames()); ok {
 		err = err.hinted("did you mean '" + hint + "'?")
 	}
@@ -159,7 +159,7 @@ func (ci *classInstance) missingFieldError(site site, name string) exception {
 }
 
 func (ci *classInstance) constFieldError(site site, name string) exception {
-	return errorAt(site, "cannot assign to constant field '%s' on class '%s'", name, ci.InstanceOf.Name).
+	return errorAt(site, KindType, "cannot assign to constant field '%s' on class '%s'", name, ci.InstanceOf.Name).
 		hinted("declare it with var to allow reassignment: var " + name + " := ...")
 }
 

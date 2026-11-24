@@ -65,6 +65,7 @@ type Frame struct {
 // Report is everything known about one error
 type Report struct {
 	Message string
+	Code    string // the sort of error, such as "notFound", shown as error[notFound]; empty for most
 	Source  *Source
 	Pos     Pos    // the primary span; zero when unknown
 	Label   string // shown under the primary span
@@ -118,7 +119,11 @@ var Colors = Palette{
 // source is known, using the palette for emphasis
 func (r *Report) Render(p Palette) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%serror%s: %s%s%s\n", p.Error, p.Reset, p.Bold, r.Message, p.Reset)
+	code := ""
+	if r.Code != "" {
+		code = "[" + r.Code + "]"
+	}
+	fmt.Fprintf(&b, "%serror%s%s: %s%s%s\n", p.Error, code, p.Reset, p.Bold, r.Message, p.Reset)
 
 	width := len(strconv.Itoa(r.Pos.Line))
 	for _, n := range r.Notes {

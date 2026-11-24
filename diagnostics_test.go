@@ -71,7 +71,7 @@ fn report(scores) => average(scores)
 fn main() {
     report([90, 85, "n/a"])
 }
-`, `error: cannot apply '+' to a number and a string
+`, `error[type]: cannot apply '+' to a number and a string
  --> example.ev:6:9
   |
 6 |         sum += v
@@ -110,7 +110,7 @@ fn main() {
     p := Point(3, 4)
     return p.lenght()
 }
-`, `error: no member 'lenght' on a Point
+`, `error[member]: no member 'lenght' on a Point
  --> example.ev:9:12
   |
 9 |     return p.lenght()

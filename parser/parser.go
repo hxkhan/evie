@@ -22,6 +22,7 @@ type Error struct {
 	diag.Report
 }
 
+// Error returns the report prefixed with "syntax error: "
 func (e *Error) Error() string {
 	return "syntax error: " + e.Report.Error()
 }
@@ -30,6 +31,7 @@ func (e *Error) Error() string {
 // error, in the order they appear. errors.As finds each *Error in it.
 type ErrorList []*Error
 
+// Error returns the first error, and how many more there are
 func (l ErrorList) Error() string {
 	if len(l) == 1 {
 		return l[0].Error()
@@ -37,6 +39,7 @@ func (l ErrorList) Error() string {
 	return fmt.Sprintf("%s (and %d more)", l[0].Error(), len(l)-1)
 }
 
+// Unwrap returns every error in the list, for errors.Is and errors.As
 func (l ErrorList) Unwrap() []error {
 	errs := make([]error, len(l))
 	for i, e := range l {

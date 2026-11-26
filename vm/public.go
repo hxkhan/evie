@@ -74,6 +74,7 @@ func (pkg *Package) SetID(id string) {
 	pkg.id = id
 }
 
+// Name returns the package's declared name
 func (pkg *Package) Name() string {
 	return pkg.name
 }

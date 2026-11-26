@@ -20,6 +20,7 @@ type ImportSpec struct {
 	AliasPos diag.Pos // where the alias is written, when there is one
 }
 
+// Package is a parsed file: its package clause, its imports and its top-level code
 type Package struct {
 	diag.Pos
 	Name    string
@@ -28,15 +29,18 @@ type Package struct {
 	Code    []Node
 }
 
+// Literal lists the Go types an Input can hold; struct{} stands for nil
 type Literal interface {
 	bool | float64 | string | struct{}
 }
 
+// Input is a literal in the source: a number, string, bool or nil
 type Input[T Literal] struct {
 	diag.Pos
 	Value T
 }
 
+// String returns the literal as Evie source
 func (node Input[T]) String() string {
 	if f, isFloat := any(node.Value).(float64); isFloat {
 		return strconv.FormatFloat(f, 'f', -1, 64)
@@ -48,12 +52,14 @@ func (node Input[T]) String() string {
 	return fmt.Sprint(node.Value)
 }
 
+// StringTemplate is a backtick string with `{expr}` interpolations
 type StringTemplate struct {
 	diag.Pos
 	Parts []string // the literal text around the interpolations; one more than Args
 	Args  []Node
 }
 
+// String returns the template's text with each interpolation in braces
 func (node StringTemplate) String() string {
 	var b strings.Builder
 	b.WriteString(node.Parts[0])
@@ -71,15 +77,18 @@ type Block struct {
 	End  diag.Pos
 }
 
+// Echo is `echo value`, which prints the value to the engine's standard output
 type Echo struct {
 	diag.Pos
 	Value Node
 }
 
+// String returns the statement as Evie source
 func (echo Echo) String() string {
 	return fmt.Sprintf("echo %v", echo.Value)
 }
 
+// String returns the package clause, its imports and its code as Evie source
 func (pkg Package) String() string {
 	b := strings.Builder{}
 	b.WriteString("package ")
@@ -118,6 +127,7 @@ func (pkg Package) String() string {
 	return b.String()
 }
 
+// String returns the block as Evie source
 func (block Block) String() string {
 	b := strings.Builder{}
 	b.WriteString("{\n")

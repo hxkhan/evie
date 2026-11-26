@@ -69,10 +69,12 @@ func Errorf(kind, format string, a ...any) *Error {
 	return &Error{Report: diag.Report{Message: fmt.Sprintf(format, a...)}, kind: kind}
 }
 
+// Error returns the error's report as text
 func (e *Error) Error() string {
 	return e.Report.Error()
 }
 
+// Unwrap returns the Go error this one was made from, if any
 func (e *Error) Unwrap() error {
 	return e.Cause
 }
@@ -444,6 +446,7 @@ type CompileError struct {
 	diag.Report
 }
 
+// Error returns the report prefixed with "compile error: "
 func (e *CompileError) Error() string {
 	return "compile error: " + e.Report.Error()
 }
@@ -517,6 +520,7 @@ func (vm *Instance) locate(err error, node ast.Node) error {
 // *CompileError in it.
 type CompileErrors []*CompileError
 
+// Error returns the first error, and how many more there are
 func (l CompileErrors) Error() string {
 	if len(l) == 1 {
 		return l[0].Error()
@@ -524,6 +528,7 @@ func (l CompileErrors) Error() string {
 	return fmt.Sprintf("%s (and %d more)", l[0].Error(), len(l)-1)
 }
 
+// Unwrap returns every error in the list, for errors.Is and errors.As
 func (l CompileErrors) Unwrap() []error {
 	errs := make([]error, len(l))
 	for i, e := range l {

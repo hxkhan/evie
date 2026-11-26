@@ -44,6 +44,33 @@ jobs:
         if: runner.os == 'Windows'
         run: go test -count=1 ./...
 
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # lets Codecov check the upload came from this repo, no token needed
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # every test counts for every library package; the benchmarks, examples
+      # and the command-line tool are left out (codecov.yml drops generated code)
+      - name: Test with coverage
+        run: |
+          pkgs="$(go list ./... | grep -v -e /benchmarks -e /embedding -e /site -e '/evie/evie$')"
+          go test -count=1 -coverpkg="$(echo "$pkgs" | paste -sd, -)" -coverprofile=coverage.out $pkgs
+
+      - uses: codecov/codecov-action@v5
+        with:
+          files: coverage.out
+          use_oidc: true
+          fail_ci_if_error: false
+
   verify:
     name: Verify
     runs-on: ubuntu-latest

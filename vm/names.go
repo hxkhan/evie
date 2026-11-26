@@ -21,6 +21,7 @@ const (
 	NamePrelude                   // a builtin, or a symbol the host makes visible everywhere
 )
 
+// String returns the kind in words, such as "parameter"
 func (k NameKind) String() string {
 	switch k {
 	case NameVariable:

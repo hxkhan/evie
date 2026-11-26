@@ -18,6 +18,8 @@ import (
 	"github.com/hxkhan/evie/parser"
 )
 
+// Instance compiles and runs Evie code: it holds the loaded packages and the
+// fibers running them. Make one with New.
 type Instance struct {
 	cp compiler
 	rt runtime
@@ -80,6 +82,7 @@ type pkgGlobal struct {
 	IsConstant bool // its value is fixed and known while compiling, so uses of it fold
 }
 
+// Options configures a new Instance
 type Options struct {
 	Resolver PackageResolver // finds a package by import path when it is not loaded yet
 	Prelude  *Package        // symbols visible everywhere without an import; the builtin types are added to it
@@ -94,6 +97,7 @@ type Options struct {
 	OnName func(NameEvent)
 }
 
+// New makes an Instance configured by opts
 func New(opts Options) (vm *Instance) {
 	var prelude *Package
 	if opts.Prelude == nil {

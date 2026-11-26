@@ -151,6 +151,7 @@ func BoxBuffer(bytes []byte) Value {
 	return Value{scalar: kindBuffer, pointer: unsafe.Pointer(&bytes)}
 }
 
+// IsNil reports whether the value is nil
 func (x Value) IsNil() bool {
 	return x.pointer == nil
 }
@@ -168,14 +169,17 @@ func (x Value) isImmutableConstant() bool {
 	return false
 }
 
+// AsFloat64 returns the value as a number, and whether it is one
 func (x Value) AsFloat64() (f float64, ok bool) {
 	return math.Float64frombits(x.scalar), x.pointer == f64Type
 }
 
+// AsBool returns the value as a bool, and whether it is one
 func (x Value) AsBool() (b bool, ok bool) {
 	return x.scalar != 0, x.pointer == boolType
 }
 
+// AsString returns the value as a string, and whether it is one
 func (x Value) AsString() (s string, ok bool) {
 	if isKnown(x.pointer) {
 		return "", false
@@ -195,6 +199,7 @@ func (x Value) asUserFn() (fn *userFn, ok bool) {
 	return (*userFn)(x.pointer), true
 }
 
+// AsGoFunc returns the value as a native function, and whether it is one
 func (x Value) AsGoFunc() (fn *GoFunc, ok bool) {
 	if x.scalar != kindGoFunc || isKnown(x.pointer) {
 		return nil, false
@@ -202,6 +207,7 @@ func (x Value) AsGoFunc() (fn *GoFunc, ok bool) {
 	return (*GoFunc)(x.pointer), true
 }
 
+// AsArray returns the value as an array, and whether it is one
 func (x Value) AsArray() (arr *Array, ok bool) {
 	if x.scalar != kindArray || isKnown(x.pointer) {
 		return nil, false
@@ -209,6 +215,7 @@ func (x Value) AsArray() (arr *Array, ok bool) {
 	return (*Array)(x.pointer), true
 }
 
+// AsObject returns the value as an object, and whether it is one
 func (x Value) AsObject() (obj *Object, ok bool) {
 	if x.scalar != kindObject || isKnown(x.pointer) {
 		return nil, false
@@ -237,6 +244,7 @@ func (x Value) asBuiltinType() (obj *builtinType, ok bool) {
 	return (*builtinType)(x.pointer), true
 }
 
+// AsTask returns the value as a task, and whether it is one
 func (x Value) AsTask() (task *Task, ok bool) {
 	if x.scalar != kindTask || isKnown(x.pointer) {
 		return nil, false
@@ -244,6 +252,7 @@ func (x Value) AsTask() (task *Task, ok bool) {
 	return (*Task)(x.pointer), true
 }
 
+// AsPackage returns the value as a package, and whether it is one
 func (x Value) AsPackage() (pkg *Package, ok bool) {
 	if x.scalar != kindPackage || isKnown(x.pointer) {
 		return nil, false
@@ -251,6 +260,7 @@ func (x Value) AsPackage() (pkg *Package, ok bool) {
 	return (*Package)(x.pointer), true
 }
 
+// AsError returns the value as an error, and whether it is one
 func (x Value) AsError() (err *Error, ok bool) {
 	if x.scalar != kindError || isKnown(x.pointer) {
 		return nil, false
@@ -265,6 +275,8 @@ func (x Value) asMethod() (m *boundMethod, ok bool) {
 	return (*boundMethod)(x.pointer), true
 }
 
+// AsBuffer returns the value as a buffer's bytes, and whether it is one;
+// the bytes are shared, not copied
 func (x Value) AsBuffer() (buffer []byte, ok bool) {
 	if x.scalar != kindBuffer || isKnown(x.pointer) {
 		return nil, false
@@ -285,6 +297,8 @@ func isKnown(p unsafe.Pointer) bool {
 	return false
 }
 
+// IsTruthy reports whether the value counts as true in a condition: nil, false,
+// 0 and an empty string, array, object or buffer do not, everything else does
 func (x Value) IsTruthy() bool {
 	switch x.pointer {
 	case nil:
@@ -311,6 +325,8 @@ func (x Value) IsTruthy() bool {
 	}
 }
 
+// Equals reports whether x == y in Evie: nil, bools, numbers and strings compare
+// by value, host values by their own equality, and everything else by identity
 func (x Value) Equals(y Value) bool {
 	if x.pointer == f64Type && y.pointer == f64Type {
 		return math.Float64frombits(x.scalar) == math.Float64frombits(y.scalar)
@@ -344,6 +360,7 @@ func (x Value) equalsSlow(y Value) bool {
 	return x.pointer == y.pointer
 }
 
+// String returns the value as echo prints it
 func (x Value) String() string {
 	switch x.pointer {
 	case nil:
@@ -467,6 +484,7 @@ func (x Value) writeTo(builder *strings.Builder, seen map[unsafe.Pointer]bool, q
 	builder.WriteString(x.String())
 }
 
+// TypeOf returns the name of the value's type, such as "number" or "array"
 func (x Value) TypeOf() string {
 	switch x.pointer {
 	case nil:

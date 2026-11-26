@@ -1,0 +1,12 @@
+# generated code is tested through the operators it implements, not line by line
+ignore:
+  - "vm/ops_gen.go"
+
+coverage:
+  status:
+    project:
+      default:
+        threshold: 1%
+    patch: off
+
+comment: false

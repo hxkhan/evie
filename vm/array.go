@@ -10,6 +10,7 @@ type Array struct {
 	Data []Value
 }
 
+// String returns the array as Evie prints it, such as [1, "a"]
 func (arr *Array) String() string {
 	var builder strings.Builder
 	arr.writeTo(&builder, nil)
@@ -58,6 +59,7 @@ func (arr *Array) grow() {
 	arr.Data = grown
 }
 
+// NewArray makes an array holding values, without copying them
 func NewArray(values ...Value) *Array {
 	return &Array{Data: values}
 }

@@ -37,6 +37,7 @@ func (p Pos) To(end Pos) Pos {
 	return p
 }
 
+// String returns the position as "line:column"
 func (p Pos) String() string {
 	return fmt.Sprintf("%d:%d", p.Line, p.Column)
 }

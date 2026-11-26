@@ -12,6 +12,9 @@ jobs:
   ci:
     name: CI
     uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      id-token: write # the coverage job's Codecov upload; a called workflow gets no more than this
 
   release:
     name: Build & Publish Release

@@ -1,8 +1,14 @@
 # The Evie Programming Language
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/hxkhan/evie.svg)](https://pkg.go.dev/github.com/hxkhan/evie)
+[![CI](https://github.com/hxkhan/evie/actions/workflows/ci.yml/badge.svg)](https://github.com/hxkhan/evie/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/hxkhan/evie/graph/badge.svg)](https://app.codecov.io/gh/hxkhan/evie)
+
 Evie is a lightweight, dynamically typed scripting language written in pure Go without CGO. Combining the dynamic ergonomics of JavaScript and Python with Go's simplicity and Rust's safe-by-default immutability, Evie features cooperative fibers with `go` and `await`, first-class OOP with classes and inheritance, and seamless Go host embedding.
 
 On an eight-workload cross-language suite, Evie is the fastest of the languages a Go program can embed: 3 to 10 times faster than [Kavun](https://github.com/jokruger/kavun), [gopher-lua](https://github.com/yuin/gopher-lua), [Tengo](https://github.com/d5/tengo), [Starlark](https://github.com/google/starlark-go), [goja](https://github.com/dop251/goja) and [Yaegi](https://github.com/traefik/yaegi). It is also slightly faster overall than PUC [Lua 5.4](https://lua.org/), written in C, and about twice as fast as Google's [V8 Ignition](https://v8.dev/docs/ignition) JavaScript interpreter. See [here](#benchmarks).
+
+**[Website](https://hxkhan.github.io/evie/)** · **[Try it in your browser](https://hxkhan.github.io/evie/play/)** · **[Language guide](https://hxkhan.github.io/evie/docs/)**
 
 ---
 

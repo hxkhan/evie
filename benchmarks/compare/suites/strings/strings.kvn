@@ -1,0 +1,18 @@
+fmt = import("fmt")
+
+main = func() {
+	base = "alpha,beta,gamma,delta,epsilon"
+	total = 0
+	for i = 0; i < 40000; i++ {
+		s = base + "," + string(i)
+		parts = s.split(",")
+		joined = parts.join("-")
+		replaced = joined.replace("beta", "BETA")
+		if replaced.contains("gamma") {
+			total += len(replaced)
+		}
+	}
+	return total
+}
+
+fmt.println(main())

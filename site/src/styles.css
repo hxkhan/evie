@@ -202,9 +202,11 @@ kbd { padding: 1px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 
 .bench { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 56px; align-items: center; padding-block: 64px; }
 .bench__text p { color: var(--ink-soft); }
-.bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; --max: 587.4; }
-.bar { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); align-items: center; gap: 14px; font-size: 0.92rem; }
-.bar__name { color: var(--ink-soft); font-weight: 500; }
+.bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; --max: 550.4; }
+.bar { display: grid; grid-template-columns: 9.5em minmax(0, 1fr); align-items: center; gap: 14px; font-size: 0.92rem; }
+.bar__name { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: var(--ink-soft); font-weight: 500; white-space: nowrap; }
+/* the language each runtime is written in, as a quiet column at the name's right edge */
+.bar__lang { font: 500 0.72rem var(--font-mono); color: var(--muted); }
 /* the fill's length is the time, to scale; the time is written just after it,
    in room the track keeps for it, so even the shortest bar stays true */
 .bar__track { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -227,7 +229,7 @@ kbd { padding: 1px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 }
 @media (max-width: 560px) {
   .feature-grid { grid-template-columns: minmax(0, 1fr); }
-  .bar { grid-template-columns: 6em minmax(0, 1fr); }
+  .bar { grid-template-columns: 8.5em minmax(0, 1fr); gap: 10px; }
 }
 
 /* ---------------------------------------------------------------- docs */

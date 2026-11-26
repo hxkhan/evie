@@ -17,6 +17,7 @@ The runner builds a fresh `evie` binary from this repository, builds the other G
 | `tengo` | `tengo` | Pure Go interpreter |
 | `goja` | built from `runners/goja` | JavaScript in Go, embedded with `console.log` writing to stdout |
 | `gopher-lua` | built from `runners` (`glua`) | Lua 5.1 in Go; runs the `.lua` programs |
+| `kavun` | built from `runners` (`kavun`) | Bytecode VM in Go derived from Tengo; the programs are `.kvn` files |
 | `starlark` | built from `runners/starlark` | starlark-go, with `while` and recursion allowed |
 | `yaegi` | built from `runners` (`yaegi`) | Interpreted Go; the programs are `.yaegi` files |
 | `node-jit` | `node` | Opt-in via `-jit` or `-langs` (V8 TurboFan JIT) |

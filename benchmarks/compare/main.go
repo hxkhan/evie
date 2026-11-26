@@ -73,6 +73,7 @@ var defaultRuntimes = []Runtime{
 	// the other languages a Go program can embed, built from the runners module
 	{Name: "goja", Ext: "js", Build: "./goja"},
 	{Name: "gopher-lua", Ext: "lua", Build: "github.com/yuin/gopher-lua/cmd/glua"},
+	{Name: "kavun", Ext: "kvn", Build: "github.com/jokruger/kavun/cmd/kavun"},
 	{Name: "starlark", Ext: "star", Build: "./starlark"},
 	{Name: "yaegi", Ext: "yaegi", Build: "github.com/traefik/yaegi/cmd/yaegi"},
 	{Name: "node-jit", Ext: "js", Bins: []string{"node"}, OptIn: true},

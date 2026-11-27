@@ -229,6 +229,8 @@ a > b     // greater than
 a >= b    // greater than or equal
 ```
 
+`<`, `<=`, `>` and `>=` compare two numbers or two strings. Strings compare character by character by Unicode code point, so `"apple" < "banana"` and `"Zebra" < "apple"` (capitals come first). Comparing a number with a string, or anything else, is an error.
+
 ### Logical Operators
 Short-circuiting boolean operations:
 ```go
@@ -602,6 +604,20 @@ arr.contains(2)           // true
 arr.reverse()             // returns new array [3, 2, 1] (does not mutate arr)
 arr.map(fn(x) => x * 10)  // [10, 20, 30]
 arr.filter(fn(x) => x > 1)// [2, 3]
+arr.index(2)              // 1 (-1 if not found; alias: arr.indexOf(2))
+arr.find(fn(x) => x > 1)  // 2, the first match (nil if none)
+arr.findIndex(fn(x) => x > 1) // 1 (-1 if none)
+arr.some(fn(x) => x > 2)  // true: at least one matches
+arr.every(fn(x) => x > 0) // true: all match (true for an empty array)
+arr.reduce(fn(sum, x) => sum + x, 0) // 6; without the start value it begins with the first element
+[3, 1, 2].sort()          // returns new array [1, 2, 3]: numbers ascending, or strings by code point
+```
+
+`sort` without a function orders an array of numbers or an array of strings. For anything else, or a different order, pass a function that says whether its first argument goes before its second. It must return a bool, and equal elements keep their order:
+
+```go
+people.sort(fn(a, b) => a.age < b.age)   // youngest first
+words.sort(fn(a, b) => a.len() > b.len()) // longest first
 ```
 
 ### Object Methods

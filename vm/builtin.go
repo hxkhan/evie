@@ -1,7 +1,9 @@
 package vm
 
 import (
+	"cmp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -354,6 +356,102 @@ var arrayPush = newMethod("push", 1, func(c Call) (Value, error) {
 	return c.This(), nil
 })
 
+var arrayIndex = newMethod("index", 1, func(c Call) (Value, error) {
+	target := c.Arg(1)
+	for i, item := range c.This().mustArray().Data {
+		if item.Equals(target) {
+			return BoxNumber(float64(i)), nil
+		}
+	}
+	return BoxNumber(-1), nil
+})
+
+// findIndex is the position of the first element the callback in argument 1
+// is truthy for, or -1
+func findIndex(c Call) (int, error) {
+	callback, err := c.Callable(1)
+	if err != nil {
+		return -1, err
+	}
+	for i, item := range c.This().mustArray().Data {
+		ok, err := c.Call(callback, item)
+		if err != nil {
+			return -1, err
+		}
+		if ok.IsTruthy() {
+			return i, nil
+		}
+	}
+	return -1, nil
+}
+
+// sortNatural sorts numbers in ascending order and strings by code point. The
+// elements must be all numbers or all strings; anything else needs a function
+// that says which of two elements goes first.
+func sortNatural(data []Value) error {
+	if len(data) == 0 {
+		return nil
+	}
+	if _, ok := data[0].AsFloat64(); ok {
+		for i, v := range data {
+			if _, ok := v.AsFloat64(); !ok {
+				return sortMixed(i, data[0], v)
+			}
+		}
+		slices.SortStableFunc(data, func(a, b Value) int {
+			x, _ := a.AsFloat64()
+			y, _ := b.AsFloat64()
+			return cmp.Compare(x, y)
+		})
+		return nil
+	}
+	if _, ok := data[0].AsString(); ok {
+		for i, v := range data {
+			if _, ok := v.AsString(); !ok {
+				return sortMixed(i, data[0], v)
+			}
+		}
+		slices.SortStableFunc(data, func(a, b Value) int {
+			return strings.Compare(a.mustString(), b.mustString())
+		})
+		return nil
+	}
+	return Errorf(KindType, "sort: cannot order %s without a function; pass one, as in sort(fn(a, b) => a.age < b.age)", article(data[0]))
+}
+
+func sortMixed(i int, first, v Value) error {
+	return Errorf(KindType, "sort: element %d is %s but element 0 is %s; pass a function that orders them", i, article(v), article(first))
+}
+
+// sortBy sorts with the callback in argument 1, which says whether its first
+// argument goes before its second. It must return a bool, so that a function
+// written to return a number, as JavaScript's sort expects, fails instead of
+// silently sorting wrongly.
+func sortBy(c Call, data []Value) error {
+	callback, err := c.Callable(1)
+	if err != nil {
+		return err
+	}
+	var failed error
+	sort.SliceStable(data, func(i, j int) bool {
+		if failed != nil {
+			return false
+		}
+		before, err := c.Call(callback, data[i], data[j])
+		if err != nil {
+			failed = err
+			return false
+		}
+		b, ok := before.AsBool()
+		if !ok {
+			failed = Errorf(KindType, "sort: the function must return a bool saying whether its first argument goes first, but it returned %s", article(before))
+			return false
+		}
+		return b
+	})
+	return failed
+}
+
 var typeArray = newBuiltinType("array", NewFunc("array", 0, func(c Call) (Value, error) {
 	return BoxArray(NewArray()), nil
 }), methodTable(
@@ -423,6 +521,80 @@ var typeArray = newBuiltinType("array", NewFunc("array", 0, func(c Call) (Value,
 			}
 		}
 		return BoxBool(false), nil
+	}),
+	arrayIndex,
+	alias("indexOf", arrayIndex),
+	newMethod("find", 1, func(c Call) (Value, error) {
+		i, err := findIndex(c)
+		if err != nil || i < 0 {
+			return Value{}, err
+		}
+		return c.This().mustArray().Data[i], nil
+	}),
+	newMethod("findIndex", 1, func(c Call) (Value, error) {
+		i, err := findIndex(c)
+		return BoxNumber(float64(i)), err
+	}),
+	newMethod("some", 1, func(c Call) (Value, error) {
+		i, err := findIndex(c)
+		return BoxBool(i >= 0), err
+	}),
+	newMethod("every", 1, func(c Call) (Value, error) {
+		callback, err := c.Callable(1)
+		if err != nil {
+			return Value{}, err
+		}
+		for _, item := range c.This().mustArray().Data {
+			ok, err := c.Call(callback, item)
+			if err != nil {
+				return Value{}, err
+			}
+			if !ok.IsTruthy() {
+				return BoxBool(false), nil
+			}
+		}
+		return BoxBool(true), nil
+	}),
+	newVariadicMethod("reduce", 1, func(c Call) (Value, error) {
+		if c.Len() > 3 {
+			return Value{}, Errorf(KindType, "reduce takes 1 or 2 arguments, got %d", c.Len()-1)
+		}
+		callback, err := c.Callable(1)
+		if err != nil {
+			return Value{}, err
+		}
+		data := c.This().mustArray().Data
+		var acc Value
+		switch {
+		case c.Len() == 3:
+			acc = c.Arg(2)
+		case len(data) == 0:
+			return Value{}, Errorf(KindValue, "reduce: an empty array needs a starting value, as in reduce(f, 0)")
+		default:
+			acc, data = data[0], data[1:]
+		}
+		for _, item := range data {
+			if acc, err = c.Call(callback, acc, item); err != nil {
+				return Value{}, err
+			}
+		}
+		return acc, nil
+	}),
+	newVariadicMethod("sort", 0, func(c Call) (Value, error) {
+		if c.Len() > 2 {
+			return Value{}, Errorf(KindType, "sort takes 0 or 1 arguments, got %d", c.Len()-1)
+		}
+		sorted := slices.Clone(c.This().mustArray().Data)
+		var err error
+		if c.Len() == 1 {
+			err = sortNatural(sorted)
+		} else {
+			err = sortBy(c, sorted)
+		}
+		if err != nil {
+			return Value{}, err
+		}
+		return BoxArray(NewArray(sorted...)), nil
 	}),
 	newMethod("reverse", 0, func(c Call) (Value, error) {
 		data := c.This().mustArray().Data

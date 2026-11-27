@@ -94,7 +94,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := l.lessThan(b); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, "<", l, b)
+						return orderSlow(site, ast.LtOp, l, b)
 					}
 				case ast.GtOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -102,7 +102,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := l.greaterThan(b); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, ">", l, b)
+						return orderSlow(site, ast.GtOp, l, b)
 					}
 				case ast.LtEqOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -110,7 +110,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := l.lessThanOrEqualTo(b); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, "<=", l, b)
+						return orderSlow(site, ast.LtEqOp, l, b)
 					}
 				case ast.GtEqOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -118,7 +118,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := l.greaterThanOrEqualTo(b); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, ">=", l, b)
+						return orderSlow(site, ast.GtEqOp, l, b)
 					}
 				case ast.OrOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -216,7 +216,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := a.lessThan(b); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, "<", a, b)
+						return orderSlow(site, ast.LtOp, a, b)
 					}
 				case ast.GtOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -225,7 +225,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := a.greaterThan(b); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, ">", a, b)
+						return orderSlow(site, ast.GtOp, a, b)
 					}
 				case ast.LtEqOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -234,7 +234,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := a.lessThanOrEqualTo(b); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, "<=", a, b)
+						return orderSlow(site, ast.LtEqOp, a, b)
 					}
 				case ast.GtEqOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -243,7 +243,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := a.greaterThanOrEqualTo(b); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, ">=", a, b)
+						return orderSlow(site, ast.GtEqOp, a, b)
 					}
 				case ast.OrOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -332,7 +332,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := a.lessThan(r); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, "<", a, r)
+						return orderSlow(site, ast.LtOp, a, r)
 					}
 				case ast.GtOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -340,7 +340,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := a.greaterThan(r); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, ">", a, r)
+						return orderSlow(site, ast.GtOp, a, r)
 					}
 				case ast.LtEqOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -348,7 +348,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := a.lessThanOrEqualTo(r); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, "<=", a, r)
+						return orderSlow(site, ast.LtEqOp, a, r)
 					}
 				case ast.GtEqOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -356,7 +356,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := a.greaterThanOrEqualTo(r); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, ">=", a, r)
+						return orderSlow(site, ast.GtEqOp, a, r)
 					}
 				case ast.OrOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -482,7 +482,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := a.lessThan(b); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, "<", a, b)
+						return orderSlow(site, ast.LtOp, a, b)
 					}
 				case ast.GtOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -494,7 +494,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := a.greaterThan(b); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, ">", a, b)
+						return orderSlow(site, ast.GtOp, a, b)
 					}
 				case ast.LtEqOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -506,7 +506,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := a.lessThanOrEqualTo(b); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, "<=", a, b)
+						return orderSlow(site, ast.LtEqOp, a, b)
 					}
 				case ast.GtEqOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -518,7 +518,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := a.greaterThanOrEqualTo(b); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, ">=", a, b)
+						return orderSlow(site, ast.GtEqOp, a, b)
 					}
 				}
 			}
@@ -618,7 +618,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if result, ok := a.lessThan(r); ok {
 						return result, nil
 					}
-					return Value{}, operatorError(site, "<", a, r)
+					return orderSlow(site, ast.LtOp, a, r)
 				}
 			case ast.GtOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -629,7 +629,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if result, ok := a.greaterThan(r); ok {
 						return result, nil
 					}
-					return Value{}, operatorError(site, ">", a, r)
+					return orderSlow(site, ast.GtOp, a, r)
 				}
 			case ast.LtEqOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -640,7 +640,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if result, ok := a.lessThanOrEqualTo(r); ok {
 						return result, nil
 					}
-					return Value{}, operatorError(site, "<=", a, r)
+					return orderSlow(site, ast.LtEqOp, a, r)
 				}
 			case ast.GtEqOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -651,7 +651,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if result, ok := a.greaterThanOrEqualTo(r); ok {
 						return result, nil
 					}
-					return Value{}, operatorError(site, ">=", a, r)
+					return orderSlow(site, ast.GtEqOp, a, r)
 				}
 			}
 		}
@@ -760,7 +760,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := a.lessThan(b); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, "<", a, b)
+						return orderSlow(site, ast.LtOp, a, b)
 					}
 				case ast.GtOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -772,7 +772,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := a.greaterThan(b); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, ">", a, b)
+						return orderSlow(site, ast.GtOp, a, b)
 					}
 				case ast.LtEqOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -784,7 +784,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := a.lessThanOrEqualTo(b); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, "<=", a, b)
+						return orderSlow(site, ast.LtEqOp, a, b)
 					}
 				case ast.GtEqOp:
 					return func(fbr *fiber) (Value, exception) {
@@ -796,7 +796,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 						if result, ok := a.greaterThanOrEqualTo(b); ok {
 							return result, nil
 						}
-						return Value{}, operatorError(site, ">=", a, b)
+						return orderSlow(site, ast.GtEqOp, a, b)
 					}
 				}
 			}
@@ -896,7 +896,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if result, ok := l.lessThan(b); ok {
 						return result, nil
 					}
-					return Value{}, operatorError(site, "<", l, b)
+					return orderSlow(site, ast.LtOp, l, b)
 				}
 			case ast.GtOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -907,7 +907,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if result, ok := l.greaterThan(b); ok {
 						return result, nil
 					}
-					return Value{}, operatorError(site, ">", l, b)
+					return orderSlow(site, ast.GtOp, l, b)
 				}
 			case ast.LtEqOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -918,7 +918,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if result, ok := l.lessThanOrEqualTo(b); ok {
 						return result, nil
 					}
-					return Value{}, operatorError(site, "<=", l, b)
+					return orderSlow(site, ast.LtEqOp, l, b)
 				}
 			case ast.GtEqOp:
 				return func(fbr *fiber) (Value, exception) {
@@ -929,7 +929,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 					if result, ok := l.greaterThanOrEqualTo(b); ok {
 						return result, nil
 					}
-					return Value{}, operatorError(site, ">=", l, b)
+					return orderSlow(site, ast.GtEqOp, l, b)
 				}
 			}
 		}
@@ -1061,7 +1061,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if result, ok := a.lessThan(b); ok {
 				return result, nil
 			}
-			return Value{}, operatorError(site, "<", a, b)
+			return orderSlow(site, ast.LtOp, a, b)
 		}
 	case ast.GtOp:
 		return func(fbr *fiber) (Value, exception) {
@@ -1076,7 +1076,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if result, ok := a.greaterThan(b); ok {
 				return result, nil
 			}
-			return Value{}, operatorError(site, ">", a, b)
+			return orderSlow(site, ast.GtOp, a, b)
 		}
 	case ast.LtEqOp:
 		return func(fbr *fiber) (Value, exception) {
@@ -1091,7 +1091,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if result, ok := a.lessThanOrEqualTo(b); ok {
 				return result, nil
 			}
-			return Value{}, operatorError(site, "<=", a, b)
+			return orderSlow(site, ast.LtEqOp, a, b)
 		}
 	case ast.GtEqOp:
 		return func(fbr *fiber) (Value, exception) {
@@ -1106,7 +1106,7 @@ func (vm *Instance) emitBinOp(node ast.BinOp) instruction {
 			if result, ok := a.greaterThanOrEqualTo(b); ok {
 				return result, nil
 			}
-			return Value{}, operatorError(site, ">=", a, b)
+			return orderSlow(site, ast.GtEqOp, a, b)
 		}
 	case ast.OrOp:
 		return func(fbr *fiber) (Value, exception) {
@@ -1926,7 +1926,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 							}
 							res, ok := a.lessThan(b)
 							if !ok {
-								return false, operatorError(site, "<", a, b)
+								return orderTest(site, ast.LtOp, a, b)
 							}
 							return res.IsTruthy(), nil
 						}, true
@@ -1938,7 +1938,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 							}
 							res, ok := a.greaterThan(b)
 							if !ok {
-								return false, operatorError(site, ">", a, b)
+								return orderTest(site, ast.GtOp, a, b)
 							}
 							return res.IsTruthy(), nil
 						}, true
@@ -1950,7 +1950,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 							}
 							res, ok := a.lessThanOrEqualTo(b)
 							if !ok {
-								return false, operatorError(site, "<=", a, b)
+								return orderTest(site, ast.LtEqOp, a, b)
 							}
 							return res.IsTruthy(), nil
 						}, true
@@ -1962,7 +1962,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 							}
 							res, ok := a.greaterThanOrEqualTo(b)
 							if !ok {
-								return false, operatorError(site, ">=", a, b)
+								return orderTest(site, ast.GtEqOp, a, b)
 							}
 							return res.IsTruthy(), nil
 						}, true
@@ -2010,7 +2010,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 						}
 						res, ok := a.lessThan(b)
 						if !ok {
-							return false, operatorError(site, "<", a, b)
+							return orderTest(site, ast.LtOp, a, b)
 						}
 						return res.IsTruthy(), nil
 					}, true
@@ -2023,7 +2023,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 						}
 						res, ok := a.greaterThan(b)
 						if !ok {
-							return false, operatorError(site, ">", a, b)
+							return orderTest(site, ast.GtOp, a, b)
 						}
 						return res.IsTruthy(), nil
 					}, true
@@ -2036,7 +2036,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 						}
 						res, ok := a.lessThanOrEqualTo(b)
 						if !ok {
-							return false, operatorError(site, "<=", a, b)
+							return orderTest(site, ast.LtEqOp, a, b)
 						}
 						return res.IsTruthy(), nil
 					}, true
@@ -2049,7 +2049,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 						}
 						res, ok := a.greaterThanOrEqualTo(b)
 						if !ok {
-							return false, operatorError(site, ">=", a, b)
+							return orderTest(site, ast.GtEqOp, a, b)
 						}
 						return res.IsTruthy(), nil
 					}, true
@@ -2103,7 +2103,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 					}
 					res, ok := a.lessThan(b)
 					if !ok {
-						return false, operatorError(site, "<", a, b)
+						return orderTest(site, ast.LtOp, a, b)
 					}
 					return res.IsTruthy(), nil
 				}, true
@@ -2119,7 +2119,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 					}
 					res, ok := a.greaterThan(b)
 					if !ok {
-						return false, operatorError(site, ">", a, b)
+						return orderTest(site, ast.GtOp, a, b)
 					}
 					return res.IsTruthy(), nil
 				}, true
@@ -2135,7 +2135,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 					}
 					res, ok := a.lessThanOrEqualTo(b)
 					if !ok {
-						return false, operatorError(site, "<=", a, b)
+						return orderTest(site, ast.LtEqOp, a, b)
 					}
 					return res.IsTruthy(), nil
 				}, true
@@ -2151,7 +2151,7 @@ func (vm *Instance) compileComparison(bin ast.BinOp, site site) (func(fbr *fiber
 					}
 					res, ok := a.greaterThanOrEqualTo(b)
 					if !ok {
-						return false, operatorError(site, ">=", a, b)
+						return orderTest(site, ast.GtEqOp, a, b)
 					}
 					return res.IsTruthy(), nil
 				}, true

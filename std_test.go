@@ -266,3 +266,79 @@ func TestStdHardeningGuards(t *testing.T) {
 	stdFails(t, `"a".repeat(100000000)`, "maximum string size")
 	stdFails(t, `"a".padStart(100000000, "x")`, "maximum string size")
 }
+
+func TestArrayMethods(t *testing.T) {
+	for expr, want := range map[string]string{
+		`[3, 1, 2].sort()`:                                       "[1, 2, 3]",
+		`[2.5, -1, 0].sort()`:                                    "[-1, 0, 2.5]",
+		`["pear", "apple", "Fig", "é"].sort()`:                   `["Fig", "apple", "pear", "é"]`,
+		`[].sort()`:                                              "[]",
+		`[3, 1, 2].sort(fn(a, b) => a > b)`:                      "[3, 2, 1]",
+		`["bb", "a", "ccc"].sort(fn(a, b) => a.len() < b.len())`: `["a", "bb", "ccc"]`,
+		// stable: equal elements keep their order
+		`[{k: 1, n: "a"}, {k: 0, n: "b"}, {k: 1, n: "c"}, {k: 0, n: "d"}].sort(fn(a, b) => a.k < b.k).map(fn(x) => x.n)`: `["b", "d", "a", "c"]`,
+		`[1, 2, 3, 4].reduce(fn(s, x) => s + x)`:    "10",
+		`[1, 2, 3].reduce(fn(s, x) => s + x, 10)`:   "16",
+		`[].reduce(fn(s, x) => s + x, 0)`:           "0",
+		`[7].reduce(fn(s, x) => s + x)`:             "7",
+		`["a", "b"].reduce(fn(s, x) => s + x, ">")`: ">ab",
+		`[5, 6, 7].index(6)`:                        "1",
+		`[5, 6, 7].index(8)`:                        "-1",
+		`[5, "6", 6].indexOf(6)`:                    "2",
+		`[5, 6, 7].find(fn(x) => x > 5)`:            "6",
+		`[5, 6, 7].find(fn(x) => x > 9)`:            "nil",
+		`[5, 6, 7].findIndex(fn(x) => x > 5)`:       "1",
+		`[5, 6, 7].findIndex(fn(x) => x > 9)`:       "-1",
+		`[5, 6, 7].some(fn(x) => x == 7)`:           "true",
+		`[5, 6, 7].some(fn(x) => x == 8)`:           "false",
+		`[].some(fn(x) => true)`:                    "false",
+		`[5, 6, 7].every(fn(x) => x > 4)`:           "true",
+		`[5, 6, 7].every(fn(x) => x > 5)`:           "false",
+		`[].every(fn(x) => false)`:                  "true",
+	} {
+		stdCase(t, expr, want)
+	}
+	stdFails(t, `[1, "a"].sort()`, "element 1 is a string but element 0 is a number")
+	stdFails(t, `[{}, {}].sort()`, "cannot order an object without a function")
+	stdFails(t, `[2, 1].sort(fn(a, b) => a - b)`, "must return a bool")
+	stdFails(t, `[2, 1].sort(fn(a, b) => a.missing)`, "no member 'missing'")
+	stdFails(t, `[1].sort(1, 2)`, "sort takes 0 or 1 arguments")
+	stdFails(t, `[].reduce(fn(s, x) => s)`, "an empty array needs a starting value")
+	stdFails(t, `[1].reduce(fn(s, x) => s, 0, 1)`, "reduce takes 1 or 2 arguments")
+	stdFails(t, `[1].find(5)`, "must be callable")
+}
+
+// sort returns a sorted copy and leaves the array as it was
+func TestArraySortCopies(t *testing.T) {
+	stdCase(t, `[[3, 1, 2]].map(fn(xs) => [xs.sort(), xs])[0]`, "[[1, 2, 3], [3, 1, 2]]")
+}
+
+// < <= > >= order strings by code point, whichever shape the compiler gives
+// the operands: constants, locals, other expressions, and conditions
+func TestStringOrdering(t *testing.T) {
+	stdCase(t, `["a" < "b", "b" < "a", "a" <= "a", "a" >= "b", "B" < "a", "é" > "z", "ab" > "a", "" < "a"]`,
+		"[true, false, true, false, true, true, true, true]")
+	stdCase(t, `[1].map(fn(_) {
+		a := "apple"
+		b := "banana"
+		var hits := []
+		if a < b { hits.push("local < local") }
+		if a < "b" { hits.push("local < const") }
+		if "z" > b { hits.push("const > local") }
+		if a.toUpper() < b { hits.push("expr < local") }
+		if a <= a.slice(0) { hits.push("local <= expr") }
+		if !(a.slice(0) > b.slice(0)) { hits.push("expr > expr") }
+		x := a < b
+		var y := false
+		y = b >= a
+		var i := "a"
+		while i < "aaaa" { i += "a" }
+		hits.push(x && y && i == "aaaa")
+		return hits
+	})[0]`, `["local < local", "local < const", "const > local", "expr < local", "local <= expr", "expr > expr", true]`)
+	stdFails(t, `1 < "a"`, "cannot apply '<' to a number and a string")
+	stdFails(t, `[1].map(fn(_) {
+		a := "a"
+		return a >= nil
+	})`, "cannot apply '>=' to a string and nil")
+}

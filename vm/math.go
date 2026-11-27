@@ -2,6 +2,7 @@ package vm
 
 import (
 	"math"
+	"strings"
 
 	"github.com/hxkhan/evie/ast"
 )
@@ -90,6 +91,49 @@ func (x Value) greaterThanOrEqualTo(y Value) (z Value, ok bool) {
 		return BoxBool(math.Float64frombits(x.scalar) >= math.Float64frombits(y.scalar)), true
 	}
 	return Value{}, false
+}
+
+// orderStrings applies the ordering operator op to two strings, comparing them
+// byte by byte, which orders UTF-8 text by code point; ok is false unless both
+// operands are strings
+func orderStrings(op ast.Operator, x, y Value) (z Value, ok bool) {
+	a, aok := x.AsString()
+	b, bok := y.AsString()
+	if !aok || !bok {
+		return Value{}, false
+	}
+	c := strings.Compare(a, b)
+	switch op {
+	case ast.LtOp:
+		return BoxBool(c < 0), true
+	case ast.GtOp:
+		return BoxBool(c > 0), true
+	case ast.LtEqOp:
+		return BoxBool(c <= 0), true
+	case ast.GtEqOp:
+		return BoxBool(c >= 0), true
+	}
+	return Value{}, false
+}
+
+// orderSlow is an ordering operator's path for operands that are not both
+// numbers. It stays out of line so the operator closures, which try numbers
+// first, keep their small Go stack frames.
+//
+//go:noinline
+func orderSlow(s site, op ast.Operator, x, y Value) (Value, exception) {
+	if z, ok := orderStrings(op, x, y); ok {
+		return z, nil
+	}
+	return Value{}, operatorError(s, op.String(), x, y)
+}
+
+// orderTest is orderSlow for a condition
+//
+//go:noinline
+func orderTest(s site, op ast.Operator, x, y Value) (bool, exception) {
+	z, exc := orderSlow(s, op, x, y)
+	return z.IsTruthy(), exc
 }
 
 // fastCompound is the number path of a compound assignment such as `x.n += 1`:

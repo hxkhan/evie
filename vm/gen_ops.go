@@ -75,10 +75,15 @@ func (o op) result(a, b string) string {
 	case "and":
 		return fmt.Sprintf("return BoxBool(%s.IsTruthy() && %s.IsTruthy()), nil", a, b)
 	}
+	fallback := fmt.Sprintf("return Value{}, operatorError(site, %q, %s, %s)", o.Symbol, a, b)
+	if o.comparison() {
+		// strings are ordered too, out of line so the number path stays small
+		fallback = fmt.Sprintf("return orderSlow(site, ast.%s, %s, %s)", o.Name, a, b)
+	}
 	return o.numeric(a, b, func(v string) string { return "return " + v + ", nil" }) + fmt.Sprintf(`if result, ok := %[1]s.%[3]s(%[2]s); ok {
 		return result, nil
 	}
-	return Value{}, operatorError(site, %[4]q, %[1]s, %[2]s)`, a, b, o.Method, o.Symbol)
+	%[4]s`, a, b, o.Method, fallback)
 }
 
 // numeric is the number fast path of + and %, whose methods are too big for Go
@@ -132,9 +137,9 @@ func (o op) condition(numbers string, bn string) string {
 	}
 	res, ok := a.%s(b)
 	if !ok {
-		return false, operatorError(site, %q, a, b)
+		return orderTest(site, ast.%s, a, b)
 	}
-	return res.IsTruthy(), nil`, numbers, o.Symbol, bn, o.Method, o.Symbol)
+	return res.IsTruthy(), nil`, numbers, o.Symbol, bn, o.Method, o.Name)
 }
 
 func main() {

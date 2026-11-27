@@ -108,16 +108,28 @@ func (vm *Instance) evaluate(node ast.Node) operand {
 					if res, ok := lhs.lessThan(rhs); ok {
 						return res
 					}
+					if res, ok := orderStrings(ast.LtOp, lhs, rhs); ok {
+						return res
+					}
 				case ast.GtOp:
 					if res, ok := lhs.greaterThan(rhs); ok {
+						return res
+					}
+					if res, ok := orderStrings(ast.GtOp, lhs, rhs); ok {
 						return res
 					}
 				case ast.LtEqOp:
 					if res, ok := lhs.lessThanOrEqualTo(rhs); ok {
 						return res
 					}
+					if res, ok := orderStrings(ast.LtEqOp, lhs, rhs); ok {
+						return res
+					}
 				case ast.GtEqOp:
 					if res, ok := lhs.greaterThanOrEqualTo(rhs); ok {
+						return res
+					}
+					if res, ok := orderStrings(ast.GtEqOp, lhs, rhs); ok {
 						return res
 					}
 				case ast.AndOp:

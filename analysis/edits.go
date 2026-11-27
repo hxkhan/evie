@@ -287,7 +287,7 @@ func (w *Workspace) Rename(file string, pos Position, newName string) (map[strin
 	changed := overlayFS{base: w.fsys, files: overlay}
 	var after []*snapshot
 	for _, s := range involved {
-		after = append(after, analyze(changed, s.entry))
+		after = append(after, analyze(changed, s.entry, w.Snippets))
 	}
 	for _, s := range after {
 		for f, diags := range s.diags {

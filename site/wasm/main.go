@@ -61,6 +61,7 @@ func main() {
 		}
 		return nil
 	}))
+	registerAnalysis()
 	js.Global().Call("postMessage", map[string]any{"type": "ready", "version": version()})
 	select {}
 }

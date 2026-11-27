@@ -154,6 +154,51 @@ const onMac = await evaluate(runKey);
 await send("Emulation.setUserAgentOverride", { userAgent: "" });
 check("the Run shortcut says ⌘ on a Mac and Ctrl elsewhere", elsewhere === "Ctrl ↵" && onMac === "⌘ ↵", JSON.stringify({ elsewhere, onMac }));
 
+// the editor's help: errors as you type, completion and hover
+async function openCode(source) {
+  await send("Page.navigate", { url: "about:blank" });
+  await send("Page.navigate", { url: `${site}/play/${code(source)}` });
+  await waitFor(`document.getElementById("status")?.textContent === "Ready"`);
+}
+await openCode('package main imports("io")\nfn main() {\n    io.printn("hi")\n}');
+const squiggle = await waitFor(`document.querySelector(".cm-lintRange-error")?.textContent.includes("printn")`, 10000);
+check("underlines an error as you type", squiggle, await evaluate(`document.querySelector(".cm-content").innerHTML.slice(0, 300)`));
+await shot("play-lint");
+
+await send("Page.navigate", { url: "about:blank" });
+await send("Page.navigate", { url: `${site}/play/#example=hero` });
+await waitFor(`document.getElementById("status")?.textContent === "Ready"`);
+await sleep(1500);
+check("an example shows no errors", (await evaluate(`document.querySelectorAll(".cm-lintRange-error").length`)) === 0);
+
+await openCode("total := 2\n");
+await evaluate(`document.querySelector(".cm-content").focus()`);
+await press("End", "End", 35, 2); // Ctrl+End: the end of the code
+await send("Input.insertText", { text: "io.pr" });
+const completed = await waitFor(`document.querySelector(".cm-tooltip-autocomplete")?.innerText.includes("println")`, 10000);
+check("completes a package's members after a dot", completed, await evaluate(`document.querySelector(".cm-tooltip-autocomplete")?.innerText ?? "no list"`));
+await shot("play-complete");
+await press("Escape", "Escape", 27);
+
+await openCode('io.println("hi")\n');
+await sleep(500);
+const at = await evaluate(`(() => {
+  const walker = document.createTreeWalker(document.querySelector(".cm-content"), NodeFilter.SHOW_TEXT);
+  for (let n; (n = walker.nextNode()); ) {
+    const i = n.textContent.indexOf("println");
+    if (i < 0) continue;
+    const r = document.createRange();
+    r.setStart(n, i + 2);
+    r.setEnd(n, i + 3);
+    const b = r.getBoundingClientRect();
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  }
+})()`);
+if (at) await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y });
+const hovered = await waitFor(`document.querySelector(".cm-evie-hover")?.innerText.includes("new line")`, 10000);
+check("hover shows what a function does", hovered, JSON.stringify(at));
+await shot("play-hover");
+
 for (const page of ["/", "/docs/", "/docs/classes-object-oriented-programming/"]) {
   await send("Page.navigate", { url: site + page });
   await sleep(800);

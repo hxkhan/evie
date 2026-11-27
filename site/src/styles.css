@@ -364,6 +364,33 @@ html:has(.page--play) { height: 100%; }
 .editor .cm-matchingBracket { background: color-mix(in srgb, var(--accent) 16%, transparent); outline: none; }
 .editor .cm-focused { outline: none; }
 
+/* the editor's help: errors, completion and hover */
+.editor .cm-tooltip { background: var(--surface); color: var(--ink); border: 1px solid var(--line-strong); border-radius: var(--radius-small); box-shadow: var(--shadow); font-family: var(--font-body); font-size: 0.85rem; overflow: hidden; }
+.editor .cm-tooltip-lint { padding: 0; }
+.editor .cm-diagnostic { padding: 6px 10px; border-left-width: 3px; white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.8rem; }
+.editor .cm-diagnostic-error { border-left-color: var(--error); }
+.editor .cm-diagnostic-hint { border-left-color: var(--line-strong); color: var(--muted); }
+.editor .cm-diagnosticAction { background: var(--accent); color: var(--accent-ink); border-radius: 4px; padding: 1px 8px; margin-left: 8px; font-family: var(--font-body); cursor: pointer; }
+.editor .cm-diagnosticAction:hover { background: var(--accent-hover); }
+.editor .cm-lintRange-error { background-image: none; text-decoration: wavy underline var(--error) 1px; text-underline-offset: 3px; text-decoration-skip-ink: none; }
+.editor .cm-lintRange-hint { background-image: none; }
+.editor .cm-unused { opacity: 0.55; }
+.editor .cm-lint-marker { width: 0.8em; height: 0.8em; }
+.editor .cm-gutter-lint { width: 1.1em; }
+.editor .cm-gutter-lint .cm-gutterElement { padding: 0 0 0 2px; }
+.editor .cm-tooltip-autocomplete > ul { font-family: var(--font-mono); font-size: 0.82rem; max-height: 16em; }
+.editor .cm-tooltip-autocomplete > ul > li { padding: 2px 10px !important; }
+.editor .cm-tooltip-autocomplete > ul > li[aria-selected] { background: var(--accent-soft); color: var(--ink); }
+.editor .cm-completionDetail { color: var(--muted); font-style: normal; margin-left: 1em; }
+.editor .cm-completionMatchedText { text-decoration: none; color: var(--accent); font-weight: 600; }
+.editor .cm-completionInfo { padding: 0; max-width: 28em; }
+.editor .cm-evie-doc, .editor .cm-evie-hover { padding: 8px 12px; max-width: 34em; line-height: 1.5; }
+.editor .cm-evie-doc p, .editor .cm-evie-hover p { margin: 0; }
+.editor .cm-evie-doc p + p, .editor .cm-evie-hover * + p { margin-top: 6px; }
+.editor .cm-evie-hover pre { margin: 0; font-family: var(--font-mono); font-size: 0.8rem; color: var(--code-ink); white-space: pre-wrap; }
+.editor .cm-evie-doc code, .editor .cm-evie-hover code { font-family: var(--font-mono); font-size: 0.9em; background: var(--code-bg); border-radius: 3px; padding: 0 3px; }
+.editor .cm-evie-hover em { color: var(--muted); }
+
 .pane__bar { display: flex; align-items: center; gap: 4px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--paper); }
 .pane__title { padding: 5px 12px; color: var(--ink); font: 500 0.88rem var(--font-body); }
 .pane__bar button { margin-left: auto; padding: 5px 12px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font: 500 0.88rem var(--font-body); cursor: pointer; }

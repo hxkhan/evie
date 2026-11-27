@@ -150,6 +150,9 @@ func (cp *compiler) usedGlobal(pkg *Package, id fields.ID, name string, pos diag
 	if g.Value != nil {
 		imported, _ = g.Value.AsPackage()
 	}
+	if imported != nil && d.kind == NameGlobal && !d.pos.Known() {
+		d.kind = NameImport // bound by the host or a session rather than by imports(...)
+	}
 	cp.used(name, pos, d, imported)
 }
 

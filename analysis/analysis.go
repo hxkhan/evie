@@ -80,10 +80,17 @@ type Related struct {
 // it parsed, so that while code is being typed and does not parse, going to a
 // definition or completing a name still works from the last good version.
 type Workspace struct {
+	// Snippets checks a file without a package header the way a session runs
+	// it, as the playground and evie -e do: a standard package it names, such
+	// as io in io.println, is imported on first use. Set it before the first
+	// question. Otherwise such a file is a script, which imports what it uses.
+	Snippets bool
+
 	mu     sync.Mutex
 	fsys   fs.FS
 	latest map[string]*snapshot
 	good   map[string]*snapshot
+	stdlib map[string]*vm.Package // standard packages a snippet names, made when first asked for
 }
 
 // NewWorkspace reads files from fsys
@@ -101,7 +108,7 @@ func (w *Workspace) Update(path string) map[string][]Diagnostic {
 }
 
 func (w *Workspace) update(path string) *snapshot {
-	s := analyze(w.fsys, path)
+	s := analyze(w.fsys, path, w.Snippets)
 	for file := range s.files {
 		w.latest[file] = s
 		if s.parsed {
@@ -145,7 +152,7 @@ type refKey struct {
 	declares  bool
 }
 
-func analyze(fsys fs.FS, path string) *snapshot {
+func analyze(fsys fs.FS, path string, snippets bool) *snapshot {
 	s := &snapshot{
 		entry: path,
 		files: map[string]*diag.Source{},
@@ -168,7 +175,11 @@ func analyze(fsys fs.FS, path string) *snapshot {
 
 	eng := evie.New(evie.Options{FS: fsys, Stdin: strings.NewReader(""), Stdout: io.Discard, OnName: s.record})
 	defer eng.Close()
-	if err := eng.Check(b); err != nil {
+	check := func() error { return eng.Check(b) }
+	if src := s.files[path]; snippets && parser.PeekPackageName(src) == "" {
+		check = func() error { return eng.NewSession().CompileSource(path, src.Text) }
+	}
+	if err := check(); err != nil {
 		s.fail(err)
 	} else {
 		s.unused()

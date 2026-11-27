@@ -89,4 +89,29 @@ for (const c of cases) {
   if (!ok) failed++;
   console.log(`${ok ? "ok  " : "FAIL"} ${c.name}`, ok ? "" : JSON.stringify(r));
 }
+
+// the editor's help: errors as you type, completion and hover
+const json = (s) => JSON.parse(s);
+const errorsIn = (code) => json(globalThis.evieCheck(code)).filter((d) => d.severity === 1);
+const help = [
+  ["every example checks without errors", () => examples.every((ex) => errorsIn(ex.code).length === 0)],
+  ["a snippet names io without importing it", () => errorsIn(["x := io.readln()", "io.println(x)"].join("\n")).length === 0],
+  [
+    "a misspelt member is an error with a fix",
+    () => {
+      const [d] = errorsIn(['package main imports("io")', "fn main() {", '    io.printn("hi")', "}"].join("\n"));
+      return d?.range.start.line === 2 && d.data?.fixes[0]?.edit.newText === "print";
+    },
+  ],
+  ["a syntax error is reported", () => errorsIn("x := 1 +").length === 1],
+  ["an unused variable is a hint", () => json(globalThis.evieCheck(["fn f() {", "    unused := 1", "}"].join("\n"))).some((d) => d.severity === 4 && d.tags?.includes(1))],
+  ["io. completes its members", () => json(globalThis.evieComplete(["x := 1", "io."].join("\n"), 1, 3)).some((c) => c.label === "println")],
+  ["a name completes from what is in scope", () => json(globalThis.evieComplete(["total := 1", "to"].join("\n"), 1, 2)).some((c) => c.label === "total")],
+  ["hover shows a stdlib function's docs", () => json(globalThis.evieHover('io.println("hi")', 0, 5))?.contents.includes("new line")],
+];
+for (const [name, test] of help) {
+  const ok = test();
+  if (!ok) failed++;
+  console.log(`${ok ? "ok  " : "FAIL"} ${name}`);
+}
 process.exit(failed ? 1 : 0);

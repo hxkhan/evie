@@ -242,6 +242,7 @@ func (s *Session) evalContext(ctx context.Context, src *diag.Source, node ast.No
 			continue
 		}
 		id := claim(decl, decl.Name)
+		vm.cp.declareGlobal(pkg, decl.Name, NameGlobal, decl.Pos, decl.IsStatic, nil)
 		cell := new(Value)
 		if saved[id].existed {
 			redeclTargets[i] = cell

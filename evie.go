@@ -39,6 +39,12 @@ var stdlib = map[string]func() *vm.Package{
 	"math": math.Construct,
 }
 
+// IsStdlib reports whether name is a package of the standard library, such as io
+func IsStdlib(name string) bool {
+	_, ok := stdlib[name]
+	return ok
+}
+
 // Options configures an Engine. The zero value gives the standard library,
 // relative imports resolved against the entry file, and no host packages.
 type Options struct {

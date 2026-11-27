@@ -17,8 +17,10 @@
     "vite": "^5.4.11"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.4",
     "@codemirror/commands": "^6.7.1",
     "@codemirror/language": "^6.10.6",
+    "@codemirror/lint": "^6.9.8",
     "@codemirror/state": "^6.4.1",
     "@codemirror/view": "^6.35.0",
     "@fontsource-variable/dm-sans": "^5.1.0",

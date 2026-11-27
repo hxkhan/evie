@@ -10,6 +10,10 @@ generated from the repository, so the site never drifts from the code:
 - the playground runs Evie compiled to WebAssembly ([`wasm/main.go`](wasm/main.go))
   inside a Web Worker, so a busy program never freezes the page and Stop can
   end any program.
+- the editor shows errors as you type, completes names and package members,
+  and shows a function's docs on hover. A second worker of the same build
+  answers with the analysis the VS Code extension uses
+  ([`wasm/analysis.go`](wasm/analysis.go), [`src/assist.ts`](src/assist.ts)).
 
 ## Working on it
 
@@ -43,6 +47,7 @@ phone's width. `SHOTS=<dir>` also saves screenshots.
 | `src/evie-syntax.js` | Evie's highlighting, used by the docs at build time and by the editor |
 | `src/styles.css` | the whole design: tokens for light and dark, then each page |
 | `src/play.ts` | the playground: editor, worker, output, sharing |
+| `src/assist.ts` | the editor's errors, completion and hover |
 | `public/evie-worker.js` | the worker that loads and runs Evie |
 
 ## Publishing

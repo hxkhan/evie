@@ -2,11 +2,15 @@ package analysis
 
 import (
 	"bytes"
+	"io"
 	"regexp"
 	"slices"
+	"strings"
 
+	"github.com/hxkhan/evie"
 	"github.com/hxkhan/evie/ast"
 	"github.com/hxkhan/evie/diag"
+	"github.com/hxkhan/evie/parser"
 	"github.com/hxkhan/evie/vm"
 )
 
@@ -65,6 +69,12 @@ func (w *Workspace) Complete(file string, pos Position, text string) []Completio
 		if pkg := s.importNamed(file, m[1]); pkg != nil {
 			return packageMembers(pkg)
 		}
+		if w.Snippets && parser.PeekPackageName(s.source(file)) == "" {
+			// a snippet names a standard package before anything imports it
+			if pkg := w.std(m[1]); pkg != nil {
+				return packageMembers(pkg)
+			}
+		}
 		return []Completion{} // a member of a value the analysis cannot tell
 	}
 
@@ -86,6 +96,24 @@ func (w *Workspace) Complete(file string, pos Position, text string) []Completio
 		add(Completion{Label: t, Kind: completionClass, Detail: "builtin type"})
 	}
 	return items
+}
+
+// std is the standard package called name, or nil when there is none
+func (w *Workspace) std(name string) *vm.Package {
+	if pkg, ok := w.stdlib[name]; ok {
+		return pkg
+	}
+	var pkg *vm.Package
+	if evie.IsStdlib(name) {
+		eng := evie.New(evie.Options{Stdin: strings.NewReader(""), Stdout: io.Discard})
+		pkg, _ = eng.NewSession().Import(name, "")
+		eng.Close()
+	}
+	if w.stdlib == nil {
+		w.stdlib = map[string]*vm.Package{}
+	}
+	w.stdlib[name] = pkg
+	return pkg
 }
 
 // importNamed is the package that name is bound to in the package of file

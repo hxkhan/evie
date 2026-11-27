@@ -6,6 +6,7 @@ import { bracketMatching, HighlightStyle, indentUnit, StreamLanguage, syntaxHigh
 import { EditorState, Prec } from "@codemirror/state";
 import { drawSelection, EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
+import { assist } from "./assist";
 import { startState, token } from "./evie-syntax.js";
 import examples from "./generated/examples.json";
 
@@ -74,6 +75,7 @@ const view = new EditorView({
       indentUnit.of("    "),
       evie,
       syntaxHighlighting(highlighting),
+      assist(`${import.meta.env.BASE_URL}evie-worker.js`),
       Prec.highest(keymap.of([{ key: "Mod-Enter", run: () => (run(), true) }, { key: "Mod-s", run: () => (share(), true) }])),
       keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
       EditorView.updateListener.of((u) => {

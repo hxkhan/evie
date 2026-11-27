@@ -572,3 +572,54 @@ func TestRunnable(t *testing.T) {
 		t.Errorf("a script runs from its start, got %+v", r)
 	}
 }
+
+// a snippet without a package header names standard packages without importing
+// them, the way the playground runs it; as a script file that is an error
+func TestSnippets(t *testing.T) {
+	const code = "x := io.readln()\nio.println(x.upper())\n"
+	fsys := fstest.MapFS{"snippet.ev": {Data: []byte(code)}}
+
+	script := analysis.NewWorkspace(fsys)
+	if !analysis.HasErrors(script.Update("snippet.ev")["snippet.ev"]) {
+		t.Fatal("a script that does not import io should not check")
+	}
+
+	ws := analysis.NewWorkspace(fsys)
+	ws.Snippets = true
+	if diags := ws.Update("snippet.ev")["snippet.ev"]; analysis.HasErrors(diags) {
+		t.Fatalf("expected no errors, got %+v", diags)
+	}
+	if h, ok := ws.Hover("snippet.ev", analysis.Position{Line: 1, Character: 4}); !ok || !strings.Contains(h.Contents, "println") {
+		t.Fatalf("hover on println: %+v %v", h, ok)
+	}
+	labels := []string{}
+	for _, c := range ws.Complete("snippet.ev", analysis.Position{Line: 1, Character: 3}, "x := io.readln()\nio.") {
+		labels = append(labels, c.Label)
+	}
+	if !slices.Contains(labels, "println") {
+		t.Fatalf("io. should complete println, got %v", labels)
+	}
+
+	// io. completes before anything else names io, and a snippet's names complete
+	fsys["snippet.ev"] = &fstest.MapFile{Data: []byte("total := 1\nto")}
+	ws.Update("snippet.ev")
+	labels = labels[:0]
+	for _, c := range ws.Complete("snippet.ev", analysis.Position{Line: 1, Character: 2}, "total := 1\nto") {
+		labels = append(labels, c.Label)
+	}
+	if !slices.Contains(labels, "total") {
+		t.Fatalf("expected total among %v", labels)
+	}
+	if got := ws.Complete("snippet.ev", analysis.Position{Line: 1, Character: 5}, "total := 1\nmath."); len(got) == 0 {
+		t.Fatal("math. should complete in a snippet that names no package yet")
+	}
+	if got := script.Complete("snippet.ev", analysis.Position{Line: 1, Character: 5}, "total := 1\nmath."); len(got) != 0 {
+		t.Fatalf("a script that does not import math should not complete its members, got %v", got)
+	}
+
+	fsys["snippet.ev"] = &fstest.MapFile{Data: []byte("io.println(nope)\n")}
+	diags := ws.Update("snippet.ev")["snippet.ev"]
+	if len(diags) != 1 || !strings.Contains(diags[0].Message, "nope") || diags[0].Range.Start != (analysis.Position{Line: 0, Character: 11}) {
+		t.Fatalf("expected the unknown name, got %+v", diags)
+	}
+}

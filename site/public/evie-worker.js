@@ -4,6 +4,10 @@
 // the program waits for a line, and a "done" message. The page answers a read
 // with {type: "input", line} or {type: "eof"}. To stop a program the page
 // terminates the worker.
+//
+// The page runs a second one of these for the editor: it posts
+// {type: "check" | "complete" | "hover", id, args} and gets back
+// {type: "answer", id, json} with the analysis's answer.
 importScripts("wasm_exec.js");
 
 const go = new Go();
@@ -34,6 +38,15 @@ onmessage = (event) => {
       break;
     case "eof":
       self.evieEOF();
+      break;
+    case "check":
+      postMessage({ type: "answer", id: msg.id, json: self.evieCheck(...msg.args) });
+      break;
+    case "complete":
+      postMessage({ type: "answer", id: msg.id, json: self.evieComplete(...msg.args) });
+      break;
+    case "hover":
+      postMessage({ type: "answer", id: msg.id, json: self.evieHover(...msg.args) });
       break;
   }
 };

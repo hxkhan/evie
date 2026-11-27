@@ -66,7 +66,18 @@ func (s *Session) Compile(code string) error {
 	s.eng.loading.Lock()
 	defer s.eng.loading.Unlock()
 	s.turn++
-	src := diag.NewSource(fmt.Sprintf("<session:%d>", s.turn), []byte(code))
+	return s.compile(diag.NewSource(fmt.Sprintf("<session:%d>", s.turn), []byte(code)))
+}
+
+// CompileSource is Compile with the code's errors and names reported under
+// name, as a tool checking an editor's snippet wants them
+func (s *Session) CompileSource(name string, code []byte) error {
+	s.eng.loading.Lock()
+	defer s.eng.loading.Unlock()
+	return s.compile(diag.NewSource(name, code))
+}
+
+func (s *Session) compile(src *diag.Source) error {
 	node, err := parser.ParseSource(src)
 	if err != nil {
 		return err

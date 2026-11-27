@@ -169,11 +169,11 @@ func (fn *userFn) callGuarded(fbr *fiber, args ...Value) (result Value, err exce
 		defer fbr.unlock()
 	}
 
-	stack, base, active := len(fbr.stack), fbr.base, fbr.active
+	entry := fbr.mark()
 	defer func() {
 		if r := recover(); r != nil {
 			result, err = Value{}, recovered(r)
-			fbr.unwind(stack, base, active)
+			fbr.unwind(entry)
 		}
 	}()
 
@@ -188,6 +188,9 @@ func (fn *userFn) call(fbr *fiber, args []Value) (Value, exception) {
 		if exc := fbr.halt(fn.def); exc != nil {
 			return Value{}, exc
 		}
+	}
+	if fbr.depth >= fbr.limit {
+		return Value{}, fbr.tooDeep(fn.def)
 	}
 	base := fbr.allocFrame(len(fn.locals))
 
@@ -205,7 +208,9 @@ func (fn *userFn) call(fbr *fiber, args []Value) (Value, exception) {
 	prevBase, prevActive := fbr.base, fbr.active
 	fbr.base, fbr.active = base, fn
 
+	fbr.depth++
 	result, exc := fn.code(fbr)
+	fbr.depth--
 
 	fbr.popStack(len(fn.locals))
 	fbr.base, fbr.active = prevBase, prevActive
@@ -227,6 +232,9 @@ func (fn *userFn) invoke(fbr *fiber, site site, arguments []instruction) (Value,
 		if exc := fbr.halt(site); exc != nil {
 			return Value{}, exc
 		}
+	}
+	if fbr.depth >= fbr.limit {
+		return Value{}, fbr.tooDeep(site)
 	}
 	base := fbr.allocFrame(len(fn.locals))
 
@@ -255,7 +263,9 @@ func (fn *userFn) invoke(fbr *fiber, site site, arguments []instruction) (Value,
 	prevBase, prevActive := fbr.base, fbr.active
 	fbr.base, fbr.active = base, fn
 
+	fbr.depth++
 	result, exc := fn.code(fbr)
+	fbr.depth--
 
 	fbr.popStack(len(fn.locals))
 	fbr.base, fbr.active = prevBase, prevActive
@@ -276,6 +286,9 @@ func (fn *userFn) invokeMethod(fbr *fiber, site site, this Value, arguments []in
 		if exc := fbr.halt(site); exc != nil {
 			return Value{}, exc
 		}
+	}
+	if fbr.depth >= fbr.limit {
+		return Value{}, fbr.tooDeep(site)
 	}
 	base := fbr.allocFrame(len(fn.locals))
 	fbr.stack[base] = this
@@ -305,7 +318,9 @@ func (fn *userFn) invokeMethod(fbr *fiber, site site, this Value, arguments []in
 	prevBase, prevActive := fbr.base, fbr.active
 	fbr.base, fbr.active = base, fn
 
+	fbr.depth++
 	result, exc := fn.code(fbr)
+	fbr.depth--
 
 	fbr.popStack(len(fn.locals))
 	fbr.base, fbr.active = prevBase, prevActive
@@ -531,6 +546,7 @@ func (fn *GoFunc) callGuarded(fbr *fiber, args ...Value) (result Value, exc exce
 			stack:  make([]Value, 0, max(len(args), 8)),
 			signal: new(atomic.Uint32),
 			stop:   &stopper{ctx: context.Background()},
+			limit:  DefaultMaxCallDepth,
 		}
 	} else {
 		if fbr.vm != nil && fbr.lock() {
@@ -543,12 +559,12 @@ func (fn *GoFunc) callGuarded(fbr *fiber, args ...Value) (result Value, exc exce
 		}
 	}
 
-	base := len(fbr.stack)
-	entryBase, entryActive := fbr.base, fbr.active
+	entry := fbr.mark()
+	base := entry.stack
 	defer func() {
 		if r := recover(); r != nil {
 			result, exc = Value{}, recovered(r)
-			fbr.unwind(base, entryBase, entryActive)
+			fbr.unwind(entry)
 		}
 	}()
 

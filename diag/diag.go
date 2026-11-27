@@ -190,21 +190,49 @@ func (r *Report) Render(p Palette) string {
 
 	if len(r.Trace) > 0 {
 		fmt.Fprintf(&b, "%s %s trace:", pad, gutter("="))
-		for i, f := range r.Trace {
-			name := f.Function
-			if name == "" {
-				name = "<anonymous>"
-			}
-			where := ""
-			if f.Pos.Known() {
-				where = " at " + (&Report{Source: f.Source, Pos: f.Pos}).Location()
-			}
+		for i, line := range traceLines(r.Trace) {
 			if i == 0 {
-				fmt.Fprintf(&b, " %s%s\n", name, where)
+				fmt.Fprintf(&b, " %s\n", line)
 			} else {
-				fmt.Fprintf(&b, "%s          %s%s\n", pad, name, where)
+				fmt.Fprintf(&b, "%s          %s\n", pad, line)
 			}
 		}
 	}
 	return b.String()
+}
+
+// traceShown is how many trace lines a long trace keeps at each end
+const traceShown = 10
+
+// traceLines describes a trace one line per frame. A frame repeated in a row,
+// as in recursion, is shown once with a count, and a trace still too long to
+// read keeps its innermost and outermost lines with a count of the rest.
+func traceLines(trace []Frame) []string {
+	var lines []string
+	for i := 0; i < len(trace); {
+		f := trace[i]
+		j := i + 1
+		for j < len(trace) && trace[j] == f {
+			j++
+		}
+		name := f.Function
+		if name == "" {
+			name = "<anonymous>"
+		}
+		line := name
+		if f.Pos.Known() {
+			line += " at " + (&Report{Source: f.Source, Pos: f.Pos}).Location()
+		}
+		if n := j - i; n > 1 {
+			line += fmt.Sprintf(" (%d times)", n)
+		}
+		lines = append(lines, line)
+		i = j
+	}
+	if len(lines) > 2*traceShown+1 {
+		hidden := len(lines) - 2*traceShown
+		kept := append(lines[:traceShown:traceShown], fmt.Sprintf("... %d more ...", hidden))
+		lines = append(kept, lines[len(lines)-traceShown:]...)
+	}
+	return lines
 }

@@ -75,6 +75,7 @@ Two tasks incrementing one global always end at the exact total, because fibers 
   - Parse once, run anywhere: `evie.ParseFile`, `ParseProject` and `ParseSource` produce an immutable `*evie.Bundle` that `eng.RunBundle` runs in any number of independent engines at once.
   - One-line script execution (`evie.Eval(...)`).
   - Stopping runaway scripts with `Interrupt()` or a context deadline, without the script being able to catch it.
+  - A call depth limit (`Options.MaxCallDepth`, 10,000 by default): runaway recursion raises a catchable `"stackOverflow"` error instead of crashing the host.
 - **Pure Go (Zero CGO)**:
   - 100% Go codebase, fast builds, effortless cross-compilation, and zero external dependencies.
 
@@ -153,6 +154,8 @@ ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 defer cancel()
 _, err := eng.CallContext(ctx, "main.status", 42) // errors.Is(err, context.DeadlineExceeded) after 2s
 ```
+
+Recursion is bounded too: a call more than `Options.MaxCallDepth` deep (10,000 unless set) raises an error of kind `"stackOverflow"`, which scripts can catch, so a script cannot exhaust the Go stack and take the process down.
 
 ---
 

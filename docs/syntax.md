@@ -729,6 +729,7 @@ The kind is how code tells failures apart, without depending on the wording of a
 | `"timeout"` | `await.timeout` that ran out of time |
 | `"cancelled"` | a task that was cancelled |
 | `"syntax"` | text that does not parse, for `json.decode` and `time.parse` |
+| `"stackOverflow"` | too many calls running at once, almost always recursion that never stops; the limit is 10,000 unless the host sets another |
 | `"error"` | everything else, and errors made without a kind |
 
 Your own kinds work the same way:
@@ -933,6 +934,7 @@ The pieces, from most to least convenient:
 | raise an error scripts can tell apart | return `vm.Errorf(vm.KindNotFound, "no user %d", id).With("id", vm.BoxNumber(id))` from a native; a plain Go error works too and takes its kind from what it wraps, as `"notFound"` from `fs.ErrNotExist` and `"timeout"` from `context.DeadlineExceeded` |
 | read an error a script raised | `errors.As(err, &e)` with `e *vm.Error`, then `e.Kind()`, `e.Field(name)`, `e.FieldNames()` and `e.CauseValue()`; `errors.Is` sees through the causes a script gave |
 | stop a runaway script | `eng.Interrupt()`, or a context: `eng.RunFileContext`, `EvalContext`, `CallContext`, `RunBundle(ctx, b)` |
+| limit how deep scripts recurse | `evie.Options.MaxCallDepth` (default 10,000); a call past it raises a catchable `"stackOverflow"` error, so runaway recursion cannot crash the host |
 | finish with an engine | `eng.Wait()` lets background tasks finish; `eng.Close()` stops them, waits, and makes later calls return `evie.ErrClosed` |
 
 A stopped script fails at its next loop iteration or call, or as soon as it wakes from an `await`, `time.sleep` or a blocking native that watches `c.Context()`. The error says where it stopped, its cause is `vm.ErrInterrupted` or the context's cause, and `catch` lets it pass. A context stops only the run it was given and the tasks that run started; `Interrupt` stops everything the instance is running, and the instance stays usable afterwards.

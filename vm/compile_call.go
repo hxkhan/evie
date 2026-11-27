@@ -185,6 +185,9 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 							return Value{}, exc
 						}
 					}
+					if fbr.depth >= fbr.limit {
+						return Value{}, fbr.tooDeep(site)
+					}
 					n := len(fn.locals)
 					base := fbr.allocFrame(n)
 
@@ -203,7 +206,9 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					prevBase := fbr.base
 					fbr.base = base
 
+					fbr.depth++
 					result, exc = fn.code(fbr)
+					fbr.depth--
 
 					fbr.popStack(n)
 					fbr.base = prevBase
@@ -228,6 +233,9 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 							return Value{}, exc
 						}
 					}
+					if fbr.depth >= fbr.limit {
+						return Value{}, fbr.tooDeep(site)
+					}
 					n := len(fn.locals)
 					base := fbr.allocFrame(n)
 
@@ -246,7 +254,9 @@ func (vm *Instance) emitCall(node ast.Call) instruction {
 					prevBase, prevActive := fbr.base, fbr.active
 					fbr.base, fbr.active = base, fn
 
+					fbr.depth++
 					result, exc = fn.code(fbr)
+					fbr.depth--
 
 					fbr.popStack(n)
 					fbr.base, fbr.active = prevBase, prevActive
@@ -368,6 +378,9 @@ func invokeDynamic(fbr *fiber, site site, target Value, arguments []instruction)
 			return Value{}, exc
 		}
 	}
+	if fbr.depth >= fbr.limit {
+		return Value{}, fbr.tooDeep(site)
+	}
 	n := len(fn.locals)
 	base := fbr.allocFrame(n)
 
@@ -396,7 +409,9 @@ func invokeDynamic(fbr *fiber, site site, target Value, arguments []instruction)
 	prevBase, prevActive := fbr.base, fbr.active
 	fbr.base, fbr.active = base, fn
 
+	fbr.depth++
 	result, exc := fn.code(fbr)
+	fbr.depth--
 
 	fbr.popStack(n)
 	fbr.base, fbr.active = prevBase, prevActive

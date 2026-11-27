@@ -71,6 +71,7 @@ type runtime struct {
 	wg           sync.WaitGroup      // wait for all fibers to complete
 	registry     sync.RWMutex        // guards packages, byName, packageOrder and the prelude's symbols, which hosts read while code loads
 	stdout       io.Writer           // where echo writes
+	maxDepth     int                 // the most evie calls a fiber may run at once
 	stops                            // when running code has to stop
 }
 
@@ -82,11 +83,23 @@ type pkgGlobal struct {
 	IsConstant bool // its value is fixed and known while compiling, so uses of it fold
 }
 
+// DefaultMaxCallDepth is the call depth limit when Options.MaxCallDepth is zero
+const DefaultMaxCallDepth = 10_000
+
 // Options configures a new Instance
 type Options struct {
 	Resolver PackageResolver // finds a package by import path when it is not loaded yet
 	Prelude  *Package        // symbols visible everywhere without an import; the builtin types are added to it
 	Stdout   io.Writer       // where echo writes; defaults to os.Stdout
+
+	// MaxCallDepth is the most evie calls that may run at once on one fiber,
+	// that is in one script run or one task. A call past it raises an error of
+	// kind KindStackOverflow, which scripts can catch, instead of letting deep
+	// recursion exhaust the Go stack and crash the process. Zero means
+	// DefaultMaxCallDepth. Each call takes Go stack, about a kilobyte for a
+	// small function, and Go stops a program whose stack passes 1GB, so a limit
+	// in the hundreds of thousands can still crash.
+	MaxCallDepth int
 
 	DebugInfo       bool // record slot names, local classes and nested closures during compilation for Dump
 	DisableInlining bool // compile without the fast paths for constants, locals and known callees; for debugging the compiler
@@ -124,7 +137,11 @@ func New(opts Options) (vm *Instance) {
 			packages: make(map[string]*Package),
 			byName:   make(map[string]*Package),
 			stdout:   opts.Stdout,
+			maxDepth: opts.MaxCallDepth,
 		},
+	}
+	if vm.rt.maxDepth <= 0 {
+		vm.rt.maxDepth = DefaultMaxCallDepth
 	}
 
 	vm.cp.registry = &vm.rt.registry

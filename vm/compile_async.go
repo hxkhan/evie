@@ -31,7 +31,7 @@ func (fbr *fiber) runTask(fn *userFn, params []Value) (result Value, exc excepti
 	defer func() {
 		if r := recover(); r != nil {
 			result, exc = Value{}, recovered(r)
-			fbr.unwind(0, 0, nil)
+			fbr.unwind(frameMark{})
 		}
 	}()
 

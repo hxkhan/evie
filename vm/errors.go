@@ -43,18 +43,19 @@ type Error struct {
 // The kinds of error the runtime and the standard library raise. A script
 // can give an error any kind; these are the ones Evie itself uses.
 const (
-	KindError      = "error"      // the default, for errors without a more specific kind
-	KindType       = "type"       // a value of the wrong type, a call with the wrong arguments, a constant assigned
-	KindValue      = "value"      // the right type but a value that cannot be used, as in number("two")
-	KindRange      = "range"      // an index outside an array, string or buffer
-	KindMember     = "member"     // a field, key, method or package member that does not exist
-	KindNotFound   = "notFound"   // a file or directory that does not exist
-	KindExists     = "exists"     // a file or directory that already exists
-	KindPermission = "permission" // access that is not allowed
-	KindIO         = "io"         // any other failure to read or write
-	KindTimeout    = "timeout"    // a wait that ran out of time
-	KindCancelled  = "cancelled"  // a task that was cancelled
-	KindSyntax     = "syntax"     // text that does not parse, as for json.decode
+	KindError         = "error"         // the default, for errors without a more specific kind
+	KindType          = "type"          // a value of the wrong type, a call with the wrong arguments, a constant assigned
+	KindValue         = "value"         // the right type but a value that cannot be used, as in number("two")
+	KindRange         = "range"         // an index outside an array, string or buffer
+	KindMember        = "member"        // a field, key, method or package member that does not exist
+	KindNotFound      = "notFound"      // a file or directory that does not exist
+	KindExists        = "exists"        // a file or directory that already exists
+	KindPermission    = "permission"    // access that is not allowed
+	KindIO            = "io"            // any other failure to read or write
+	KindTimeout       = "timeout"       // a wait that ran out of time
+	KindCancelled     = "cancelled"     // a task that was cancelled
+	KindSyntax        = "syntax"        // text that does not parse, as for json.decode
+	KindStackOverflow = "stackOverflow" // too many calls running at once, usually recursion that never stops; see Options.MaxCallDepth
 )
 
 type exception = *Error

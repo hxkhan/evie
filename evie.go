@@ -53,6 +53,12 @@ type Options struct {
 	Stdin    goio.Reader                            // standard input for the io package; defaults to os.Stdin
 	Stdout   goio.Writer                            // standard output for the io package and echo; defaults to os.Stdout
 
+	// MaxCallDepth is the most calls that may run at once in one script run or
+	// task; zero means vm.DefaultMaxCallDepth (10,000). A call past it raises a
+	// catchable error of kind "stackOverflow" instead of letting runaway
+	// recursion crash the process. See vm.Options.MaxCallDepth.
+	MaxCallDepth int
+
 	// OnName, when set, receives every name the compiler declares or resolves,
 	// with where it is declared, for tools such as editors; see vm.NameEvent.
 	// Use it with Check to learn about a program without running it.
@@ -118,6 +124,7 @@ func New(opts ...Options) *Engine {
 		Resolver:        e.resolve,
 		Prelude:         opt.Prelude,
 		Stdout:          opt.Stdout,
+		MaxCallDepth:    opt.MaxCallDepth,
 		DebugInfo:       opt.Debug.DebugInfo,
 		DisableInlining: opt.Debug.NoFastPaths || testWithoutFastPaths,
 		OnName:          opt.OnName,
